@@ -20,3 +20,6 @@ playwright-report/
 *.tsbuildinfo
 .livecheck/tmp/
 .livecheck/runs/
+.next/
+.svelte-kit/
+.astro/

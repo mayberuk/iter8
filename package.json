@@ -1,0 +1,47 @@
+{
+  "name": "iter8",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "bun@1.4.2",
+  "workspaces": [
+    "packages/*",
+    "harness",
+    "fixtures/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "knip": "knip",
+    "depcruise": "depcruise --config .dependency-cruiser.cjs .",
+    "test": "bun test --parallel --timeout 120000",
+    "check": "bun run typecheck && bun run lint && bun run knip && bun run depcruise && bun run test",
+    "setup:browsers": "playwright install chromium",
+    "build": "bun scripts/build.ts",
+    "build:overlay": "bun scripts/build.ts overlay",
+    "release": "bun scripts/release.ts"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "0.9.1",
+    "@iter8/protocol": "workspace:*",
+    "@jridgewell/trace-mapping": "0.3.31",
+    "@preact/signals": "2.11.3",
+    "bippy": "0.7.3",
+    "citty": "0.2.2",
+    "hono": "4.13.13",
+    "modern-screenshot": "4.7.0",
+    "pino": "10.4.0",
+    "preact": "11.0.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@swc/core": "1.16.13",
+    "@types/bun": "1.4.2",
+    "dependency-cruiser": "18.5.0",
+    "fast-check": "4.10.2",
+    "knip": "6.41.0",
+    "playwright": "1.64.0",
+    "typescript": "7.0.2"
+  }
+}

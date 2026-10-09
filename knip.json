@@ -1,0 +1,38 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": [".claude/**"],
+  "ignoreWorkspaces": ["fixtures/*"],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "apps/iter8/src/main.ts",
+        "apps/overlay/src/main.tsx",
+        "packages/source/src/index.ts",
+        "scripts/*.ts",
+        "**/*.test.ts"
+      ],
+      "project": ["apps/**/*.{ts,tsx}", "packages/source/**/*.ts", "scripts/**/*.ts"],
+      "ignoreDependencies": [
+        "@swc/core",
+        "hono",
+        "@hono/zod-validator",
+        "citty",
+        "pino",
+        "preact",
+        "@preact/signals",
+        "modern-screenshot",
+        "bippy",
+        "@jridgewell/trace-mapping",
+        "@iter8/protocol"
+      ]
+    },
+    "packages/protocol": {
+      "entry": ["src/index.ts", "src/version.ts"],
+      "ignoreDependencies": ["zod", "fast-check"]
+    },
+    "harness": {
+      "entry": ["rig/*.ts", "stubs/*.ts", "scenarios/**/*.ts"],
+      "ignoreDependencies": ["hono", "zod", "playwright", "fast-check", "@iter8/protocol"]
+    }
+  }
+}
