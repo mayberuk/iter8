@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run setup:browsers --with-deps
+      - run: bun run build
+      - run: bun run check
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run release -- --tag "$TAG" --out dist/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-release
+          if-no-files-found: error
+          path: |
+            dist/release/iter8-linux-x64
+            dist/release/iter8-darwin-arm64
+            dist/release/SHA256SUMS
+
+  macos:
+    needs: build
+    runs-on: macos-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-release
+          path: dist/release
+      - name: Verify macOS signature and version
+        working-directory: dist/release
+        shell: bash
+        run: |
+          test "$(uname -m)" = arm64
+          shasum -a 256 --check SHA256SUMS
+          chmod +x iter8-darwin-arm64
+          if codesign -vvv --verify ./iter8-darwin-arm64; then
+            echo "macOS codesign: cross-compiled signature verified." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "macOS codesign: cross-compiled signature failed; applying ad-hoc signature." >> "$GITHUB_STEP_SUMMARY"
+            codesign --force --sign - --entitlements ../../scripts/entitlements.plist ./iter8-darwin-arm64
+            codesign -vvv --verify ./iter8-darwin-arm64
+            echo "macOS codesign: ad-hoc signature verified." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          actual=$(./iter8-darwin-arm64 --version)
+          expected="iter8 ${TAG#v}"
+          if [ "$actual" != "$expected" ]; then
+            echo "Version mismatch: expected '$expected', received '$actual'" >&2
+            exit 1
+          fi
+          shasum -a 256 iter8-linux-x64 iter8-darwin-arm64 > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-release
+          if-no-files-found: error
+          path: |
+            dist/release/iter8-linux-x64
+            dist/release/iter8-darwin-arm64
+            dist/release/SHA256SUMS
+
+  publish:
+    needs: [build, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: mayberuk/iter8
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-release
+          path: dist/release
+      - name: Publish release
+        working-directory: dist/release
+        run: |
+          sha256sum --check SHA256SUMS
+          gh release create "$TAG" --verify-tag iter8-linux-x64 iter8-darwin-arm64 SHA256SUMS

@@ -1,0 +1,18 @@
+{
+  "id": "larkspur",
+  "origin": "http://larkspur.localhost:3990",
+  "target": {
+    "kind": "server",
+    "upstream": "http://localhost:5173/",
+    "extraUpstreams": [
+      {
+        "upstream": "http://localhost:8787/",
+        "port": 3991
+      }
+    ]
+  },
+  "pairing": {
+    "owner": "own_3kq9xw7d",
+    "generation": 2
+  }
+}

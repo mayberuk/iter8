@@ -1,0 +1,19 @@
+{
+  "completeness": "stale",
+  "omittedParts": ["screenshot", "computedStyles"],
+  "url": "http://larkspur.localhost:3990/pricing",
+  "viewport": {
+    "width": 1440,
+    "height": 900,
+    "devicePixelRatio": 2
+  },
+  "theme": "dark",
+  "landmark": "main",
+  "surroundingText": "Choose a plan.",
+  "sourceLead": {
+    "confidence": "file-only",
+    "framework": "vue",
+    "component": "PlanCard",
+    "file": "src/components/PlanCard.vue"
+  }
+}

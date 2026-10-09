@@ -1,0 +1,5 @@
+{
+  "type": "upstream-failure",
+  "port": 3991,
+  "url": "http://larkspur.localhost:3991/api/plans"
+}

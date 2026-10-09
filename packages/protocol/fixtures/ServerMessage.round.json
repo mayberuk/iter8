@@ -1,0 +1,136 @@
+{
+  "type": "round",
+  "round": {
+    "id": "R12",
+    "pageId": "larkspur",
+    "owner": "own_3kq9xw7d",
+    "state": {
+      "stage": "claimed",
+      "queuedAt": "2026-10-09T18:34:00.000Z",
+      "idempotencyKey": "send-7c1e9b2a40d3",
+      "announcedAt": "2026-10-09T18:34:00.000Z",
+      "generation": 2,
+      "claimedAt": "2026-10-09T18:36:00.000Z"
+    },
+    "notes": [
+      {
+        "id": "N12",
+        "pageId": "larkspur",
+        "author": {
+          "kind": "user"
+        },
+        "intent": "fix",
+        "body": "The price wraps onto two lines at this width; keep it on one.",
+        "target": {
+          "kind": "element",
+          "anchor": {
+            "selector": ["main > section.plans > article:nth-of-type(2)"],
+            "role": "article",
+            "name": "Pro plan",
+            "text": "Pro plan $24 / month",
+            "box": {
+              "x": 24,
+              "y": 312,
+              "width": 360,
+              "height": 148
+            },
+            "renderGeneration": 3
+          }
+        },
+        "anchorStatus": "anchored",
+        "createdAt": "2026-10-09T18:30:00.000Z",
+        "capture": {
+          "completeness": "complete",
+          "omittedParts": [],
+          "url": "http://larkspur.localhost:3990/pricing",
+          "viewport": {
+            "width": 1440,
+            "height": 900,
+            "devicePixelRatio": 2
+          },
+          "theme": "light",
+          "landmark": "main",
+          "surroundingText": "Choose a plan. Starter $0 / month. Pro $24 / month. Team $79 / month.",
+          "computedStyles": {
+            "font-size": "18px",
+            "color": "rgb(17, 17, 17)",
+            "padding-top": "12px"
+          },
+          "consoleErrors": [
+            {
+              "message": "Failed to load resource: the server responded with a status of 404",
+              "source": "http://larkspur.localhost:3990/api/plans",
+              "at": "2026-10-09T18:29:00.000Z"
+            }
+          ],
+          "screenshot": {
+            "ref": "shot_8f2c1a9e",
+            "width": 720,
+            "height": 296
+          },
+          "sourceLead": {
+            "confidence": "exact",
+            "framework": "react",
+            "component": "PricingCard",
+            "file": "src/components/PricingCard.tsx",
+            "line": 18,
+            "column": 7
+          }
+        },
+        "resolution": {
+          "status": "done",
+          "at": "2026-10-09T18:45:00.000Z"
+        }
+      },
+      {
+        "id": "N13",
+        "pageId": "larkspur",
+        "author": {
+          "kind": "user"
+        },
+        "intent": "question",
+        "body": "Should this whole band collapse on mobile?",
+        "target": {
+          "kind": "region",
+          "box": {
+            "x": 0,
+            "y": 280,
+            "width": 1440,
+            "height": 320
+          },
+          "viewport": {
+            "width": 1440,
+            "height": 900,
+            "devicePixelRatio": 2
+          }
+        },
+        "anchorStatus": "anchored",
+        "createdAt": "2026-10-09T18:31:00.000Z",
+        "capture": {
+          "completeness": "stale",
+          "omittedParts": ["screenshot", "computedStyles"],
+          "url": "http://larkspur.localhost:3990/pricing",
+          "viewport": {
+            "width": 1440,
+            "height": 900,
+            "devicePixelRatio": 2
+          },
+          "theme": "dark",
+          "landmark": "main",
+          "surroundingText": "Choose a plan.",
+          "sourceLead": {
+            "confidence": "file-only",
+            "framework": "vue",
+            "component": "PlanCard",
+            "file": "src/components/PlanCard.vue"
+          }
+        },
+        "resolution": {
+          "status": "answered",
+          "reply": "Yes, below 640px it stacks.",
+          "at": "2026-10-09T18:46:00.000Z"
+        }
+      }
+    ]
+  }
+}

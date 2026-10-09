@@ -1,0 +1,21 @@
+{
+  "outcome": "refused",
+  "reason": "session-gone",
+  "pairing": {
+    "owner": "own_3kq9xw7d",
+    "agent": "claude",
+    "process": {
+      "pid": 48213,
+      "startedAt": "Fri Oct  9 17:58:02 2026",
+      "label": "5f0c2e7a-1b9d-4c3e-8a6f-2d4b9e1c7a30"
+    },
+    "cwd": "/home/biruk/dev/larkspur",
+    "generation": 2,
+    "state": {
+      "status": "gone",
+      "reason": "crashed"
+    },
+    "relabelPending": false,
+    "listener": "none"
+  }
+}

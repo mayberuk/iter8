@@ -1,0 +1,8 @@
+{
+  "confidence": "exact",
+  "framework": "react",
+  "component": "PricingCard",
+  "file": "src/components/PricingCard.tsx",
+  "line": 18,
+  "column": 7
+}

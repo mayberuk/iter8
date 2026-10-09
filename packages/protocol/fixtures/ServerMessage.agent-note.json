@@ -1,0 +1,50 @@
+{
+  "type": "agent-note",
+  "note": {
+    "id": "N15",
+    "pageId": "larkspur",
+    "author": {
+      "kind": "agent",
+      "owner": "own_3kq9xw7d",
+      "name": "Claude",
+      "agent": "claude"
+    },
+    "intent": "question",
+    "body": "I moved the plan toggle above the cards; does this order read better?",
+    "target": {
+      "kind": "elements",
+      "anchors": [
+        {
+          "selector": ["main > section.plans > article:nth-of-type(2)"],
+          "role": "article",
+          "name": "Pro plan",
+          "text": "Pro plan $24 / month",
+          "box": {
+            "x": 24,
+            "y": 312,
+            "width": 360,
+            "height": 148
+          },
+          "renderGeneration": 3
+        },
+        {
+          "selector": ["app-shell", "pricing-card[data-plan='pro']", "button.cta"],
+          "role": "button",
+          "name": "Upgrade to Pro",
+          "box": {
+            "x": 48,
+            "y": 420,
+            "width": 140,
+            "height": 40
+          },
+          "renderGeneration": 3
+        }
+      ]
+    },
+    "anchorStatus": "anchored",
+    "createdAt": "2026-10-09T18:40:00.000Z",
+    "resolution": {
+      "status": "open"
+    }
+  }
+}

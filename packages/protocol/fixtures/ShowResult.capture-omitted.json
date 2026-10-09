@@ -1,0 +1,106 @@
+{
+  "round": {
+    "id": "R12",
+    "pageId": "larkspur",
+    "stage": "claimed",
+    "url": "http://larkspur.localhost:3990/pricing"
+  },
+  "notes": [
+    {
+      "authored": {
+        "id": "N12",
+        "author": {
+          "kind": "user"
+        },
+        "intent": "fix",
+        "body": "The price wraps onto two lines at this width; keep it on one.",
+        "target": {
+          "kind": "element",
+          "anchor": {
+            "selector": ["main > section.plans > article:nth-of-type(2)"],
+            "role": "article",
+            "name": "Pro plan",
+            "text": "Pro plan $24 / month",
+            "box": {
+              "x": 24,
+              "y": 312,
+              "width": 360,
+              "height": 148
+            },
+            "renderGeneration": 3
+          }
+        },
+        "anchorStatus": "anchored",
+        "resolution": {
+          "status": "open"
+        }
+      },
+      "untrustedCapture": {
+        "completeness": "omitted",
+        "omittedParts": [
+          "landmark",
+          "surroundingText",
+          "computedStyles",
+          "consoleErrors",
+          "screenshot",
+          "sourceLead"
+        ],
+        "url": "http://larkspur.localhost:3990/pricing",
+        "viewport": {
+          "width": 1440,
+          "height": 900,
+          "devicePixelRatio": 2
+        },
+        "theme": "light"
+      }
+    },
+    {
+      "authored": {
+        "id": "N15",
+        "author": {
+          "kind": "agent",
+          "owner": "own_3kq9xw7d",
+          "name": "Claude",
+          "agent": "claude"
+        },
+        "intent": "question",
+        "body": "I moved the plan toggle above the cards; does this order read better?",
+        "target": {
+          "kind": "elements",
+          "anchors": [
+            {
+              "selector": ["main > section.plans > article:nth-of-type(2)"],
+              "role": "article",
+              "name": "Pro plan",
+              "text": "Pro plan $24 / month",
+              "box": {
+                "x": 24,
+                "y": 312,
+                "width": 360,
+                "height": 148
+              },
+              "renderGeneration": 3
+            },
+            {
+              "selector": ["app-shell", "pricing-card[data-plan='pro']", "button.cta"],
+              "role": "button",
+              "name": "Upgrade to Pro",
+              "box": {
+                "x": 48,
+                "y": 420,
+                "width": 140,
+                "height": 40
+              },
+              "renderGeneration": 3
+            }
+          ]
+        },
+        "anchorStatus": "anchored",
+        "resolution": {
+          "status": "open"
+        }
+      },
+      "untrustedCapture": null
+    }
+  ]
+}

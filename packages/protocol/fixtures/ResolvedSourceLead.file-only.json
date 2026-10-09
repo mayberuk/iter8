@@ -1,0 +1,6 @@
+{
+  "confidence": "file-only",
+  "framework": "vue",
+  "component": "PlanCard",
+  "file": "src/components/PlanCard.vue"
+}

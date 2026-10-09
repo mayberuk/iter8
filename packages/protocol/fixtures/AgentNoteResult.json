@@ -1,0 +1,34 @@
+{
+  "note": {
+    "id": "N16",
+    "pageId": "larkspur",
+    "author": {
+      "kind": "agent",
+      "owner": "own_3kq9xw7d",
+      "name": "Claude",
+      "agent": "claude"
+    },
+    "intent": "question",
+    "body": "This footer link points at the old docs.",
+    "target": {
+      "kind": "element",
+      "anchor": {
+        "selector": ["footer a[href='/docs/v1']"],
+        "text": "Docs",
+        "box": {
+          "x": 24,
+          "y": 312,
+          "width": 360,
+          "height": 148
+        },
+        "renderGeneration": 2
+      }
+    },
+    "anchorStatus": "unanchored",
+    "createdAt": "2026-10-09T18:40:00.000Z",
+    "resolution": {
+      "status": "open"
+    }
+  },
+  "anchorStatus": "unanchored"
+}
