@@ -1,0 +1,39 @@
+# Stack
+
+One language, one toolchain, one schema. Each pick and its rejected alternatives are recorded in
+`docs/design/brainstorm.md`.
+
+| Job | Use | Not |
+|---|---|---|
+| Runtime, package manager, binary | Bun, pinned in `packageManager`; `bun build --compile` for `linux-x64` and `darwin-arm64` | Node, npm, pnpm |
+| Service API (overlay↔service, live socket) | Hono 4.13.x; `zValidator` on routes; `hc` typed client | Elysia, Express, tRPC |
+| App proxy and HMR socket bridge | `Bun.serve` + `fetch` + `HTMLRewriter`, written by hand | http-proxy, a framework router in front of app traffic |
+| Overlay UI | Preact 11 + `@preact/signals`, rendered into a shadow root | React, Solid, Lit, vanilla DOM building |
+| Overlay build | `Bun.build` to one script the service serves | Vite (the overlay is one injected script, not an app) |
+| Screenshots | `modern-screenshot` (`domToCanvas`) on a crop capped at two viewports and 300 nodes, after the composer paints | `html2canvas`, `html-to-image`, a whole-page render |
+| React element → source | `bippy` 0.7.3 | `element-source` 0.0.5, LocatorJS, click-to-component |
+| Validation, schema | Zod 4 | TypeBox, yup, hand-written guards |
+| Store | `bun:sqlite`, one file under the state dir, numbered SQL migrations | JSON files written by hand, an ORM |
+| CLI parsing | citty | commander, yargs |
+| Logging | pino, JSON lines to the service's log file | `console.log` outside a CLI's own output |
+| Lint, format | Biome | ESLint, Prettier |
+| Dead code, boundaries | knip, dependency-cruiser | — |
+| Tests | `bun test`; fast-check for invariants; Playwright driving Chromium for anything in a browser | Jest, Vitest, a DOM emulator for overlay behaviour |
+| Dates | `Intl.*` | dayjs, date-fns |
+
+Source-map symbolication runs in the service; its library is chosen in the service part's spec
+and added to this table there.
+
+## Always
+- Pin exact versions (no `^` or `~`); commit `bun.lock`.
+- Ground library code with `npx ctx7@latest` before writing it (global rule
+  `~/.claude/rules/context7.md`); versions in this table are targets to verify, not facts.
+- Add a dependency only when the plan names it or a row above says so; an unlisted dependency is
+  a proposal to the plan, not an install.
+
+## Never
+- Install a second library for a job that already has a row.
+- Add a Node-only API or a `node_modules` binary the compiled Bun binary cannot embed.
+
+Why: iter8 ships as one compiled binary on two machines; drift has to be impossible on our side
+for "the same version on both ends" to stay true.

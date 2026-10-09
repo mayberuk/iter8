@@ -1,0 +1,22 @@
+.DS_Store
+
+# The machine-wide gitignore excludes *.md, CLAUDE.md, .claude/, biome.json and settings.json;
+# this repo tracks its docs, rules and lint config, so re-include them and keep machine state out.
+!*.md
+!CLAUDE.md
+!biome.json
+!.claude/
+.claude/*
+!.claude/docs/
+!.claude/rules/
+!.claude/settings.json
+!.claude/dispatch-config.json
+!.claude/verify.config.json
+
+node_modules/
+dist/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.livecheck/tmp/
+.livecheck/runs/
