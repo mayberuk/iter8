@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>static</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script type="module" src="./shadow-label.js"></script>
+</head>
+<body>
+  <header><h1>static</h1></header>
+  <nav aria-label="Main navigation"><a href="/">Home</a><a href="/second.html">Second page</a></nav>
+  <main>
+    <section aria-labelledby="overview-heading">
+      <h2 id="overview-heading">Overview</h2>
+      <p data-source-target="card">Card in static</p>
+      <button type="button">Save</button>
+    </section>
+    <section aria-labelledby="details-heading">
+      <h2 id="details-heading">Details</h2>
+      <p>Details for the static page.</p>
+      <button type="button">Save</button>
+    </section>
+    <section aria-labelledby="notes-heading">
+      <h2 id="notes-heading">Notes</h2>
+      <form>
+        <label for="title">Title</label>
+        <input id="title" name="title" type="text" />
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes"></textarea>
+        <button type="button">Save</button>
+      </form>
+    </section>
+    <fixture-shadow-label></fixture-shadow-label>
+  </main>
+  <aside aria-label="Related information"><p>Related information for static.</p></aside>
+  <footer><p>Footer for static.</p></footer>
+</body>
+</html>

@@ -1,0 +1,123 @@
+[
+  {
+    "name": "static",
+    "dir": "fixtures/static",
+    "kind": "folder",
+    "devArgs": [
+      "--port",
+      "{port}"
+    ],
+    "env": {},
+    "readyPath": "/",
+    "heavyPath": null,
+    "targets": [
+      "card"
+    ],
+    "confidence": "none"
+  },
+  {
+    "name": "vite-react",
+    "dir": "fixtures/vite-react",
+    "kind": "server",
+    "devArgs": [
+      "--port",
+      "{port}"
+    ],
+    "env": {},
+    "readyPath": "/",
+    "heavyPath": "/heavy",
+    "targets": [
+      "card",
+      "hookless"
+    ],
+    "confidence": "exact"
+  },
+  {
+    "name": "next-turbopack",
+    "dir": "fixtures/next-turbopack",
+    "kind": "server",
+    "devArgs": [
+      "-p",
+      "{port}"
+    ],
+    "env": {
+      "NEXT_TELEMETRY_DISABLED": "1"
+    },
+    "readyPath": "/",
+    "heavyPath": null,
+    "targets": [
+      "client",
+      "server"
+    ],
+    "confidence": "exact"
+  },
+  {
+    "name": "next-webpack",
+    "dir": "fixtures/next-webpack",
+    "kind": "server",
+    "devArgs": [
+      "-p",
+      "{port}"
+    ],
+    "env": {
+      "NEXT_TELEMETRY_DISABLED": "1"
+    },
+    "readyPath": "/",
+    "heavyPath": null,
+    "targets": [
+      "client",
+      "server"
+    ],
+    "confidence": "approximate"
+  },
+  {
+    "name": "sveltekit",
+    "dir": "fixtures/sveltekit",
+    "kind": "server",
+    "devArgs": [
+      "--port",
+      "{port}"
+    ],
+    "env": {},
+    "readyPath": "/",
+    "heavyPath": null,
+    "targets": [
+      "card"
+    ],
+    "confidence": "exact"
+  },
+  {
+    "name": "vue",
+    "dir": "fixtures/vue",
+    "kind": "server",
+    "devArgs": [
+      "--port",
+      "{port}"
+    ],
+    "env": {},
+    "readyPath": "/",
+    "heavyPath": null,
+    "targets": [
+      "card"
+    ],
+    "confidence": "file-only"
+  },
+  {
+    "name": "astro",
+    "dir": "fixtures/astro",
+    "kind": "server",
+    "devArgs": [
+      "--port",
+      "{port}"
+    ],
+    "env": {
+      "ASTRO_TELEMETRY_DISABLED": "1"
+    },
+    "readyPath": "/",
+    "heavyPath": null,
+    "targets": [
+      "card"
+    ],
+    "confidence": "exact"
+  }
+]

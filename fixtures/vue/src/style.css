@@ -1,0 +1,48 @@
+body {
+  margin: 0 auto;
+  max-width: 960px;
+  padding: 24px;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  color: #243242;
+  background: #f6f8fa;
+}
+header, nav, section, aside, footer {
+  margin-block: 16px;
+}
+section, aside {
+  padding: 16px;
+  border: 1px solid #cbd5df;
+  background: white;
+}
+nav a {
+  margin-inline-end: 16px;
+}
+label {
+  display: block;
+  margin-block: 12px;
+}
+input, textarea, button {
+  font: inherit;
+}
+input, textarea {
+  display: block;
+  width: min(100%, 360px);
+  box-sizing: border-box;
+}
+button {
+  padding: 4px 12px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+td, th {
+  padding: 4px 8px;
+  border: 1px solid #cbd5df;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
