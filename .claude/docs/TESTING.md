@@ -13,6 +13,9 @@ and the harness inventory.
 - Precheck: `bun run typecheck && bun run lint`
 - Unit: `bun run knip && bun run depcruise && bun test packages scripts`
 - Gate: `bun run check`
+
+Integration test command: `bun run test`
+Integration tests required for behavior changes: yes
 - Scoped: `bun test <path>` — always name the paths; a bare `bun test` is not the gate.
 
 ## Conventions the gate does not enforce
