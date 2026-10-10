@@ -455,7 +455,7 @@ function HistoryNote(props: { round: Round; note: Note; index: number; agentName
   const finished = state === "done" || state === "answered"
   const file = sourceFile(note)
   const before = note.capture?.screenshot?.ref
-  const comparable = state === "done" && note.target.kind !== "region" && before !== undefined
+  const comparable = before !== undefined
   const { resolution } = note
   const roundState = round.state
   const sent = roundState.stage === "draft" ? undefined : clock(roundState.queuedAt)
@@ -559,7 +559,7 @@ function StripFrame(props: { round: Round; note: Note; index: number; root: Shad
         reveal(note)
       }}
     >
-      {screenshot ? <img src={screenshot} alt="" /> : null}
+      {screenshot ? <img src={screenshot} alt={`Screenshot of note ${index + 1}`} /> : null}
       <span class="fn">{number(index)}</span>
       <span class="stamp">{finished ? <Icon name="check" size={8} /> : null}</span>
     </button>

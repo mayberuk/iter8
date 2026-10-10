@@ -956,6 +956,46 @@ const COMPARABLE = Round.parse({
   ),
 })
 
+const withRef = (round: Round, ref: string | null) =>
+  Round.parse({
+    ...round,
+    notes: round.notes.map((note, i) => {
+      if (i !== 0 || !note.capture) return note
+      const { screenshot: _dropped, ...bare } = note.capture
+      return {
+        ...note,
+        capture: ref === null ? bare : { ...bare, screenshot: { ref, width: 720, height: 296 } },
+      }
+    }),
+  })
+const SHOT_REF = "shot_8f2c1a9e"
+const SHOTS = (() => {
+  const [first, second] = FINISHED.notes
+  if (!first?.capture || !second?.capture) throw new Error("the fixture round changed")
+  const { screenshot: _dropped, ...bare } = first.capture
+  return Round.parse({
+    ...FINISHED,
+    notes: [
+      first,
+      {
+        ...second,
+        capture: { ...second.capture, screenshot: { ref: SHOT_REF, width: 720, height: 296 } },
+      },
+      {
+        ...first,
+        id: "N14",
+        resolution: { status: "answered", reply: "Done already.", at: "2026-10-09T18:47:00.000Z" },
+        capture: bare,
+      },
+    ],
+  })
+})()
+const PARTIAL = Round.parse({
+  ...WORKING,
+  notes: [FINISHED.notes[0], WORKING.notes[1]],
+})
+const FOUR_INTENTS = ["fix", "change", "question", "keep", "keep"] as const
+
 describe("round sheet: history in detail", () => {
   test("rounds sit newest first, each headed by its own owner, outcome, ticks and send time", async () => {
     const o = await open({
@@ -1059,32 +1099,48 @@ describe("round sheet: history in detail", () => {
     await until("note 2 to scroll into view", inView)
   }, 30_000)
 
-  test("Before / after is offered only for a finished note that has a screenshot", async () => {
+  test("Before / after is offered for every note that has a screenshot, whatever its state or target, and for none that lacks one", async () => {
     const queued = await open({
       pairing: LIVE,
       pageState: { drafts: [], rounds: [OPEN_ROUND], agentNotes: [] },
     })
+    await serveScreenshot(queued)
     const waiting = await openSheet(queued, "history")
+    const articleFor = (sheet: Locator, text: string) =>
+      sheet.getByRole("article").filter({ hasText: text })
+    const compare = (article: Locator) => article.getByRole("button", { name: "Before / after" })
     await until("the round", () => waiting.getByRole("article").first().isVisible())
-    expect(await waiting.getByRole("button", { name: "Before / after" }).count()).toBe(0)
+    expect(await compare(articleFor(waiting, "The price wraps")).count()).toBe(1)
+    expect(await compare(articleFor(waiting, "Should this whole band")).count()).toBe(0)
+    expect(await waiting.getByRole("button", { name: "Before / after" }).count()).toBe(1)
+    await compare(articleFor(waiting, "The price wraps")).click()
+    await until("the lost-element copy for the queued note", () =>
+      waiting.locator(".compare .lay.after").getByText("Element not on the page").isVisible(),
+    )
     await queued.close()
     opened = null
 
-    const finished = await open({
+    const mixed = await open({
       pairing: LIVE,
-      pageState: { drafts: [], rounds: [FINISHED], agentNotes: [] },
+      pageState: { drafts: [], rounds: [SHOTS], agentNotes: [] },
     })
-    const done = await openSheet(finished, "history")
-    await until("the round", () => done.getByRole("article").first().isVisible())
-    const buttons = done.getByRole("button", { name: "Before / after" })
-    expect(await buttons.count()).toBe(1)
+    await serveScreenshot(mixed)
+    const sheet = await openSheet(mixed, "history")
+    await until("the round", () => sheet.getByRole("article").first().isVisible())
+    expect(await compare(articleFor(sheet, "The price wraps")).count()).toBe(1)
+    expect(await compare(articleFor(sheet, "Should this whole band")).count()).toBe(1)
     expect(
-      await done
+      await sheet
         .getByRole("article")
-        .filter({ hasText: "The price wraps" })
+        .nth(2)
         .getByRole("button", { name: "Before / after" })
         .count(),
-    ).toBe(1)
+    ).toBe(0)
+    expect(await sheet.getByRole("button", { name: "Before / after" }).count()).toBe(2)
+    await compare(articleFor(sheet, "Should this whole band")).click()
+    await until("the lost-element copy for the region note", () =>
+      sheet.locator(".compare .lay.after").getByText("Element not on the page").isVisible(),
+    )
   }, 30_000)
 
   test("the comparison shows the stored shot as Before and a fresh crop of the element as After", async () => {
@@ -1172,5 +1228,257 @@ describe("round sheet: history in detail", () => {
     if (!frame) throw new Error("no compare box")
     await o.page.mouse.click(frame.x + frame.width * 0.25, frame.y + frame.height / 2)
     await until("a click to set the split", async () => Math.abs((await split()) - 0.25) < 0.05)
+  }, 30_000)
+})
+
+describe("round sheet: remaining spec gaps", () => {
+  test("a round half resolved shows each note's own state", async () => {
+    const o = await open({
+      pairing: LIVE,
+      pageState: { drafts: [], rounds: [PARTIAL], agentNotes: [] },
+    })
+    const sheet = await openSheet(o, "history")
+    const fixed = sheet.getByRole("article").filter({ hasText: "The price wraps" })
+    const open_ = sheet.getByRole("article").filter({ hasText: "Should this whole band" })
+    await until("the round", () => fixed.isVisible())
+    expect(await fixed.getByRole("status", { name: "done", exact: true }).count()).toBe(1)
+    expect(await fixed.getByRole("status", { name: "working", exact: true }).count()).toBe(0)
+    expect(await open_.getByRole("status", { name: "working", exact: true }).count()).toBe(1)
+    expect(await open_.getByRole("status", { name: "done", exact: true }).count()).toBe(0)
+    expect(await sheet.getByRole("status", { name: "1 of 2 resolved", exact: true }).count()).toBe(
+      1,
+    )
+    const ticks = await sheet
+      .locator(".ticks i")
+      .evaluateAll((els) => els.map((el) => el.className))
+    expect(ticks).toEqual(["done", "working"])
+    const picked = await clockTime(o, "2026-10-09T18:36:00.000Z")
+    expect(await open_.locator(".when").innerText()).toBe(
+      `sent ${await clockTime(o, "2026-10-09T18:34:00.000Z")} · delivered ${await clockTime(o, ANNOUNCED_AT)} · picked up ${picked}`,
+    )
+    expect(await fixed.locator(".when").innerText()).toContain("done ")
+
+    await pushUntil(
+      o,
+      { type: "round", round: FINISHED },
+      async () =>
+        (await open_.getByRole("status", { name: "answered", exact: true }).count()) === 1,
+    )
+    expect(await sheet.getByRole("status", { name: "All 2 resolved" }).count()).toBe(1)
+  }, 30_000)
+
+  test("film-strip frames with a shot are images named for their note, and those without have none", async () => {
+    const o = await open({
+      pairing: LIVE,
+      pageState: { drafts: [], rounds: [SHOTS], agentNotes: [] },
+    })
+    await serveScreenshot(o)
+    const sheet = await openSheet(o, "history")
+    const strip = sheet.locator(".strip")
+    await until("the strip images", async () => (await strip.getByRole("img").count()) === 2)
+    expect(await strip.locator(".sframe").count()).toBe(3)
+    const names = await strip
+      .locator("img")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("alt")))
+    expect(names).toEqual(["Screenshot of note 1", "Screenshot of note 2"])
+    expect(await strip.getByRole("img", { name: "Screenshot of note 3" }).count()).toBe(0)
+  }, 30_000)
+
+  test("replacing and removing a mounted shot fetches the new one, revokes the old URL and ignores a late reply", async () => {
+    const o = await open({
+      pairing: LIVE,
+      pageState: { drafts: [], rounds: [FINISHED], agentNotes: [] },
+    })
+    const fetched: string[] = []
+    const gates = new Map<string, Promise<void>>()
+    let releaseLate: () => void = () => {}
+    gates.set(
+      "shot_late0001",
+      new Promise<void>((resolve) => {
+        releaseLate = resolve
+      }),
+    )
+    let served = 0
+    await o.page.route("**/screenshots/*", async (route) => {
+      const ref = route.request().url().split("/").pop() ?? ""
+      fetched.push(ref)
+      await gates.get(ref)
+      served += 1
+      await route.fulfill({ status: 200, contentType: "image/png", body: PNG })
+    })
+    await o.page.evaluate(() => {
+      const made: string[] = []
+      const revoked: string[] = []
+      Object.assign(window, { made, revoked })
+      const create = URL.createObjectURL.bind(URL)
+      const revoke = URL.revokeObjectURL.bind(URL)
+      URL.createObjectURL = (blob: Blob | MediaSource) => {
+        const url = create(blob)
+        made.push(url)
+        return url
+      }
+      URL.revokeObjectURL = (url: string) => {
+        revoked.push(url)
+        revoke(url)
+      }
+    })
+    const seen = () =>
+      o.page.evaluate(() => {
+        const win = window as unknown as { made: string[]; revoked: string[] }
+        return { made: win.made, revoked: win.revoked }
+      })
+    try {
+      const sheet = await openSheet(o, "history")
+      const frame = sheet.locator(".strip").getByRole("img", { name: "Screenshot of note 1" })
+      await until("the first shot", () => frame.isVisible())
+      const first = (await frame.getAttribute("src")) ?? ""
+      expect(fetched).toEqual([SHOT_REF])
+
+      await pushUntil(o, { type: "round", round: withRef(FINISHED, "shot_late0001") }, async () =>
+        fetched.includes("shot_late0001"),
+      )
+      await pushUntil(o, { type: "round", round: withRef(FINISHED, "shot_newer002") }, async () =>
+        fetched.includes("shot_newer002"),
+      )
+      await until("the replacement to show", async () => {
+        const src = await frame.getAttribute("src").catch(() => null)
+        return src !== null && src !== first
+      })
+      const second = (await frame.getAttribute("src")) ?? ""
+      expect((await seen()).revoked).toContain(first)
+
+      releaseLate()
+      await until("the late reply to be served", () => served >= 3)
+      await o.page.evaluate(() => fetch("/after-the-late-shot").catch(() => {}))
+      await until("the page to settle", () =>
+        o.mock.requests().some((request) => request.path === "/after-the-late-shot"),
+      )
+      expect((await seen()).made).toEqual([first, second])
+      expect(await frame.getAttribute("src")).toBe(second)
+
+      await pushUntil(
+        o,
+        { type: "round", round: withRef(FINISHED, null) },
+        async () => (await sheet.locator(".strip img").count()) === 0,
+      )
+      await until("the removed shot to be revoked", async () =>
+        (await seen()).revoked.includes(second),
+      )
+    } finally {
+      releaseLate()
+    }
+  }, 30_000)
+
+  test("Undo stays available until 6000 ms after the delete and is gone once its toast has left", async () => {
+    const o = await open({ pairing: LIVE, pageState: THREE })
+    const sheet = await openSheet(o)
+    const start = await o.page.evaluate(() => Date.now())
+    await o.page.clock.install({ time: start })
+    await o.page.clock.pauseAt(start + 1000)
+    await sheet.getByRole("button", { name: "Delete note 2" }).click()
+    const undo = o.overlay.getByRole("button", { name: "Undo" })
+    await until("the Undo toast", () => undo.isVisible())
+
+    await o.page.clock.runFor(5999)
+    expect(await undo.count()).toBe(1)
+    expect(await o.overlay.locator(".toast.out").count()).toBe(0)
+
+    await o.page.clock.runFor(1)
+    await until(
+      "the toast to start leaving",
+      async () => (await o.overlay.locator(".toast.out").count()) === 1,
+    )
+    await o.page.clock.runFor(1000)
+    await until("Undo to be gone", async () => (await undo.count()) === 0)
+  }, 30_000)
+
+  test("the panel header shows the session's meter and avatar, and every draft row has its grip", async () => {
+    const live = await open({ pairing: LIVE, pageState: THREE })
+    const sheet = await openSheet(live)
+    const meter = sheet.locator(".sh-h .sub svg.meter")
+    expect(await meter.count()).toBe(1)
+    const liveClass = (await meter.getAttribute("class")) ?? ""
+    expect(liveClass).toContain("still")
+    const avatar = sheet.locator(".sh-h .sub").getByRole("img", { name: "Claude" })
+    expect(await avatar.count()).toBe(1)
+    expect(await avatar.locator("svg").count()).toBe(1)
+    const grips = sheet.getByRole("listitem").locator(".grip svg")
+    expect(await grips.count()).toBe(3)
+    for (const box of await grips.evaluateAll((els) =>
+      els.map((el) => el.getBoundingClientRect().width),
+    ))
+      expect(box).toBeGreaterThan(0)
+    await live.close()
+    opened = null
+
+    const busy = await open({ pairing: { ...LIVE, state: { status: "busy" } }, pageState: THREE })
+    const busySheet = await openSheet(busy)
+    const busyClass = (await busySheet.locator(".sh-h .sub svg.meter").getAttribute("class")) ?? ""
+    expect(busyClass).toContain("busy")
+    expect(busyClass).not.toBe(liveClass)
+  }, 30_000)
+
+  test("rows and summary cover question and keep as well as fix and change: labels, colours and counts", async () => {
+    const mixed = {
+      drafts: FOUR_INTENTS.map((intent, i) =>
+        draft(`N${60 + i}`, `Body ${intent} ${i}`, TARGETS[i % 3], intent),
+      ),
+      rounds: [],
+      agentNotes: [],
+    }
+    const o = await open({ pairing: LIVE, pageState: mixed })
+    const sheet = await openSheet(o)
+    const rows = await sheet.getByRole("listitem").evaluateAll(
+      (els, intents) =>
+        els.map((el, i) => {
+          const probe = (intent: string) => {
+            const p = document.createElement("i")
+            p.style.background = `var(--${intent})`
+            el.append(p)
+            const colour = getComputedStyle(p).backgroundColor
+            p.remove()
+            return colour
+          }
+          const edge = el.querySelector(".frame .edge") as HTMLElement
+          const badge = el.querySelector(".frame .fn") as HTMLElement
+          return {
+            label: el.querySelector(".it")?.textContent,
+            edge: getComputedStyle(edge).backgroundColor,
+            badge: getComputedStyle(badge).backgroundColor,
+            expected: probe(intents[i] ?? ""),
+          }
+        }),
+      [...FOUR_INTENTS],
+    )
+    expect(rows.map((row) => row.label)).toEqual(["Fix", "Change", "Question", "Keep", "Keep"])
+    for (const row of rows) {
+      expect(row.edge).toBe(row.expected)
+      expect(row.badge).toBe(row.expected)
+    }
+    expect(new Set(rows.map((row) => row.expected)).size).toBe(4)
+
+    const summary = await sheet.locator(".sh-f .sum .txt").innerText()
+    expect(summary).toContain("5 notes")
+    expect(summary).toContain("1 fix · 1 change · 1 question · 2 keep")
+    const bars = await sheet.locator(".sh-f .bars i").evaluateAll((els) =>
+      els.map((el) => {
+        const p = document.createElement("i")
+        p.style.background = `var(--${el.className})`
+        el.parentElement?.append(p)
+        const expected = getComputedStyle(p).backgroundColor
+        p.remove()
+        return [
+          el.className,
+          getComputedStyle(el).flexGrow,
+          getComputedStyle(el).backgroundColor === expected,
+        ]
+      }),
+    )
+    expect(bars).toEqual([
+      ["fix", "1", true],
+      ["change", "1", true],
+      ["question", "1", true],
+      ["keep", "2", true],
+    ])
   }, 30_000)
 })
