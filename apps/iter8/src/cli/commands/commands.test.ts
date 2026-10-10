@@ -769,6 +769,83 @@ describe("agent commands", () => {
     expect(sectionOf(fourth)).toContain("Screenshot: none\n")
   })
 
+  test("each show run writes into its own fresh directory and leaves earlier runs' files intact", async () => {
+    const state = setup()
+    await state.start()
+    const page = await state.openPage()
+    const pngOf = (width: number) =>
+      Uint8Array.from([
+        137,
+        80,
+        78,
+        71,
+        13,
+        10,
+        26,
+        10,
+        0,
+        0,
+        0,
+        13,
+        73,
+        72,
+        68,
+        82,
+        0,
+        0,
+        0,
+        width,
+        0,
+        0,
+        0,
+        1,
+      ])
+    const [pngA, pngB] = [pngOf(1), pngOf(2)]
+    const roundWith = (png: Uint8Array, body: string) => {
+      const screenshot = state.screenshots.store(page.id, png)
+      if (!screenshot) throw new Error("PNG rejected")
+      return state.sendMany(page.id, [
+        {
+          body,
+          capture: {
+            completeness: "complete",
+            omittedParts: [],
+            url: `${page.origin}/`,
+            viewport: { width: 800, height: 600, devicePixelRatio: 1 },
+            theme: "light",
+            screenshot,
+          },
+        },
+      ])
+    }
+    const first = roundWith(pngA, "first round")
+    const second = roundWith(pngB, "second round")
+    const firstNote = first.notes[0]?.id
+    const secondNote = second.notes[0]?.id
+    if (!firstNote || !secondNote) throw new Error("A seeded round has no note")
+
+    const show = async (roundId: string) => {
+      const before = directories.length
+      await state.run("show", [roundId])
+      expect(state.exits).toEqual([ExitCode.ok])
+      state.clear()
+      expect(directories).toHaveLength(before + 1)
+      return directories.at(-1) ?? ""
+    }
+    const firstRun = await show(first.id)
+    const repeatRun = await show(first.id)
+    const secondRun = await show(second.id)
+
+    expect(new Set([firstRun, repeatRun, secondRun]).size).toBe(3)
+    const bytes = async (directory: string, note: string) =>
+      new Uint8Array(await readFile(join(directory, `${note}.png`)))
+    expect(await bytes(firstRun, firstNote)).toEqual(pngA)
+    expect(await bytes(repeatRun, firstNote)).toEqual(pngA)
+    expect(await bytes(secondRun, secondNote)).toEqual(pngB)
+    expect(await readdir(firstRun)).toEqual([`${firstNote}.png`])
+    expect(await readdir(secondRun)).toEqual([`${secondNote}.png`])
+  })
+
   test("done prints done or answered and unknown note exits notFound", async () => {
     const state = setup()
     await state.start()
