@@ -6,17 +6,31 @@ const SOURCE_LOC = "data-astro-source-loc"
 // The 6.6 KB fixture page parses in 0.1 ms in headless Chromium and a 1 MB page built from it in 4 ms.
 export const MAX_SERVED_HTML_BYTES = 1_000_000
 
+function oneBased(text: string | undefined): number | null {
+  const value = Number(text)
+  return Number.isInteger(value) && value >= 1 ? value : null
+}
+
 function annotatedEvidence(element: Element, onPickedElement: boolean): Evidence | null {
   const file = element.getAttribute(SOURCE_FILE)
   if (file === null || file === "") return null
-  const line = Number(element.getAttribute(SOURCE_LOC)?.split(":")[0])
+  const [lineText, columnText] = (element.getAttribute(SOURCE_LOC) ?? "").split(":")
+  const line = oneBased(lineText)
+  // Astro's loc is already 1-based and names the position just past the opening tag's `>`.
+  const column = oneBased(columnText)
   const basename = file.slice(file.lastIndexOf("/") + 1)
   return {
     framework: "astro",
     major: null,
     component: basename.endsWith(".astro") ? basename.slice(0, -".astro".length) : null,
-    // The loc column marks the end of the opening tag, not where the element starts, so it is dropped.
-    frames: [{ kind: "source", file, ...(Number.isInteger(line) && line >= 1 ? { line } : {}) }],
+    frames: [
+      {
+        kind: "source",
+        file,
+        ...(line !== null ? { line } : {}),
+        ...(column !== null ? { column } : {}),
+      },
+    ],
     onPickedElement,
   }
 }
