@@ -428,46 +428,54 @@ for (const [name, block] of Object.entries(blockers)) {
   }, 60_000)
 }
 
-test("the service stays up until the sweep has orphaned the round of an owner that just died", async () => {
-  const home = await makeHome()
-  const idleMs = 600
-  const service = await startIdleService(home, idleMs)
-  const session = sleeper(home)
-  const owner = await registerOwner(home, session.pid)
-  const { open, access } = await openPage(home, "site", owner)
-  const live = await connectLive(access)
-  const round = await sendRound(open, access, "stranded")
-  const prompt = await cli(home, ["hook", "prompt", "--pid", String(session.pid)])
-  expect(prompt.exitCode, prompt.stderr).toBe(0)
-  const busyPairings = () =>
-    live.messages.filter(
-      ({ message }) =>
-        message.type === "pairing" &&
-        message.pairing?.owner === owner &&
-        message.pairing.state.status === "busy",
-    ).length
-  await until("a sweep to report the busy owner", () => busyPairings() >= 2, SWEEP_MS + 3_000)
-
-  live.ws.close()
-  session.kill("SIGKILL")
-  await session.exited
-  await until(
-    "the sweep to orphan the round while the service stays up",
-    async () => {
-      expect(service.exitCode).toBeNull()
+for (const stage of ["announced", "queued"] as const) {
+  test(`the service stays up until the sweep has orphaned the ${stage} round of an owner that just died`, async () => {
+    const home = await makeHome()
+    const idleMs = 600
+    const service = await startIdleService(home, idleMs)
+    const session = sleeper(home)
+    const owner = await registerOwner(home, session.pid)
+    const { open, access } = await openPage(home, "site", owner)
+    const live = await connectLive(access)
+    const roundStage = async (id: string) => {
       const response = await controlFetch(home, "/rounds", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ identities: [], owner: null }),
       })
       const { rounds } = RoundsResult.parse(await response.json())
-      return rounds.find((summary) => summary.id === round.id)?.stage === "orphaned"
-    },
-    SWEEP_MS + 3_000,
-  )
-  expect(await exitCodeWithin(service, 15_000)).toBe(0)
-  expectStopped(home)
-}, 60_000)
+      return rounds.find((summary) => summary.id === id)?.stage
+    }
+    const busyPairings = () =>
+      live.messages.filter(
+        ({ message }) =>
+          message.type === "pairing" &&
+          message.pairing?.owner === owner &&
+          message.pairing.state.status === "busy",
+      ).length
+
+    const early = stage === "announced" ? await sendRound(open, access, "stranded") : null
+    const prompt = await cli(home, ["hook", "prompt", "--pid", String(session.pid)])
+    expect(prompt.exitCode, prompt.stderr).toBe(0)
+    await until("a sweep to report the busy owner", () => busyPairings() >= 2, SWEEP_MS + 3_000)
+    const round = early ?? (await sendRound(open, access, "stranded"))
+    expect(await roundStage(round.id)).toBe(stage)
+
+    live.ws.close()
+    session.kill("SIGKILL")
+    await session.exited
+    await until(
+      "the sweep to orphan the round while the service stays up",
+      async () => {
+        expect(service.exitCode).toBeNull()
+        return (await roundStage(round.id)) === "orphaned"
+      },
+      SWEEP_MS + 3_000,
+    )
+    expect(await exitCodeWithin(service, 15_000)).toBe(0)
+    expectStopped(home)
+  }, 60_000)
+}
 
 test("a restarted service orphans the queued and announced rounds of an owner stored as gone, then idles out", async () => {
   const home = await makeHome()

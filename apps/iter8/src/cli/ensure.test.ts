@@ -14,6 +14,7 @@ import {
   RoundsResult,
   SendResult,
   ServiceStatus,
+  ShowResult,
   TOKEN_HEADER,
 } from "@iter8/protocol"
 import type { Subprocess } from "bun"
@@ -163,6 +164,12 @@ function processGroup(pid: number): number {
   return Number(result.stdout.toString().trim())
 }
 
+function capabilityOf(open: OpenResult) {
+  return LandingFragment.parse(
+    Object.fromEntries(new URLSearchParams(new URL(open.landingUrl).hash.slice(1))),
+  ).t
+}
+
 async function sendRound(open: OpenResult, body: string) {
   const { t: token } = LandingFragment.parse(
     Object.fromEntries(new URLSearchParams(new URL(open.landingUrl).hash.slice(1))),
@@ -267,6 +274,11 @@ for (const field of ["version", "protocolVersion", "schemaVersion", "build"] as 
     )
     const opened = await cliJson(home, ["open", site, "--owner", pairing.owner], OpenResult)
     const round = await sendRound(opened, "keep me across the restart")
+    const shownBefore = await cliJson(
+      home,
+      ["show", round.id, "--owner", pairing.owner],
+      ShowResult,
+    )
     const real = await cliJson(home, ["status"], ServiceStatus)
     process.kill(real.pid, "SIGTERM")
     await until(
@@ -326,11 +338,19 @@ const server = Bun.serve({
     const fakeRun = await finished(fake)
     expect(fakeRun.exitCode, fakeRun.stderr).toBe(0)
     expect(reopened.page.id).toBe(opened.page.id)
+    expect(capabilityOf(reopened)).toBe(capabilityOf(opened))
+    expect(reopened.page.pairing).toEqual(opened.page.pairing)
+    expect(reopened.page.pairing?.owner).toBe(pairing.owner)
     const replaced = await cliJson(home, ["status"], ServiceStatus)
     expect(replaced[field]).toBe(real[field])
     expect(replaced.pid).not.toBe(fake.pid)
     const { rounds } = await cliJson(home, ["rounds"], RoundsResult)
     expect(rounds.map((summary) => summary.id)).toEqual([round.id])
+    const shownAfter = await cliJson(home, ["show", round.id, "--owner", pairing.owner], ShowResult)
+    expect(shownBefore.notes.map((note) => note.authored.body)).toEqual([
+      "keep me across the restart",
+    ])
+    expect(shownAfter.notes).toEqual(shownBefore.notes)
   }, 60_000)
 }
 
