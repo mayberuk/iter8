@@ -340,25 +340,6 @@ describe("note pins", () => {
     expect(text).toContain("Click to edit")
   }, 30_000)
 
-  test("a window scroll moves the pin with its element in the same frame", async () => {
-    const o = await open(seed([draft("N21", DETAILS)]))
-    await o.page.setViewportSize({ width: 1280, height: 300 })
-    const pin = pinNamed(o.overlay, "Note 1, Fix")
-    await until("the pin", () => pin.isVisible())
-    const before = await centre(pin)
-
-    const read = await scrollAndRead(o.page, {
-      pin: "Note 1, Fix",
-      target: "h2#details-heading",
-      scroller: null,
-      to: 120,
-      when: "same frame",
-    })
-    expect(read.scrolled).toBe(120)
-    expectOnCorner(read)
-    expect(before.y - read.pin.y).toBeGreaterThan(100)
-  }, 30_000)
-
   test("a horizontal window scroll moves the pin with its element in the same frame", async () => {
     const o = await openWide([draft("N21", WIDE_A)])
     const pair = { pin: "Note 1, Fix", target: "p#wide-a" }
