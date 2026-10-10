@@ -35,14 +35,18 @@ function parentOf(element: Element): Element | null {
 const yieldToPage = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /** Rejects only when `signal` aborts, with its reason; a page that breaks an adapter gives none. */
-export async function lookupSource(element: Element, signal: AbortSignal): Promise<SourceLead> {
+export async function lookupSource(
+  element: Element,
+  signal: AbortSignal,
+  walkedAdapters: readonly Adapter[] = adapters,
+): Promise<SourceLead> {
   signal.throwIfAborted()
   const build = detectBuild(readPage())
   let current: Element | null = element
   for (let depth = 0; current !== null && depth <= MAX_ANCESTORS; depth += 1) {
     await yieldToPage()
     signal.throwIfAborted()
-    for (const adapter of adapters) {
+    for (const adapter of walkedAdapters) {
       let evidence: Evidence | null = null
       try {
         evidence = await adapter(current, { signal, depth })

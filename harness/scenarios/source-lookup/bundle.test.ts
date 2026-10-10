@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
+import { SOURCE_BUNDLE_PATH } from "@iter8/protocol"
 import type { Browser, Page } from "playwright"
+import type { lookupSource } from "../../../packages/source/src/index"
 import { buildOverlayBundles } from "../../../scripts/build"
 import { launchChromium } from "../../rig/browser"
 import { type RunningFixture, startFixture } from "../../rig/fixtures"
@@ -282,3 +284,94 @@ test(
   },
   RIG_TIMEOUT_MS,
 )
+
+type AbortMode = "never" | "before-the-call" | "inside-an-adapter" | "between-steps"
+
+const walkWithFakeAdapter = (page: Page, mode: AbortMode) =>
+  page.evaluate(
+    async ({ bundlePath, selector, mode }) => {
+      const bundle: { lookupSource: typeof lookupSource } = await import(
+        new URL(bundlePath, location.origin).href
+      )
+      const element = document.querySelector(selector)
+      if (element === null) throw new Error(`No element matches ${selector}`)
+      const controller = new AbortController()
+      const reason = new RangeError("the pick moved on")
+      const calls: number[] = []
+      const evidence = {
+        framework: "react" as const,
+        major: 18,
+        component: "Late",
+        frames: [{ kind: "source" as const, file: "/src/late.tsx", line: 1 }],
+        onPickedElement: true,
+      }
+      const adapter = (_element: Element, context: { depth: number }) => {
+        calls.push(context.depth)
+        if (context.depth === 0 && mode === "inside-an-adapter") {
+          controller.abort(reason)
+          return evidence
+        }
+        if (context.depth === 0) {
+          if (mode === "between-steps") setTimeout(() => controller.abort(reason))
+          return null
+        }
+        return context.depth === 1 ? evidence : null
+      }
+      if (mode === "before-the-call") controller.abort(reason)
+      let timerFired = false
+      setTimeout(() => {
+        timerFired = true
+      })
+      try {
+        const lead = await bundle.lookupSource(element, controller.signal, [adapter])
+        return { settled: "resolved" as const, confidence: lead.confidence, calls, timerFired }
+      } catch (error) {
+        return { settled: "rejected" as const, sameReason: error === reason, calls, timerFired }
+      }
+    },
+    { bundlePath: SOURCE_BUNDLE_PATH, selector: CARD, mode },
+  )
+
+test("a walk nothing aborts reaches the ancestor whose adapter finds evidence", async () => {
+  const view = await rig.open(fixture)
+  try {
+    const run = await walkWithFakeAdapter(view.page, "never")
+    expect(run.settled).toBe("resolved")
+    expect(run.calls).toEqual([0, 1])
+    if (run.settled === "resolved") expect(run.confidence).not.toBe("none")
+  } finally {
+    await view.close()
+  }
+})
+
+test("a signal already aborted rejects with its reason before any task yields or adapter runs", async () => {
+  const view = await rig.open(fixture)
+  try {
+    const run = await walkWithFakeAdapter(view.page, "before-the-call")
+    expect(run).toEqual({ settled: "rejected", sameReason: true, calls: [], timerFired: false })
+  } finally {
+    await view.close()
+  }
+})
+
+test("an abort that lands as the picked element's adapter returns evidence rejects instead of giving a lead", async () => {
+  const view = await rig.open(fixture)
+  try {
+    const run = await walkWithFakeAdapter(view.page, "inside-an-adapter")
+    expect(run.settled).toBe("rejected")
+    expect(run).toMatchObject({ sameReason: true, calls: [0] })
+  } finally {
+    await view.close()
+  }
+})
+
+test("an abort between the first and second ancestor stops the walk before the second adapter runs", async () => {
+  const view = await rig.open(fixture)
+  try {
+    const run = await walkWithFakeAdapter(view.page, "between-steps")
+    expect(run.settled).toBe("rejected")
+    expect(run).toMatchObject({ sameReason: true, calls: [0] })
+  } finally {
+    await view.close()
+  }
+})
