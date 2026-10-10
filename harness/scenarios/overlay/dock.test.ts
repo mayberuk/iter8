@@ -131,6 +131,23 @@ describe("dock session states", () => {
     expect(await tip.innerText()).toBe("Delivers when larkspur’s turn ends")
   }, 30_000)
 
+  test("a session that ends while the page is open disables Send before any Send is tried", async () => {
+    const o = await open({ pairing: LIVE, liveSessions: [OTHER], pageState: SEEDED })
+    expect(await sendButton(o.overlay).isEnabled()).toBe(true)
+    await socketOpen(o)
+    o.mock.setPairing(GONE)
+    o.mock.push({ type: "pairing", pairing: GONE })
+    await until("Send to be disabled", () => sendButton(o.overlay).isDisabled())
+    expect(await dock(o.overlay).locator(".stword").innerText()).toBe("ended")
+    await until("the session-ended dialog", () =>
+      o.overlay.getByRole("dialog", { name: "Session ended" }).isVisible(),
+    )
+    expect(await draftCount(o.overlay)).toBe("1")
+    expect(o.mock.requests().some((request) => request.path === OVERLAY_ROUTES.send.path)).toBe(
+      false,
+    )
+  }, 30_000)
+
   test("a session with no listener says the round waits for the next prompt", async () => {
     const { overlay } = await open({ pairing: { ...LIVE, listener: "none" }, pageState: SEEDED })
     await sendButton(overlay).hover()
