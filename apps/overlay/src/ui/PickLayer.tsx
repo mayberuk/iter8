@@ -49,6 +49,45 @@ type Run = {
   capture: Capture | null
 }
 
+/**
+ * Where the composer goes beside its targets. While the round sheet is open and the composer fits
+ * left of it, the sheet's resting edge bounds the composer; a viewport too narrow for that lets the
+ * composer overlap the sheet, and the stacking order keeps it on top.
+ */
+export function composerSpot(input: {
+  targets: readonly Rect[]
+  panel: { w: number; h: number }
+  viewport: { w: number; h: number }
+  dock: { top: number; bottom: number; anchor: string } | null
+  sheetLeft: number | null
+}): { x: number; y: number; side: "left" | "right" } {
+  const { targets, panel, viewport, dock, sheetLeft } = input
+  const left = Math.min(...targets.map((r) => r.x))
+  const top = Math.min(...targets.map((r) => r.y))
+  const right = Math.max(...targets.map((r) => r.x + r.w))
+  const bottom = Math.max(...targets.map((r) => r.y + r.h))
+  const beside = sheetLeft !== null && sheetLeft - 2 * EDGE >= panel.w
+  const limit = beside ? sheetLeft - EDGE : viewport.w - EDGE
+  const floor = dock?.anchor.startsWith("b") ? dock.top - EDGE : viewport.h - EDGE
+  const ceiling = dock?.anchor.startsWith("t") ? dock.bottom + EDGE : EDGE
+  const fitsRight = right + COMPOSER_GAP + panel.w < limit
+  const fitsLeft = left - COMPOSER_GAP - panel.w > EDGE
+  let x: number
+  let y = Math.min(Math.max(top, ceiling), floor - panel.h)
+  let side: "left" | "right" = "left"
+  if (fitsRight) x = right + COMPOSER_GAP
+  else if (fitsLeft) {
+    x = left - COMPOSER_GAP - panel.w
+    if (beside) x = Math.min(x, limit - panel.w)
+    side = "right"
+  } else {
+    x = Math.min(Math.max(left, EDGE), limit - panel.w)
+    y = bottom + COMPOSER_GAP
+    if (y + panel.h > floor) y = Math.max(ceiling, top - panel.h - COMPOSER_GAP)
+  }
+  return { x, y, side }
+}
+
 function viewRect(el: Element): Rect {
   const r = el.getBoundingClientRect()
   return { x: r.left, y: r.top, w: r.width, h: r.height }
@@ -562,30 +601,18 @@ export function PickLayer(): JSX.Element | null {
             ? [boxRect(composer.target.box)]
             : targets.current.flatMap((el) => (el?.isConnected ? [viewRect(el)] : []))
         if (rects.length === 0) return
-        const left = Math.min(...rects.map((r) => r.x))
-        const top = Math.min(...rects.map((r) => r.y))
-        const right = Math.max(...rects.map((r) => r.x + r.w))
-        const bottom = Math.max(...rects.map((r) => r.y + r.h))
-        const width = panel.offsetWidth
-        const height = panel.offsetHeight
         const { dock: anchor, collapsed } = model.prefs.peek()
-        const dock = root.querySelector(collapsed ? ".iter8btn" : ".dock")?.getBoundingClientRect()
-        const floor = dock && anchor.startsWith("b") ? dock.top - EDGE : window.innerHeight - EDGE
-        const ceiling = dock && anchor.startsWith("t") ? dock.bottom + EDGE : EDGE
-        const fitsRight = right + COMPOSER_GAP + width < window.innerWidth - EDGE
-        const fitsLeft = left - COMPOSER_GAP - width > EDGE
-        let x: number
-        let y = Math.min(Math.max(top, ceiling), floor - height)
-        let side = "left"
-        if (fitsRight) x = right + COMPOSER_GAP
-        else if (fitsLeft) {
-          x = left - COMPOSER_GAP - width
-          side = "right"
-        } else {
-          x = Math.min(Math.max(left, EDGE), window.innerWidth - width - EDGE)
-          y = bottom + COMPOSER_GAP
-          if (y + height > floor) y = Math.max(ceiling, top - height - COMPOSER_GAP)
-        }
+        const dockBox = root
+          .querySelector(collapsed ? ".iter8btn" : ".dock")
+          ?.getBoundingClientRect()
+        const sheet = model.sheet.peek().open ? root.querySelector<HTMLElement>(".sheet") : null
+        const { x, y, side } = composerSpot({
+          targets: rects,
+          panel: { w: panel.offsetWidth, h: panel.offsetHeight },
+          viewport: { w: window.innerWidth, h: window.innerHeight },
+          dock: dockBox ? { top: dockBox.top, bottom: dockBox.bottom, anchor } : null,
+          sheetLeft: sheet ? sheet.offsetLeft : null,
+        })
         write(panel, `left:${Math.round(x)}px;top:${Math.round(y)}px;--ox:${side}`)
       }
 
@@ -709,82 +736,86 @@ export function PickLayer(): JSX.Element | null {
   }
 
   return (
-    <div class="layer pick">
-      <div ref={veilRef} class="veil" />
-      <div ref={marksRef}>
-        {marks.map((_, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: marks are numbered by position
-          <div key={i} class="mark">
-            {mode === "pick" && <b>{i + 1}</b>}
-          </div>
-        ))}
+    <>
+      <div class="layer pick">
+        <div ref={veilRef} class="veil" />
+        <div ref={marksRef}>
+          {marks.map((_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: marks are numbered by position
+            <div key={i} class="mark">
+              {mode === "pick" && <b>{i + 1}</b>}
+            </div>
+          ))}
+        </div>
+        <div ref={ringRef} class="ring">
+          <i />
+          <i />
+          <i />
+          <i />
+          <span class="wtag" />
+          <span class="htag" />
+        </div>
+        <div
+          ref={chipRef}
+          class={info ? "chip on" : "chip"}
+          role="status"
+          aria-live="polite"
+          aria-hidden={info ? undefined : "true"}
+        >
+          {info && (
+            <>
+              <div class="c1">
+                <span class="comp tag">{info.tag}</span>
+                <span class="dim">{info.dims}</span>
+              </div>
+              <div class="nm">{info.name ? `“${info.name}”` : "—"}</div>
+              <div class="path">
+                {info.path.map((label, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: ancestors are listed by depth
+                  <span key={i}>
+                    {i > 0 && <i>›</i>}
+                    {i === info.path.length - 1 ? <strong>{label}</strong> : <span>{label}</span>}
+                  </span>
+                ))}
+              </div>
+              <div class="hints">
+                {multi.length > 0 ? (
+                  <>
+                    <span class="count">{multi.length} selected</span>
+                    <span>click adds and opens</span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      <kbd>↑</kbd>
+                      <kbd>↓</kbd> climb
+                    </span>
+                    <span>
+                      <kbd>⇧</kbd> click to add
+                    </span>
+                    <span>drag for region</span>
+                    <span>
+                      <kbd>↵</kbd> note
+                    </span>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
-      <div ref={ringRef} class="ring">
-        <i />
-        <i />
-        <i />
-        <i />
-        <span class="wtag" />
-        <span class="htag" />
-      </div>
-      <div
-        ref={chipRef}
-        class={info ? "chip on" : "chip"}
-        role="status"
-        aria-live="polite"
-        aria-hidden={info ? undefined : "true"}
-      >
-        {info && (
-          <>
-            <div class="c1">
-              <span class="comp tag">{info.tag}</span>
-              <span class="dim">{info.dims}</span>
-            </div>
-            <div class="nm">{info.name ? `“${info.name}”` : "—"}</div>
-            <div class="path">
-              {info.path.map((label, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: ancestors are listed by depth
-                <span key={i}>
-                  {i > 0 && <i>›</i>}
-                  {i === info.path.length - 1 ? <strong>{label}</strong> : <span>{label}</span>}
-                </span>
-              ))}
-            </div>
-            <div class="hints">
-              {multi.length > 0 ? (
-                <>
-                  <span class="count">{multi.length} selected</span>
-                  <span>click adds and opens</span>
-                </>
-              ) : (
-                <>
-                  <span>
-                    <kbd>↑</kbd>
-                    <kbd>↓</kbd> climb
-                  </span>
-                  <span>
-                    <kbd>⇧</kbd> click to add
-                  </span>
-                  <span>drag for region</span>
-                  <span>
-                    <kbd>↵</kbd> note
-                  </span>
-                </>
-              )}
-            </div>
-          </>
+      <div class="layer typing">
+        {target && (
+          <Composer
+            panelRef={panelRef}
+            lead={lead}
+            thumb={thumb}
+            attach={attach}
+            onAttach={onAttach}
+            onInput={onInput}
+          />
         )}
       </div>
-      {target && (
-        <Composer
-          panelRef={panelRef}
-          lead={lead}
-          thumb={thumb}
-          attach={attach}
-          onAttach={onAttach}
-          onInput={onInput}
-        />
-      )}
-    </div>
+    </>
   )
 }
