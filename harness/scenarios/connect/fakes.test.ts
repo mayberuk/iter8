@@ -39,9 +39,13 @@ type Fake = {
   stop(): Promise<void>
 }
 
-function spawnFake(entry: string, args: string[], vars: Record<string, string> = {}): Fake {
+type FakeEnv = Record<string, string | undefined>
+
+function spawnFake(entry: string, args: string[], vars: FakeEnv = {}): Fake {
+  const env: FakeEnv = { ...process.env, ...vars }
+  for (const [name, value] of Object.entries(vars)) if (value === undefined) delete env[name]
   const child = Bun.spawn([process.execPath, entry, ...args], {
-    env: { ...process.env, ...vars },
+    env,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -58,7 +62,7 @@ function spawnFake(entry: string, args: string[], vars: Record<string, string> =
   }
 }
 
-const ssh = (args: string[], vars?: Record<string, string>) => spawnFake(FAKE_SSH_ENTRY, args, vars)
+const ssh = (args: string[], vars?: FakeEnv) => spawnFake(FAKE_SSH_ENTRY, args, vars)
 
 async function teardown(steps: (() => Promise<unknown>)[]): Promise<void> {
   const failures: unknown[] = []
@@ -93,30 +97,48 @@ function startTarget() {
   return { port: listener.port, received, stop: async () => listener.stop(true) }
 }
 
+function replyHandlers(
+  send: string,
+  expectedLength: number,
+  resolve: (received: string) => void,
+  reject: (error: unknown) => void,
+) {
+  let received = ""
+  return {
+    open(socket: { write(data: string): unknown }) {
+      socket.write(send)
+    },
+    data(socket: { end(): unknown }, chunk: Uint8Array) {
+      received += chunk.toString()
+      if (received.length >= expectedLength) {
+        socket.end()
+        resolve(received)
+      }
+    },
+    error(_socket: unknown, error: Error) {
+      reject(error)
+    },
+    close() {
+      resolve(received)
+    },
+  }
+}
+
 function exchange(hostname: string, port: number, send: string, expectedLength: number) {
   return new Promise<string>((resolve, reject) => {
-    let received = ""
     Bun.connect({
       hostname,
       port,
-      socket: {
-        open(socket) {
-          socket.write(send)
-        },
-        data(socket, chunk) {
-          received += chunk.toString()
-          if (received.length >= expectedLength) {
-            socket.end()
-            resolve(received)
-          }
-        },
-        error(_socket, error) {
-          reject(error)
-        },
-        close() {
-          resolve(received)
-        },
-      },
+      socket: replyHandlers(send, expectedLength, resolve, reject),
+    }).catch(reject)
+  })
+}
+
+function exchangeUnix(path: string, send: string, expectedLength: number) {
+  return new Promise<string>((resolve, reject) => {
+    Bun.connect({
+      unix: path,
+      socket: replyHandlers(send, expectedLength, resolve, reject),
     }).catch(reject)
   })
 }
@@ -576,3 +598,257 @@ test("fake tailscale prints the file FAKE_TAILSCALE_STATUS names, and fails when
     await teardown(steps)
   }
 }, 30_000)
+
+const CLIENTS = 8
+const interleavedPayloads = Array.from({ length: CLIENTS }, (_, index) =>
+  `client-${index}-`.repeat(400),
+)
+
+test("concurrent clients of one -L forward each get only their own stream back", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const upstream = Bun.listen({
+      hostname: SERVICE_ADDRESS,
+      port: 0,
+      socket: {
+        data(socket, chunk) {
+          socket.write(chunk)
+        },
+      },
+    })
+    steps.push(async () => upstream.stop(true))
+    const [port] = await ports(1)
+    if (port === undefined) throw new Error("no port")
+    const fake = ssh(["-N", "-L", `${port}:${SERVICE_ADDRESS}:${upstream.port}`, "--", HOST])
+    steps.push(() => fake.stop())
+    await forwardReady(fake, SERVICE_ADDRESS, port)
+
+    const replies = await Promise.all(
+      interleavedPayloads.map((payload) =>
+        exchange(SERVICE_ADDRESS, port, payload, payload.length),
+      ),
+    )
+    expect(replies).toEqual(interleavedPayloads)
+  } finally {
+    await teardown(steps)
+  }
+}, 15_000)
+
+test("concurrent clients of one -R forward each get only their own stream back", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const home = await throwawayHome()
+    steps.push(home.dispose)
+    const localPath = join(home.path, "local.sock")
+    const remotePath = join(home.path, "remote.sock")
+    const upstream = Bun.listen({
+      unix: localPath,
+      socket: {
+        data(socket, chunk) {
+          socket.write(chunk)
+        },
+      },
+    })
+    steps.push(async () => upstream.stop(true))
+    const fake = ssh(["-N", "-R", `${remotePath}:${localPath}`, "--", HOST])
+    steps.push(() => fake.stop())
+    await waitFor("the remote socket to exist", async () => existsSync(remotePath) || null, {
+      timeoutMs: READY_MS,
+    })
+
+    const replies = await Promise.all(
+      interleavedPayloads.map((payload) => exchangeUnix(remotePath, payload, payload.length)),
+    )
+    expect(replies).toEqual(interleavedPayloads)
+  } finally {
+    await teardown(steps)
+  }
+}, 15_000)
+
+test("only the second of two -L ports being bound names that port, exits 255 and releases the first", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const [first, second] = await ports(2)
+    if (first === undefined || second === undefined) throw new Error("no ports")
+    const holder = Bun.listen({ hostname: SERVICE_ADDRESS, port: second, socket: { data() {} } })
+    steps.push(async () => holder.stop(true))
+
+    const fake = ssh([
+      "-N",
+      "-L",
+      `${first}:${SERVICE_ADDRESS}:9`,
+      "-L",
+      `${second}:${SERVICE_ADDRESS}:9`,
+      "--",
+      HOST,
+    ])
+    steps.push(() => fake.stop())
+
+    expect(await exited(fake)).toBe(255)
+    expect(await fake.stderr).toBe(
+      [
+        `bind [${SERVICE_ADDRESS}]:${second}: Address already in use`,
+        `channel_setup_fwd_listener_tcpip: cannot listen to port: ${second}`,
+        "Could not request local forwarding.",
+        "",
+      ].join("\n"),
+    )
+    expect(await accepts(SERVICE_ADDRESS, first)).toBeNull()
+  } finally {
+    await teardown(steps)
+  }
+}, 30_000)
+
+test("with the DOWN marker present -G, -N and a remote command all refuse, and the command never runs", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const home = await throwawayHome()
+    steps.push(home.dispose)
+    const down = join(home.path, "down")
+    await Bun.write(down, "")
+    const ran = join(home.path, "ran")
+    const unreachable = `ssh: connect to host ${HOST} port 22: Network is unreachable\n`
+
+    for (const args of [
+      ["-G", "--", HOST],
+      ["-N", "-o", "BatchMode=yes", "--", HOST],
+      ["-o", "BatchMode=yes", "--", HOST, "touch", ran],
+    ]) {
+      const fake = ssh(args, { FAKE_SSH_DOWN: down })
+      steps.push(() => fake.stop())
+      expect(await exited(fake)).toBe(255)
+      expect(await fake.stderr).toBe(unreachable)
+      expect(await fake.stdout).toBe("")
+    }
+    expect(existsSync(ran)).toBe(false)
+
+    const control = ssh(["-o", "BatchMode=yes", "--", HOST, "touch", ran])
+    steps.push(() => control.stop())
+    expect(await exited(control)).toBe(0)
+    expect(existsSync(ran)).toBe(true)
+  } finally {
+    await teardown(steps)
+  }
+}, 30_000)
+
+const STAND_IN_SOURCE = [
+  "console.log(JSON.stringify({ argv: process.argv.slice(2), home: process.env.ITER8_HOME, pool: process.env.ITER8_POOL }))",
+  "process.exit(Number(process.env.STAND_IN_EXIT ?? 0))",
+].join("\n")
+
+test("the remote env overlay wins over conflicting inherited ITER8_HOME and ITER8_POOL", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const home = await throwawayHome()
+    steps.push(home.dispose)
+    const standIn = join(home.path, "iter8-stand-in.ts")
+    await Bun.write(standIn, STAND_IN_SOURCE)
+    const fake = ssh(["-o", "BatchMode=yes", "--", HOST, "iter8", "status"], {
+      FAKE_SSH_ITER8: JSON.stringify([process.execPath, standIn]),
+      FAKE_SSH_REMOTE_ENV: JSON.stringify({ ITER8_HOME: "/remote/home", ITER8_POOL: "7000-7009" }),
+      ITER8_HOME: "/inherited/home",
+      ITER8_POOL: "1000-1009",
+    })
+    steps.push(() => fake.stop())
+
+    expect(await exited(fake)).toBe(0)
+    expect(JSON.parse(await fake.stdout)).toEqual({
+      argv: ["status"],
+      home: "/remote/home",
+      pool: "7000-7009",
+    })
+  } finally {
+    await teardown(steps)
+  }
+}, 30_000)
+
+test("a remote iter8 command exiting 0 returns 0", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const home = await throwawayHome()
+    steps.push(home.dispose)
+    const standIn = join(home.path, "iter8-stand-in.ts")
+    await Bun.write(standIn, STAND_IN_SOURCE)
+    const fake = ssh(["-o", "BatchMode=yes", "--", HOST, "iter8", "status"], {
+      FAKE_SSH_ITER8: JSON.stringify([process.execPath, standIn]),
+    })
+    steps.push(() => fake.stop())
+
+    expect(await exited(fake)).toBe(0)
+    expect(await fake.stderr).toBe("")
+  } finally {
+    await teardown(steps)
+  }
+}, 30_000)
+
+test("a non-iter8 remote command runs as given, with or without FAKE_SSH_ITER8", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const home = await throwawayHome()
+    steps.push(home.dispose)
+    const script = join(home.path, "plain.ts")
+    await Bun.write(script, STAND_IN_SOURCE)
+    const decoy = join(home.path, "decoy.ts")
+    await Bun.write(decoy, 'console.log(JSON.stringify({ argv: ["decoy"] }))')
+    const command = [process.execPath, script, "iter8", "--json"]
+
+    for (const iter8 of [undefined, JSON.stringify([process.execPath, decoy])]) {
+      const fake = ssh(["-o", "BatchMode=yes", "--", HOST, ...command], { FAKE_SSH_ITER8: iter8 })
+      steps.push(() => fake.stop())
+      expect(await exited(fake)).toBe(0)
+      expect(JSON.parse(await fake.stdout).argv).toEqual(["iter8", "--json"])
+      expect(await fake.stderr).toBe("")
+    }
+  } finally {
+    await teardown(steps)
+  }
+}, 30_000)
+
+test("the log gains one argv and pid line per invocation, in every mode", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const home = await throwawayHome()
+    steps.push(home.dispose)
+    const log = join(home.path, "ssh.log")
+    const down = join(home.path, "down")
+    const remotePath = join(home.path, "remote.sock")
+    const seen: { argv: string[]; pid: number }[] = []
+    const run = async (args: string[], vars: FakeEnv = {}) => {
+      const fake = ssh(args, { FAKE_SSH_LOG: log, ...vars })
+      steps.push(() => fake.stop())
+      seen.push({ argv: args, pid: fake.child.pid })
+      return fake
+    }
+
+    expect(await exited(await run(["-G", "--", HOST]))).toBe(0)
+    expect(await exited(await run(["-o", "BatchMode=yes", "--", HOST, "true"]))).toBe(0)
+    const forwarding = await run([
+      "-N",
+      "-R",
+      `${remotePath}:${join(home.path, "l.sock")}`,
+      "--",
+      HOST,
+    ])
+    await waitFor("the remote socket to exist", async () => existsSync(remotePath) || null, {
+      timeoutMs: READY_MS,
+    })
+    await forwarding.stop()
+    await Bun.write(down, "")
+    expect(await exited(await run(["-G", "--", HOST], { FAKE_SSH_DOWN: down }))).toBe(255)
+    expect(await exited(await run(["-G", "--", HOST]))).toBe(0)
+
+    const lines = (await Bun.file(log).text()).trim().split("\n")
+    expect(lines.map((line) => JSON.parse(line))).toEqual(seen)
+  } finally {
+    await teardown(steps)
+  }
+}, 30_000)
+
+test("fake tailscale fails the same way when FAKE_TAILSCALE_STATUS is absent from the environment", async () => {
+  const fake = spawnFake(FAKE_TAILSCALE_ENTRY, ["status", "--json"], {
+    FAKE_TAILSCALE_STATUS: undefined,
+  })
+  expect(await exited(fake)).toBe(1)
+  expect(await fake.stderr).toBe("failed to connect to local tailscaled\n")
+  expect(await fake.stdout).toBe("")
+})
