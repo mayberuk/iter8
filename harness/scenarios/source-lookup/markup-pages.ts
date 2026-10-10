@@ -78,3 +78,27 @@ export const CRLF_PAGE = `<!doctype html>
 </body>
 </html>
 `
+
+export const NESTED_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Shadow roots inside shadow roots</title>
+</head>
+<body>
+  <main>
+    <section id="outer-host" class="shell">Outer host text</section>
+  </main>
+  <script>
+    const outer = document.getElementById("outer-host")
+    const inner = document.createElement("div")
+    inner.id = "inner-host"
+    inner.className = "core"
+    outer.attachShadow({ mode: "open" }).append(inner)
+    const label = document.createElement("span")
+    label.textContent = "Nested label"
+    inner.attachShadow({ mode: "open" }).append(label)
+  </script>
+</body>
+</html>
+`

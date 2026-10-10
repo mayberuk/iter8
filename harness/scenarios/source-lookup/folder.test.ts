@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
+import { SOURCE_BUNDLE_PATH, SourceLead } from "@iter8/protocol"
+import type { lookupSource } from "../../../packages/source/src/index"
 import { fixtureDir } from "../../rig/fixtures"
 import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import {
@@ -9,7 +11,7 @@ import {
   resolveInPage,
   startSourceRig,
 } from "./lookup"
-import { CRLF_PAGE, INDEX_PAGE, SHIFTED_PAGE, SUB_PAGE } from "./markup-pages"
+import { CRLF_PAGE, INDEX_PAGE, NESTED_PAGE, SHIFTED_PAGE, SUB_PAGE } from "./markup-pages"
 
 const RIG_TIMEOUT_MS = 120_000
 
@@ -29,6 +31,7 @@ beforeAll(async () => {
     writeFile(`${pages.path}/shifted.html`, SHIFTED_PAGE),
     writeFile(`${pages.path}/sub/index.html`, SUB_PAGE),
     writeFile(`${pages.path}/crlf.html`, crlfPage),
+    writeFile(`${pages.path}/nested.html`, NESTED_PAGE),
   ])
 }, RIG_TIMEOUT_MS)
 
@@ -69,6 +72,28 @@ async function lookedUp(view: LookupView, selector: string, within?: string) {
   const lead = await lookupInPage(view, selector, within === undefined ? {} : { within })
   if ("rejected" in lead) throw new Error(`lookup rejected with ${lead.rejected}`)
   return { lead, resolved: await resolveInPage(view, lead) }
+}
+
+async function lookedUpThroughShadowRoots(view: LookupView, hosts: string[], selector: string) {
+  const lead = await view.page.evaluate(
+    async ({ bundlePath, hosts, selector }) => {
+      const bundle: { lookupSource: typeof lookupSource } = await import(
+        new URL(bundlePath, location.origin).href
+      )
+      let scope: Document | ShadowRoot = document
+      for (const host of hosts) {
+        const root: ShadowRoot | null | undefined = scope.querySelector(host)?.shadowRoot
+        if (root === null || root === undefined) throw new Error(`No open shadow root on ${host}`)
+        scope = root
+      }
+      const element = scope.querySelector(selector)
+      if (element === null) throw new Error(`No element matches ${selector}`)
+      return await bundle.lookupSource(element, new AbortController().signal)
+    },
+    { bundlePath: SOURCE_BUNDLE_PATH, hosts, selector },
+  )
+  const parsed = SourceLead.parse(lead)
+  return { lead: parsed, resolved: await resolveInPage(view, parsed) }
 }
 
 function lineHolding(text: string, needle: string): { index: number; text: string } {
@@ -152,6 +177,10 @@ test(
             { tag: "main", index: 0 },
             { tag: "fixture-shadow-label", index: 0 },
           ],
+          id: null,
+          className: null,
+          text: "",
+          url: view.page.url(),
           onPickedElement: false,
         },
       })
@@ -160,6 +189,43 @@ test(
         framework: "html",
         component: null,
         file: "index.html",
+        ...host,
+      })
+    })
+  },
+  RIG_TIMEOUT_MS,
+)
+
+test(
+  "an element in a shadow root inside another shadow root is described by the outermost light-DOM host",
+  async () => {
+    const { pages } = started()
+    const host = startTagAt(NESTED_PAGE, 'id="outer-host"')
+    await withFolderPage(pages, "/nested.html", async (view) => {
+      const { lead, resolved } = await lookedUpThroughShadowRoots(
+        view,
+        ["#outer-host", "#inner-host"],
+        "span",
+      )
+      expect(lead).toEqual({
+        confidence: "none",
+        markup: {
+          url: view.page.url(),
+          steps: [
+            { tag: "main", index: 0 },
+            { tag: "section", index: 0 },
+          ],
+          id: "outer-host",
+          className: "shell",
+          text: "Outer host text",
+          onPickedElement: false,
+        },
+      })
+      expect(resolved).toEqual({
+        confidence: "approximate",
+        framework: "html",
+        component: null,
+        file: "nested.html",
         ...host,
       })
     })
