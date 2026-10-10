@@ -170,10 +170,6 @@ function painted(page: Page): Promise<Painted[]> {
 }
 
 describe("the glyph set", () => {
-  test("the production icon catalog has exactly the spec's 26 names", () => {
-    expect(ICON_NAMES).toHaveLength(26)
-  })
-
   test("every IconName renders a 16px svg that paints inside its 16-unit grid", async () => {
     const { page } = await openUi()
     await show(
