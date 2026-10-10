@@ -162,3 +162,22 @@ test("a process removes the claims it made when it exits and leaves other claims
     }
   })
 })
+
+test("a claim naming this very process, left by an earlier file in the same worker, is reused once its port is free", async () => {
+  await withClaimsDir(async (claims) => {
+    const seen = await runAllocator(
+      claims,
+      `
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(${JSON.stringify(claims)}, { recursive: true });
+      writeFileSync(${JSON.stringify(join(claims, String(FIRST)))}, String(process.pid));
+      writeFileSync(${JSON.stringify(join(claims, String(FIRST + 1)))}, String(process.pid));
+      const bound = Bun.listen({ hostname: "127.0.0.1", port: ${FIRST}, socket: { data() {} } });
+      const port = await nextPort();
+      bound.stop(true);
+      console.log(JSON.stringify({ port }));
+    `,
+    )
+    expect(seen.port).toBe(FIRST + 1)
+  })
+})

@@ -101,6 +101,12 @@ const allocate = (() => {
         if (errnoCode(error) === "ENOENT") continue
         throw error
       }
+      // `bun test --parallel` runs many files in one worker process, each with a fresh copy of this
+      // module, so a claim naming this pid is an earlier file's and reusable once its port is free.
+      if (owner === process.pid) {
+        claimed.add(port)
+        return "own"
+      }
       if (!Number.isInteger(owner) || owner < 1 || !ownerIsDead(owner)) return "held"
       removeClaimFile(path)
     }
