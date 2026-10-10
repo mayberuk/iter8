@@ -13,34 +13,36 @@ import type { Item, UiHarness } from "./ui-assets.entry"
 const ORIGIN = "http://engine.localhost"
 const FONT_ROOT = new URL("../../../apps/overlay/assets/fonts/", import.meta.url)
 
-const ICON_NAMES = [
-  "pick",
-  "region",
-  "shot",
-  "send",
-  "x",
-  "edit",
-  "trash",
-  "grip",
-  "check",
-  "file",
-  "arrow",
-  "box",
-  "hl",
-  "undo",
-  "search",
-  "keys",
-  "term",
-  "layers",
-  "compare",
-  "eye",
-  "history",
-  "collapse",
-  "more",
-  "sun",
-  "moon",
-  "auto",
-] as const satisfies readonly IconName[]
+const ICON_CATALOG = {
+  pick: true,
+  region: true,
+  shot: true,
+  send: true,
+  x: true,
+  edit: true,
+  trash: true,
+  grip: true,
+  check: true,
+  file: true,
+  arrow: true,
+  box: true,
+  hl: true,
+  undo: true,
+  search: true,
+  keys: true,
+  term: true,
+  layers: true,
+  compare: true,
+  eye: true,
+  history: true,
+  collapse: true,
+  more: true,
+  sun: true,
+  moon: true,
+  auto: true,
+} satisfies Record<IconName, true>
+
+const ICON_NAMES = Object.keys(ICON_CATALOG) as IconName[]
 
 const STATUS_KEYS = ["queued", "delivered", "working", "done", "answered", "failed"] as const
 const METER_KEYS = ["live", "busy", "gone", "checking", "delivered", "unattached"] as const
@@ -168,9 +170,8 @@ function painted(page: Page): Promise<Painted[]> {
 }
 
 describe("the glyph set", () => {
-  test("the spec's icon list is complete and has no repeats", () => {
+  test("the production icon catalog has exactly the spec's 26 names", () => {
     expect(ICON_NAMES).toHaveLength(26)
-    expect(new Set(ICON_NAMES).size).toBe(26)
   })
 
   test("every IconName renders a 16px svg that paints inside its 16-unit grid", async () => {
