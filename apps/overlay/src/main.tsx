@@ -91,10 +91,15 @@ export function mount(input: OverlayBoot): () => void {
       }),
       effect(() => {
         if (!created.reloadNow.value) return
-        void connection
-          .flush()
-          .catch(() => {})
-          .then(() => location.reload())
+        void connection.flush().then(
+          () => location.reload(),
+          () => {
+            created.reloadNow.value = false
+            created.pushToast("A note change didn't save — the page was not reloaded", {
+              tone: "failed",
+            })
+          },
+        )
       }),
       effect(() => {
         const until = created.deliveredUntil.value

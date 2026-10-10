@@ -11,7 +11,7 @@ import {
   Round,
   TOKEN_HEADER,
 } from "@iter8/protocol"
-import type { Browser, Locator } from "playwright"
+import type { Browser, Locator, Route } from "playwright"
 import liveSessionJson from "../../../packages/protocol/fixtures/LiveSession.json"
 import noteJson from "../../../packages/protocol/fixtures/Note.json"
 import goneJson from "../../../packages/protocol/fixtures/Pairing.gone.json"
@@ -34,6 +34,14 @@ const ORPHANED = Round.parse({
   notes: orphanedJson.notes.map((note) => ({ ...note, pageId: "mockpage" })),
 })
 const SEEDED = { drafts: [DRAFT], rounds: [], agentNotes: [] }
+const THREE_DRAFTS = {
+  drafts: ["N21", "N22", "N23"].map((id) =>
+    Note.parse({ ...noteJson, id, pageId: "mockpage", body: `Body of ${id}` }),
+  ),
+  rounds: [],
+  agentNotes: [],
+}
+const PUT_DRAFT = new RegExp(`${OVERLAY_ROUTES.putDraft.path.replace(":noteId", "[^/]+")}$`)
 
 let browser: Browser
 let overlayBuild: Scratch
@@ -488,6 +496,103 @@ describe("preferences and reload", () => {
       false,
     )
     expect(await draftCount(o.overlay)).toBe("1")
+  }, 30_000)
+})
+
+describe("reload with unsaved draft writes", () => {
+  /** Opens the round sheet, focuses the second draft, switches its intent to Change and saves it. */
+  async function editSecondDraft(o: Awaited<ReturnType<typeof open>>) {
+    await o.page.keyboard.press("r")
+    await o.page.keyboard.press("j")
+    await o.page.keyboard.press("j")
+    await o.page.keyboard.press("e")
+    await o.page.keyboard.press("2")
+    await o.page.keyboard.press("Control+Enter")
+  }
+
+  async function reloadWhileWriteHeld(
+    o: Awaited<ReturnType<typeof open>>,
+    answer: (route: Route, release: Promise<void>) => Promise<void>,
+  ) {
+    await socketOpen(o)
+    let release = () => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const writes: string[] = []
+    await o.page.route(PUT_DRAFT, async (route) => {
+      writes.push(new URL(route.request().url()).pathname)
+      await answer(route, released)
+    })
+    let loads = 0
+    o.page.on("load", () => {
+      loads += 1
+    })
+    await o.page.evaluate(() => document.body.setAttribute("data-before-reload", ""))
+    await editSecondDraft(o)
+    await until("the held write", () => writes.length === 1)
+    o.mock.push({ type: "reload" })
+    o.mock.push({ type: "upstream-failure", port: 4321, url: "http://localhost:4321/" })
+    const after = o.overlay.getByRole("status").filter({ hasText: "A request to port 4321 failed" })
+    await until("the message after reload to arrive", () => after.isVisible())
+    return { release, writes, loads: () => loads }
+  }
+
+  const intents = (mock: Awaited<ReturnType<typeof open>>["mock"]) =>
+    mock.draft().map((note) => [String(note.id), String(note.intent)])
+
+  test("a reload waits for a held draft write and the reloaded page has every draft as edited", async () => {
+    const o = await open({ pairing: LIVE, pageState: THREE_DRAFTS })
+    expect(await draftCount(o.overlay)).toBe("3")
+    const held = await reloadWhileWriteHeld(o, async (route, released) => {
+      await released
+      await route.continue()
+    })
+    expect(held.writes).toEqual([`${OVERLAY_PREFIX}/drafts/N22`])
+    expect(held.loads()).toBe(0)
+    expect(await o.page.evaluate(() => document.body.hasAttribute("data-before-reload"))).toBe(true)
+    expect(intents(o.mock)).toEqual([
+      ["N21", "fix"],
+      ["N22", "fix"],
+      ["N23", "fix"],
+    ])
+
+    const loaded = o.page.waitForEvent("load", { timeout: 5000 })
+    held.release()
+    await loaded
+    expect(intents(o.mock)).toEqual([
+      ["N21", "fix"],
+      ["N22", "change"],
+      ["N23", "fix"],
+    ])
+    await until("the dock after reload", () =>
+      o.overlay.getByRole("button", { name: "Pick element" }).isVisible(),
+    )
+    expect(await o.page.evaluate(() => document.body.hasAttribute("data-before-reload"))).toBe(
+      false,
+    )
+    expect(await draftCount(o.overlay)).toBe("3")
+    expect(o.mock.draft().map((note) => note.body)).toEqual([
+      "Body of N21",
+      "Body of N22",
+      "Body of N23",
+    ])
+  }, 30_000)
+
+  test("a draft write that fails keeps the page, the drafts and says so instead of reloading", async () => {
+    const o = await open({ pairing: LIVE, pageState: THREE_DRAFTS })
+    const held = await reloadWhileWriteHeld(o, async (route, released) => {
+      await released
+      await route.fulfill({ status: 500 })
+    })
+    expect(held.loads()).toBe(0)
+    held.release()
+    const why = o.overlay.getByRole("status").filter({ hasText: /didn.t save/ })
+    await until("the failure to be said", () => why.isVisible())
+    expect(held.loads()).toBe(0)
+    expect(await o.page.evaluate(() => document.body.hasAttribute("data-before-reload"))).toBe(true)
+    expect(await draftCount(o.overlay)).toBe("3")
+    expect(o.mock.draft().length).toBe(3)
   }, 30_000)
 })
 
