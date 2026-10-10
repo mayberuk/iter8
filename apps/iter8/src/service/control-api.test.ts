@@ -1404,3 +1404,70 @@ describe("agent routes, in depth", () => {
     }
   })
 })
+
+describe("done across owners", () => {
+  async function twoOwners() {
+    const t = setup()
+    const a = await t.startSession(4821, "session-a")
+    const b = await t.startSession(5133, "session-b")
+    const pageA = (await t.openServer(a)).page
+    const pageB = (await t.openServer(b, "http://localhost:4000")).page
+    const firstRound = t.sendRound(pageB.id, "B's earlier round")
+    const secondRound = t.sendNotes(pageA.id, ["A's first note", "A's second note"])
+    const target = secondRound.notes[1]
+    if (!target) throw new Error("The seeded round has no second note")
+    const resolutions = () => t.inbox.round(secondRound.id)?.notes.map((note) => note.resolution)
+    return { t, a, b, firstRound, secondRound, target, resolutions }
+  }
+
+  test("done on a note in another owner's later round is refused and changes nothing, while its owner succeeds", async () => {
+    const { t, a, b, firstRound, secondRound, target, resolutions } = await twoOwners()
+    const open = [{ status: "open" }, { status: "open" }]
+
+    const refused = await t.post("/done", {
+      note: target.id,
+      reply: null,
+      identities: b.identities,
+      owner: null,
+    })
+    expect(refused.status).toBe(409)
+    expect<unknown>(resolutions()).toEqual(open)
+    const viaFlag = await t.post("/done", {
+      note: target.id,
+      reply: null,
+      identities: [],
+      owner: b.ownerId,
+    })
+    expect(viaFlag.status).toBe(409)
+    expect<unknown>(resolutions()).toEqual(open)
+
+    const accepted = await t.post("/done", {
+      note: target.id,
+      reply: null,
+      identities: a.identities,
+      owner: null,
+    })
+    expect(accepted.status).toBe(200)
+    expect<unknown>(DoneResult.parse(await accepted.json()).roundId).toBe(secondRound.id)
+    expect(resolutions()?.map((resolution) => resolution.status)).toEqual(["open", "done"])
+    expect(t.inbox.round(firstRound.id)?.notes[0]?.resolution).toEqual({ status: "open" })
+  })
+
+  test("done with a reply by the wrong owner is refused exactly like one without, and stores no reply", async () => {
+    const { t, b, target, resolutions } = await twoOwners()
+    const attempt = (reply: string | null) =>
+      t.post("/done", { note: target.id, reply, identities: b.identities, owner: null })
+
+    const withoutReply = await attempt(null)
+    const withReply = await attempt("B answering for A")
+    expect(withReply.status).toBe(409)
+    expect(withReply.status).toBe(withoutReply.status)
+    expect(await withReply.text()).toBe(await withoutReply.text())
+    expect<unknown>(resolutions()).toEqual([{ status: "open" }, { status: "open" }])
+    expect(
+      t.db
+        .query("SELECT COUNT(*) AS count FROM notes WHERE resolution_json LIKE '%B answering%'")
+        .get(),
+    ).toEqual({ count: 0 })
+  })
+})
