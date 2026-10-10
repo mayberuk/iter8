@@ -134,14 +134,18 @@ test("all 64 plant labels are issued before suffixes and retired labels survive 
 test("a label is never reused even when arbitrary pages are removed", () => {
   fc.assert(
     fc.property(fc.array(fc.boolean(), { minLength: 1, maxLength: 80 }), (remove) => {
-      using db = openStore(":memory:")
-      const pages = createPages(db, { randomToken: () => PageToken.parse("a".repeat(43)) })
-      const issued = new Set<string>()
-      for (const [index, shouldRemove] of remove.entries()) {
-        const record = pages.open(server(`http://localhost:${5000 + index}`))
-        expect(issued.has(record.page.id)).toBe(false)
-        issued.add(record.page.id)
-        if (shouldRemove) db.query("DELETE FROM pages WHERE id = ?").run(record.page.id)
+      const db = openStore(":memory:")
+      try {
+        const pages = createPages(db, { randomToken: () => PageToken.parse("a".repeat(43)) })
+        const issued = new Set<string>()
+        for (const [index, shouldRemove] of remove.entries()) {
+          const record = pages.open(server(`http://localhost:${5000 + index}`))
+          expect(issued.has(record.page.id)).toBe(false)
+          issued.add(record.page.id)
+          if (shouldRemove) db.query("DELETE FROM pages WHERE id = ?").run(record.page.id)
+        }
+      } finally {
+        db.close()
       }
     }),
     { numRuns: 30 },
