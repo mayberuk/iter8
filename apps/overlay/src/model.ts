@@ -76,7 +76,7 @@ export type Toast = {
   text: string
   tone: ToastTone
   action: "undo" | null
-  ttlMs: number
+  leavesAt: number
 }
 
 export type AnchorResolution =
@@ -293,7 +293,7 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
       text,
       tone: options.tone ?? "plain",
       action: options.action ?? null,
-      ttlMs: options.ttlMs ?? TOAST_MS,
+      leavesAt: now() + (options.ttlMs ?? TOAST_MS),
     }
     toasts.value = [...toasts.value, toast].slice(-MAX_TOASTS)
     return toast.id

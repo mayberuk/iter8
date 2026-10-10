@@ -80,7 +80,7 @@ export function mount(input: OverlayBoot): () => void {
       model.applyHello(hello)
       return
     }
-    const created = createOverlayModel({ hello, now: Date.now })
+    const created = createOverlayModel({ hello, now: () => Date.now() })
     model = created
     disposers.push(
       effect(() => {

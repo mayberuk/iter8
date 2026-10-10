@@ -35,10 +35,11 @@ function ToastRow({ toast }: { toast: Toast }) {
   const { model, connection } = useOverlay()
   const [leaving, setLeaving] = useState(false)
 
+  // Counted from the push, not from this effect, which Preact runs only after the next paint.
   useEffect(() => {
-    const timer = setTimeout(() => setLeaving(true), toast.ttlMs)
+    const timer = setTimeout(() => setLeaving(true), Math.max(0, toast.leavesAt - Date.now()))
     return () => clearTimeout(timer)
-  }, [toast.ttlMs])
+  }, [toast.leavesAt])
 
   useEffect(() => {
     if (!leaving) return

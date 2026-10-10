@@ -562,7 +562,11 @@ describe("draft edits", () => {
     m.noteSaved(draft(42))
     m.noteDeleted(NoteId.parse("N41"))
     expect(m.draftOrder.value).toEqual([NoteId.parse("N14"), NoteId.parse("N42")])
-    expect(m.toasts.value.at(-1)).toMatchObject({ text: "Note 2 deleted", action: "undo" })
+    expect(m.toasts.value.at(-1)).toMatchObject({
+      text: "Note 2 deleted",
+      action: "undo",
+      leavesAt: T0 + 6000,
+    })
     const taken = m.takeUndo()
     expect(taken?.index).toBe(1)
     expect(m.takeUndo()).toBeNull()
