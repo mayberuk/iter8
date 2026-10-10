@@ -1,0 +1,122 @@
+.veil {
+  position: fixed;
+  inset: 0;
+  background: var(--veil);
+  opacity: 0;
+  transition: opacity 0.18s var(--out);
+}
+.veil.on {
+  opacity: 1;
+}
+.ring {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  box-shadow:
+    0 0 0 1.5px var(--cobalt),
+    2px 3px 0 1.5px var(--cobalt-d);
+}
+.ring.on {
+  opacity: 1;
+}
+.ring i {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 0 solid var(--cobalt-d);
+}
+.ring i:nth-child(1) {
+  left: -7px;
+  top: -7px;
+  border-left-width: 2px;
+  border-top-width: 2px;
+  border-top-left-radius: 3px;
+}
+.ring i:nth-child(2) {
+  right: -7px;
+  top: -7px;
+  border-right-width: 2px;
+  border-top-width: 2px;
+  border-top-right-radius: 3px;
+}
+.ring i:nth-child(3) {
+  left: -7px;
+  bottom: -7px;
+  border-left-width: 2px;
+  border-bottom-width: 2px;
+  border-bottom-left-radius: 3px;
+}
+.ring i:nth-child(4) {
+  right: -7px;
+  bottom: -7px;
+  border-right-width: 2px;
+  border-bottom-width: 2px;
+  border-bottom-right-radius: 3px;
+}
+.ring .wtag,
+.ring .htag {
+  position: absolute;
+  font: 500 10px / 1 var(--mono);
+  color: var(--on-accent);
+  background: var(--cobalt);
+  padding: 3px 5px;
+  border-radius: 4px;
+  box-shadow: 0 2px 0 var(--cobalt-d);
+}
+.ring .wtag {
+  left: 50%;
+  top: -24px;
+  transform: translateX(-50%);
+}
+.ring .htag {
+  right: -14px;
+  top: 50%;
+  transform: translate(100%, -50%);
+}
+.ring.notags .wtag,
+.ring.notags .htag {
+  display: none;
+}
+.ring.region {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(49, 96, 228, 0.08) 0 6px,
+    transparent 6px 12px
+  );
+}
+.mark {
+  position: fixed;
+  left: 0;
+  top: 0;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1.5px var(--cobalt),
+    inset 0 0 0 9999px rgba(49, 96, 228, 0.05);
+  pointer-events: none;
+}
+.mark b {
+  position: absolute;
+  left: -10px;
+  top: -10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--cobalt);
+  color: var(--on-accent);
+  display: grid;
+  place-items: center;
+  font: 600 10px / 1 var(--mono);
+  box-shadow: 0 2px 0 var(--cobalt-d);
+}
+.chip .hints .count {
+  color: var(--cobalt);
+  font-weight: 500;
+}
+.chip .comp.tag {
+  color: var(--ink-2);
+}

@@ -1,0 +1,276 @@
+.composer {
+  width: 356px;
+  padding: 0;
+  overflow: hidden;
+  transform-origin: var(--ox, left) top;
+}
+.composer.on {
+  transition:
+    opacity 0.14s,
+    transform 0.24s var(--spring),
+    left 0.1s linear,
+    top 0.1s linear;
+}
+.cmp-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+.cmp-h .comp {
+  font: 600 12px var(--mono);
+  color: var(--cobalt-d);
+  white-space: nowrap;
+}
+.cmp-h .nm {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.cmp-h .dim {
+  font: 400 11px var(--mono);
+  color: var(--mute);
+  white-space: nowrap;
+}
+.cmp-src {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  font: 400 11.5px var(--mono);
+  color: var(--mute);
+  white-space: nowrap;
+}
+.cmp-src svg {
+  flex: none;
+  color: var(--faint);
+}
+.cmp-src .file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.cmp-src .file b {
+  font-weight: 600;
+}
+.cmp-src .pending {
+  flex: 1;
+  color: var(--faint);
+}
+.cmp-src .conf {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--cobalt);
+  color: var(--cobalt-d);
+  font: 500 10.5px / 1.2 var(--mono);
+}
+.cmp-src.uncertain .file {
+  color: var(--mute);
+}
+.cmp-src.uncertain .conf {
+  border-style: dashed;
+  border-color: var(--edge-2);
+  color: var(--mute);
+}
+.intents {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 12px 12px 2px;
+}
+.intent {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 58px;
+  padding-top: 2px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  box-shadow:
+    0 3px 0 var(--edge),
+    var(--top);
+  transition:
+    transform 0.09s var(--press),
+    box-shadow 0.09s var(--press),
+    background 0.12s,
+    border-color 0.12s;
+}
+.intent.fix {
+  --w: var(--fix-w);
+  --cd: var(--fix-d);
+}
+.intent.change {
+  --w: var(--change-w);
+  --cd: var(--change-d);
+}
+.intent.question {
+  --w: var(--cobalt-wash);
+  --cd: var(--question-d);
+}
+.intent.keep {
+  --w: var(--keep-w);
+  --cd: var(--keep-d);
+}
+.intent:hover {
+  background: var(--raised);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 var(--edge);
+}
+.intent:active {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 var(--edge);
+}
+.intent .gl {
+  width: 24px;
+  height: 24px;
+}
+.intent kbd {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  min-width: 14px;
+  height: 14px;
+  font-size: 9px;
+  padding: 0 3px;
+  box-shadow: 0 1px 0 var(--base-2);
+  opacity: 0.8;
+}
+.intent[aria-checked="true"] {
+  background: var(--w);
+  border-color: var(--cd);
+  color: var(--ink);
+  font-weight: 600;
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--cd);
+}
+.cmp-body {
+  padding: 12px 12px 0;
+}
+.cmp-body textarea {
+  display: block;
+  width: 100%;
+  min-height: 76px;
+  resize: none;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  caret-color: var(--cobalt);
+  box-shadow: inset 0 2px 0 var(--well);
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+.cmp-body textarea::placeholder {
+  color: var(--faint);
+}
+.cmp-body textarea:focus {
+  outline: none;
+  border-color: var(--cobalt);
+  box-shadow:
+    inset 0 2px 0 var(--cobalt-wash),
+    0 0 0 3px var(--cobalt-wash);
+}
+.err {
+  height: 0;
+  overflow: hidden;
+  color: var(--fix-d);
+  font-size: 12px;
+  transition: height 0.14s;
+}
+.err.on {
+  height: 18px;
+  padding-top: 2px;
+}
+.attach {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.attach label {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.attach .tw {
+  width: 84px;
+  height: 52px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  box-shadow: 2px 2px 0 var(--base-2);
+  transition:
+    opacity 0.16s,
+    transform 0.2s var(--spring);
+  background: var(--paper-2);
+}
+.attach .tw img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.attach .tw.off {
+  opacity: 0.25;
+  transform: scale(0.92);
+  filter: grayscale(1);
+}
+.cmp-f {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  background: var(--paper-2);
+  border-top: 1px solid var(--line);
+}
+.cmp-f .hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--mute);
+  font-size: 12px;
+}
+.cmp-f .spacer {
+  flex: 1;
+}
+.shake {
+  animation: shake 0.34s var(--out);
+}
+@keyframes shake {
+  20% {
+    transform: translateX(-5px);
+  }
+  45% {
+    transform: translateX(4px);
+  }
+  70% {
+    transform: translateX(-2px);
+  }
+}
