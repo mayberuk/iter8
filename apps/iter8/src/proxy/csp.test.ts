@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import fc from "fast-check"
-import { amendCsp } from "./csp"
+import { agreedNonce, amendCsp } from "./csp"
 
 const HASH = "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
 const HASH_SOURCE = `'sha256-${HASH}'`
@@ -132,6 +132,38 @@ test("each policy of a comma-separated header value is amended", () => {
   )
   expect(scriptSources(first ?? "")).toContain(HASH_SOURCE)
   expect(scriptSources(second ?? "")).toContain(HASH_SOURCE)
+})
+
+describe("the nonce an injected script can carry", () => {
+  test("a nonce in the effective script directive is returned", () => {
+    expect(agreedNonce(["script-src 'nonce-abc' 'strict-dynamic'"])).toBe("abc")
+    expect(agreedNonce(["default-src 'nonce-abc'"])).toBe("abc")
+    expect(agreedNonce(["script-src 'self'; script-src-elem 'NONCE-abc'"])).toBe("abc")
+  })
+
+  test("a nonce outside the effective script directive is ignored", () => {
+    expect(agreedNonce(["script-src 'self'; script-src-elem https://cdn.example"])).toBeUndefined()
+    expect(agreedNonce(["script-src-elem 'self'; script-src 'nonce-abc'"])).toBeUndefined()
+    expect(agreedNonce(["script-src 'self'; default-src 'nonce-abc'"])).toBeUndefined()
+    expect(agreedNonce(["style-src 'nonce-abc'"])).toBeUndefined()
+  })
+
+  test("no policy, or no nonce, gives none", () => {
+    expect(agreedNonce([])).toBeUndefined()
+    expect(agreedNonce(["script-src 'sha256-abc' 'strict-dynamic'"])).toBeUndefined()
+  })
+
+  test("every policy with a nonce must accept it, across values and within a comma list", () => {
+    expect(agreedNonce(["script-src 'nonce-a'", "script-src 'nonce-b'"])).toBeUndefined()
+    expect(agreedNonce(["script-src 'nonce-a', script-src 'nonce-b'"])).toBeUndefined()
+    expect(agreedNonce(["script-src 'nonce-a' 'nonce-b'", "script-src 'nonce-b'"])).toBe("b")
+    expect(agreedNonce(["script-src 'self'", "script-src 'nonce-a'"])).toBe("a")
+  })
+
+  test("a value that is not a plain base64 token is never returned", () => {
+    expect(agreedNonce(["script-src 'nonce-a\"b'"])).toBeUndefined()
+    expect(agreedNonce(["script-src 'nonce-a<b'"])).toBeUndefined()
+  })
 })
 
 const source = fc.constantFrom(

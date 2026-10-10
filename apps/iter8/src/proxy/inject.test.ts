@@ -230,3 +230,102 @@ describe("headers", () => {
     expect(out).toContain(reportOnly)
   })
 })
+
+describe("the script's nonce", () => {
+  const meta = (policy: string) => `<meta http-equiv="Content-Security-Policy" content="${policy}">`
+
+  const injectedNonce = async (res: Response) => {
+    const scripts = await scriptsIn(await res.text())
+    expect(scripts).toHaveLength(1)
+    return scripts[0]?.attrs.nonce
+  }
+
+  test("a header CSP nonce is carried by the injected script", async () => {
+    const res = await injectBoot(
+      html("<head></head>", {
+        "content-security-policy": "script-src 'nonce-r4nd0m' 'strict-dynamic'; object-src 'none'",
+      }),
+      boot,
+      ORIGIN,
+    )
+    expect(await injectedNonce(res)).toBe("r4nd0m")
+  })
+
+  test("a meta CSP nonce is carried by the injected script", async () => {
+    const markup = `<head>${meta("script-src 'nonce-m3ta+/=' 'strict-dynamic'")}</head>`
+    expect(await injectedNonce(await injectBoot(html(markup), boot, ORIGIN))).toBe("m3ta+/=")
+  })
+
+  test("the nonce comes from the effective directive, here default-src", async () => {
+    const markup = `<head>${meta("default-src 'nonce-fallback'")}</head>`
+    expect(await injectedNonce(await injectBoot(html(markup), boot, ORIGIN))).toBe("fallback")
+  })
+
+  test("without a nonce the script has no nonce attribute", async () => {
+    for (const headers of [
+      {},
+      { "content-security-policy": "script-src 'self'" },
+      { "content-security-policy": "script-src 'sha256-abc' 'strict-dynamic'" },
+      { "content-security-policy-report-only": "script-src 'nonce-reported'" },
+    ]) {
+      const [script] = await scriptsIn(
+        await (await injectBoot(html("<head></head>", headers), boot, ORIGIN)).text(),
+      )
+      expect(script?.attrs).toEqual({ type: "module" })
+    }
+  })
+
+  test("a nonce on an unrelated directive is not used", async () => {
+    const res = await injectBoot(
+      html("<head></head>", { "content-security-policy": "style-src 'nonce-css'" }),
+      boot,
+      ORIGIN,
+    )
+    expect(await injectedNonce(res)).toBeUndefined()
+  })
+
+  test("policies with different nonces give no nonce", async () => {
+    const markup = `<head>${meta("script-src 'nonce-two' 'strict-dynamic'")}</head>`
+    const res = await injectBoot(
+      html(markup, { "content-security-policy": "script-src 'nonce-one' 'strict-dynamic'" }),
+      boot,
+      ORIGIN,
+    )
+    expect(await injectedNonce(res)).toBeUndefined()
+  })
+
+  test("policies that share a nonce give that nonce", async () => {
+    const markup = `<head>${meta("script-src 'nonce-two' 'nonce-one'")}</head>`
+    const res = await injectBoot(
+      html(markup, { "content-security-policy": "script-src 'nonce-one' 'strict-dynamic'" }),
+      boot,
+      ORIGIN,
+    )
+    expect(await injectedNonce(res)).toBe("one")
+  })
+
+  test("a policy without a nonce does not veto another policy's nonce", async () => {
+    const markup = `<head>${meta("script-src 'self'")}</head>`
+    const res = await injectBoot(
+      html(markup, { "content-security-policy": "script-src 'nonce-one' 'strict-dynamic'" }),
+      boot,
+      ORIGIN,
+    )
+    expect(await injectedNonce(res)).toBe("one")
+  })
+
+  test("a meta CSP after the injection point is not consulted", async () => {
+    const markup = `<head></head><body>${meta("script-src 'nonce-late'")}</body>`
+    expect(await injectedNonce(await injectBoot(html(markup), boot, ORIGIN))).toBeUndefined()
+  })
+
+  test("the nonce is still added when the script goes into body", async () => {
+    const markup = `<body><p>x</p></body>`
+    const res = await injectBoot(
+      html(markup, { "content-security-policy": "script-src 'nonce-b0dy' 'strict-dynamic'" }),
+      boot,
+      ORIGIN,
+    )
+    expect(await injectedNonce(res)).toBe("b0dy")
+  })
+})

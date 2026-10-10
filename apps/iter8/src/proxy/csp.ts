@@ -1,6 +1,7 @@
 type Directive = { name: string; sources: string[]; raw: string }
 
 const HASH_OR_NONCE = /^'(nonce|sha256|sha384|sha512)-/i
+const NONCE = /^'nonce-([A-Za-z0-9+/_-]+=*)'$/i
 
 function parse(policy: string): Directive[] {
   return policy
@@ -83,6 +84,26 @@ function amendPolicy(policy: string, scriptHash: string, pageOrigin: string): st
   amend(["img-src", "default-src"], (sources) => (has(sources, "blob:") ? [] : ["blob:"]))
 
   return changed ? directives.map((directive) => directive.raw).join("; ") : policy
+}
+
+function scriptNonces(policy: string): string[] {
+  const directives = parse(policy)
+  const effective = ["script-src-elem", "script-src", "default-src"]
+    .map((name) => directives.find((directive) => directive.name === name))
+    .find((directive) => directive !== undefined)
+  return (effective?.sources ?? []).flatMap((source) => NONCE.exec(source)?.[1] ?? [])
+}
+
+/**
+ * The nonce an injected script can carry to be allowed by every enforcing policy whose effective
+ * script directive has one, or undefined when there is none or the policies share none. Takes
+ * header values, so a comma-separated list counts as several policies.
+ */
+export function agreedNonce(values: string[]): string | undefined {
+  const sets = values
+    .flatMap((value) => value.split(",").map(scriptNonces))
+    .filter((nonces) => nonces.length > 0)
+  return sets[0]?.find((nonce) => sets.every((set) => set.includes(nonce)))
 }
 
 /**

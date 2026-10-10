@@ -1,5 +1,5 @@
 import { type OverlayBoot, renderBootScript } from "@iter8/protocol"
-import { amendCsp } from "./csp"
+import { agreedNonce, amendCsp } from "./csp"
 
 const CSP = "content-security-policy"
 
@@ -15,11 +15,19 @@ export async function injectBoot(
 ): Promise<Response> {
   const text = renderBootScript(boot)
   const scriptHash = new Bun.CryptoHasher("sha256").update(text).digest("base64")
-  const tag = `<script type="module">${text}</script>`
-  let injected = false
-
   const headers = new Headers(res.headers)
   const policy = headers.get(CSP)
+  const enforcing = policy === null ? [] : [policy]
+  let injected = false
+
+  // Under 'strict-dynamic' a hash-allowed inline module cannot import the overlay; the nonce
+  // makes its import allowed. A meta CSP parsed after the tag is written is not consulted.
+  const tag = () => {
+    const nonce = agreedNonce(enforcing)
+    const attribute = nonce === undefined ? "" : ` nonce="${nonce}"`
+    return `<script type="module"${attribute}>${text}</script>`
+  }
+
   if (policy !== null) headers.set(CSP, amendCsp(policy, scriptHash, pageOrigin))
   headers.delete("content-length")
   headers.delete("etag")
@@ -32,6 +40,7 @@ export async function injectBoot(
         const content = meta.getAttribute("content")
         if (meta.getAttribute("http-equiv")?.trim().toLowerCase() !== CSP || content === null)
           return
+        enforcing.push(content)
         meta.setAttribute("content", amendCsp(content, scriptHash, pageOrigin))
       },
     })
@@ -41,7 +50,7 @@ export async function injectBoot(
         // takes the script instead.
         head.onEndTag((end) => {
           if (injected) return
-          end.before(tag, { html: true })
+          end.before(tag(), { html: true })
           injected = true
         })
       },
@@ -49,13 +58,13 @@ export async function injectBoot(
     .on("body", {
       element(body) {
         if (injected) return
-        body.prepend(tag, { html: true })
+        body.prepend(tag(), { html: true })
         injected = true
       },
     })
     .onDocument({
       end(end) {
-        if (!injected) end.append(tag, { html: true })
+        if (!injected) end.append(tag(), { html: true })
       },
     })
     .transform(new Response(res.body, { status: res.status, statusText: res.statusText, headers }))
