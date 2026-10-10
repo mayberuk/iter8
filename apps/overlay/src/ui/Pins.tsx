@@ -468,7 +468,8 @@ export function Pins(): JSX.Element | null {
     const resolution = anchored.get(note.id)
     if (!resolution) continue
     if (resolution.status !== "anchored") {
-      lost.push(source)
+      // A fix usually rewrites the element it was about, so a resolved note losing its element is expected.
+      if (note.resolution.status === "open") lost.push(source)
       continue
     }
     const count = anchorsOf(note).length

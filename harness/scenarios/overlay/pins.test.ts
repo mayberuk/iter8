@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { type ElementAnchor, Note, OVERLAY_ROUTES, Pairing } from "@iter8/protocol"
+import { type ElementAnchor, Note, OVERLAY_ROUTES, Pairing, Round } from "@iter8/protocol"
 import type { Browser, Locator, Page } from "playwright"
 import noteJson from "../../../packages/protocol/fixtures/Note.json"
 import unanchoredJson from "../../../packages/protocol/fixtures/Note.unanchored.json"
@@ -767,6 +767,136 @@ describe("agent pins", () => {
     expect(text).toContain("This footer link points at the old docs.")
     expect(await pinNamed(o.overlay, "Claude note").count()).toBe(0)
     expect(await movedList(o.overlay).count()).toBe(0)
+  }, 30_000)
+})
+
+describe("resolved notes", () => {
+  const SENT_BODY = "The price wraps onto two lines at this width; keep it on one."
+  const OPEN_BODY = "Details need the same treatment."
+  const DONE = { status: "done", at: "2026-10-09T18:45:00.000Z" } as const
+  const ANSWERED = {
+    status: "answered",
+    reply: "Yes, it stays on one line.",
+    at: "2026-10-09T18:46:00.000Z",
+  } as const
+
+  const roundSheet = (o: Opened) => o.overlay.getByRole("complementary", { name: "Round sheet" })
+  const notePins = (o: Opened) => o.overlay.getByRole("button", { name: /^Note \d+, / })
+
+  async function sendFromSheet(o: Opened) {
+    const sheet = roundSheet(o)
+    await o.overlay.getByRole("button", { name: "Open round sheet" }).click()
+    await until("the round sheet", () => sheet.isVisible())
+    await sheet.getByRole("button", { name: "Send round" }).click()
+    await until("the sent round in History", () =>
+      sheet.getByRole("status", { name: "Queued", exact: true }).isVisible(),
+    )
+    return sheet
+  }
+
+  function resolved(o: Opened, resolutions: Record<string, Note["resolution"]>) {
+    const [round] = o.mock.rounds()
+    if (!round) throw new Error("no round was sent")
+    return Round.parse({
+      ...round,
+      notes: round.notes.map((note) => ({
+        ...note,
+        resolution: resolutions[note.id] ?? note.resolution,
+      })),
+    })
+  }
+
+  const reword = (page: Page, selectors: string[]) =>
+    page.evaluate((targets) => {
+      for (const selector of targets) {
+        const el = document.querySelector(selector)
+        if (!el) throw new Error(`nothing matches ${selector}`)
+        el.textContent = `${el.textContent} (reworded)`
+      }
+    }, selectors)
+
+  test("a sent note that lost its element is listed until the agent marks it done", async () => {
+    const o = await open(seed([draft("N21", OVERVIEW)]))
+    const sheet = await sendFromSheet(o)
+    await until("the sent pin", () => notePins(o).first().isVisible())
+
+    await reword(o.page, ["h2#overview-heading"])
+    const list = movedList(o.overlay)
+    await until("the moved list", () => list.isVisible())
+    expect(await list.getByRole("listitem").innerText()).toContain(SENT_BODY)
+    expect(await o.overlay.getByText("1 note lost its element").isVisible()).toBe(true)
+
+    await pushUntil(o, { type: "round", round: resolved(o, { N21: DONE }) }, () =>
+      sheet.getByRole("status", { name: "done", exact: true }).isVisible(),
+    )
+    await until(
+      "the lost panel to go",
+      async () => (await o.overlay.locator(".lost").count()) === 0,
+    )
+    expect(await notePins(o).count()).toBe(0)
+  }, 30_000)
+
+  test("an answered note whose element changes after the answer never enters the lost panel, while a still-open note does", async () => {
+    const o = await open(seed([draft("N21", OVERVIEW), draft("N22", DETAILS, { body: OPEN_BODY })]))
+    const sheet = await sendFromSheet(o)
+    await pushUntil(o, { type: "round", round: resolved(o, { N21: ANSWERED }) }, () =>
+      sheet.getByRole("status", { name: "answered", exact: true }).isVisible(),
+    )
+    await until("both pins", async () => (await notePins(o).count()) === 2)
+
+    await reword(o.page, ["h2#overview-heading", "h2#details-heading"])
+    await until("the open note to be listed", () =>
+      o.overlay.getByText("1 note lost its element").isVisible(),
+    )
+    const rows = movedList(o.overlay).getByRole("listitem")
+    expect(await rows.count()).toBe(1)
+    expect(await rows.innerText()).toContain(OPEN_BODY)
+    expect(await o.overlay.locator(".lost").getByText(SENT_BODY).count()).toBe(0)
+    expect(await notePins(o).count()).toBe(0)
+  }, 40_000)
+
+  for (const [status, resolution] of [
+    ["done", DONE],
+    ["answered", ANSWERED],
+  ] as const) {
+    test(`a ${status} note whose element is unchanged keeps its pin after a re-anchoring pass`, async () => {
+      const o = await open(
+        seed([draft("N21", OVERVIEW), draft("N22", DETAILS, { body: OPEN_BODY })]),
+      )
+      const sheet = await sendFromSheet(o)
+      await pushUntil(o, { type: "round", round: resolved(o, { N21: resolution }) }, () =>
+        sheet.getByRole("status", { name: status, exact: true }).isVisible(),
+      )
+      await until("both pins", async () => (await notePins(o).count()) === 2)
+
+      await reword(o.page, ["h2#details-heading"])
+      await until("the open note to be listed", () =>
+        o.overlay.getByText("1 note lost its element").isVisible(),
+      )
+      const rows = movedList(o.overlay).getByRole("listitem")
+      expect(await rows.count()).toBe(1)
+      expect(await rows.innerText()).toContain(OPEN_BODY)
+
+      expect(await notePins(o).count()).toBe(1)
+      const pin = notePins(o).first()
+      const target = await rectOf(o.page, "h2#overview-heading")
+      const at = await centre(pin)
+      expect(Math.abs(at.x - (target.left + 2))).toBeLessThanOrEqual(2)
+      expect(Math.abs(at.y - (target.top + 2))).toBeLessThanOrEqual(2)
+      expect(await o.overlay.locator(".lost").getByText(SENT_BODY).count()).toBe(0)
+    }, 40_000)
+  }
+
+  test("an open draft whose heading text changes is listed as moved", async () => {
+    const o = await open(seed([draft("N21", OVERVIEW)]))
+    const pin = pinNamed(o.overlay, "Note 1, Fix")
+    await until("the pin", () => pin.isVisible())
+
+    await reword(o.page, ["h2#overview-heading"])
+    const list = movedList(o.overlay)
+    await until("the moved list", () => list.isVisible())
+    expect(await list.getByRole("listitem").innerText()).toContain("Moved")
+    expect(await pin.count()).toBe(0)
   }, 30_000)
 })
 
