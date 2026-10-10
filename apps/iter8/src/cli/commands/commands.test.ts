@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite"
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   type Capture,
@@ -9,7 +9,11 @@ import {
   DraftBody,
   ExitCode,
   formatPointer,
+  HookEndReason,
+  HookSource,
   IdempotencyKey,
+  Intent,
+  LANDING_PATH,
   OpenResult,
   type OwnerId,
   type PageId,
@@ -232,6 +236,7 @@ function setup() {
     screenshots,
     owners,
     waiters,
+    machineId,
     pid,
   }
 }
@@ -988,5 +993,381 @@ describe("control client", () => {
     } finally {
       await server.stop(true)
     }
+  })
+})
+
+describe("show text output", () => {
+  test("names the round, the page and every note's authored body, as the protocol data has them", async () => {
+    const state = setup()
+    await state.start()
+    const page = await state.openPage()
+    const round = state.sendMany(page.id, [
+      { body: "Heading is too small on mobile" },
+      { body: "Button label wraps" },
+      { body: "Footer link colour fails contrast" },
+    ])
+    await state.run("show", [round.id, "--json"])
+    const data = ShowResult.parse(JSON.parse(state.stdout.join("")))
+    state.clear()
+    expect(data.notes).toHaveLength(3)
+
+    await state.run("show", [round.id])
+    expect(state.exits).toEqual([ExitCode.ok])
+    const text = state.stdout.join("")
+    expect(text).toContain(`Round ${data.round.id}`)
+    expect(text).toContain(`Page: ${data.round.pageId}`)
+    for (const { authored } of data.notes) {
+      expect(text).toContain(authored.id)
+      expect(text).toContain(authored.body)
+    }
+    expect(text).not.toContain("undefined")
+  })
+})
+
+describe("hook wait response failures", () => {
+  test.each([
+    ["a body that is not JSON", () => new Response("{broken", { status: 200 })],
+    [
+      "a body stream that fails after the headers",
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("connection reset"))
+            },
+          }),
+          { status: 200 },
+        ),
+    ],
+  ])("%s exits unavailable, once, without reconnecting", async (_name, reply) => {
+    const state = setup()
+    await state.start()
+    state.clear()
+    const sent: string[] = []
+    const broken = hc<ControlApp>("http://iter8", {
+      fetch: async (input: RequestInfo | URL) => {
+        sent.push(new URL(String(input)).pathname)
+        return reply()
+      },
+    })
+    state.deps.connect = async (options) => {
+      state.connections.push(options)
+      return broken
+    }
+    await state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "600"])
+    expect(state.exits).toEqual([ExitCode.serviceUnavailable])
+    expect(state.connections).toEqual([{ start: true }])
+    expect(sent).toEqual(["/hook/wait"])
+    expect(state.stdout).toEqual([])
+    expect(state.stderr).toEqual(["Lost iter8 control connection while waiting\n"])
+  })
+})
+
+describe("note and done requests", () => {
+  test("note sends exactly the given intent, body, every hop and the optional fields it was given", async () => {
+    const state = setup()
+    const pairing = await state.start("claude")
+    const page = await state.openPage()
+    await state.run("note", [
+      page.id,
+      "--intent",
+      "question",
+      "--body",
+      "Should this card keep its shadow?",
+      "--at",
+      "x-shell",
+      "--at",
+      "x-card >> .inner",
+      "--at",
+      "h2",
+      "--role",
+      "heading",
+      "--name",
+      "Pricing",
+      "--text",
+      "Pricing that scales",
+      "--json",
+    ])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.requests[0]?.path).toBe("/note")
+    expect(state.requests[0]?.body).toEqual({
+      identities: [{ pid: 9001, startedAt: "linux:1:9001" }],
+      owner: null,
+      page: page.id,
+      intent: "question",
+      body: "Should this card keep its shadow?",
+      at: ["x-shell", "x-card >> .inner", "h2"],
+      role: "heading",
+      name: "Pricing",
+      text: "Pricing that scales",
+    })
+    const posted = JSON.parse(state.stdout.join("")).note
+    expect(posted.author.owner).toBe(pairing.owner)
+    expect(posted.body).toBe("Should this card keep its shadow?")
+  })
+
+  test("note leaves omitted optional fields out of the request", async () => {
+    const state = setup()
+    await state.start("claude")
+    const page = await state.openPage()
+    await state.run("note", [page.id, "--intent", "fix", "--body", "Plain", "--at", "h1"])
+    expect(state.exits).toEqual([ExitCode.ok])
+    const body = state.requests[0]?.body as Record<string, unknown>
+    expect(Object.keys(body).sort()).toEqual(
+      ["at", "body", "identities", "intent", "owner", "page"].sort(),
+    )
+    state.clear()
+    await state.run("note", [
+      page.id,
+      "--intent",
+      "fix",
+      "--body",
+      "Role",
+      "--at",
+      "h1",
+      "--name",
+      "N",
+    ])
+    const named = state.requests[0]?.body as Record<string, unknown>
+    expect(Object.keys(named)).toContain("name")
+    expect(Object.keys(named)).not.toContain("role")
+    expect(Object.keys(named)).not.toContain("text")
+  })
+
+  test("done --reply sends the exact reply text and the service stores it", async () => {
+    const state = setup()
+    await state.start()
+    const page = await state.openPage()
+    const round = state.send(page.id)
+    const note = round.notes[0]
+    if (!note) throw new Error("Missing note")
+    const reply = '  Moved the padding to 12px — "tight" ✓  '
+
+    await state.run("done", [note.id, "--reply", reply])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.requests[0]?.body).toMatchObject({ note: note.id, reply })
+    expect(state.inbox.round(round.id)?.notes[0]?.resolution).toEqual({
+      status: "answered",
+      reply,
+      at: "2026-10-09T18:00:00.000Z",
+    })
+  })
+})
+
+describe("flag validation", () => {
+  const validArgs = (pageId: string): Array<[string, string[]]> => [
+    ["hook start", ["--pid", "9001", "--label", "session-9001", "--source", "startup"]],
+    ["hook prompt", ["--pid", "9001"]],
+    ["hook stop", ["--pid", "9001"]],
+    ["hook wait", ["--pid", "9001", "--timeout-seconds", "0"]],
+    ["hook end", ["--pid", "9001", "--label", "session-9001", "--reason", "logout"]],
+    ["note", [pageId, "--intent", "fix", "--body", "Body", "--at", "h1"]],
+  ]
+  const argsOf = (name: string, args: string[]) => {
+    const [root = "", child] = name.split(" ")
+    return { root, args: child ? [child, ...args] : args }
+  }
+  const without = (args: string[], flag: string) => {
+    const kept: string[] = []
+    for (let index = 0; index < args.length; index++) {
+      if (args[index] === `--${flag}`) index++
+      else kept.push(args[index] ?? "")
+    }
+    return kept
+  }
+  const withValue = (args: string[], flag: string, value: string) =>
+    args.map((arg, index) => (args[index - 1] === `--${flag}` ? value : arg))
+
+  async function fresh() {
+    const state = setup()
+    await state.start()
+    const page = await state.openPage()
+    return { state, page }
+  }
+
+  test("each command succeeds with all-valid args, and fails with usage naming the one flag left out", async () => {
+    for (const [name] of validArgs("page")) {
+      const baseline = await fresh()
+      const [, args = []] = validArgs(baseline.page.id).find(([entry]) => entry === name) ?? []
+      const { root, args: full } = argsOf(name, args)
+      await baseline.state.run(root, full)
+      expect({ name, exits: baseline.state.exits }).toEqual({ name, exits: [ExitCode.ok] })
+
+      const required = CLI_SURFACE[name as keyof typeof CLI_SURFACE].flags.filter(
+        (flag) => flag.required,
+      )
+      for (const flag of required) {
+        const { state, page } = await fresh()
+        const [, valid = []] = validArgs(page.id).find(([entry]) => entry === name) ?? []
+        const target = argsOf(name, without(valid, flag.name))
+        await state.run(target.root, target.args)
+        expect({ name, flag: flag.name, exits: state.exits }).toEqual({
+          name,
+          flag: flag.name,
+          exits: [ExitCode.usage],
+        })
+        expect(state.stderr.join("")).toContain(`--${flag.name}`)
+        expect(state.connections).toEqual([])
+      }
+    }
+  })
+
+  test("an invalid intent, source or reason fails with usage naming the flag, with otherwise-valid args", async () => {
+    for (const [name, flag] of [
+      ["note", "intent"],
+      ["hook start", "source"],
+      ["hook end", "reason"],
+    ] as const) {
+      const { state, page } = await fresh()
+      const [, valid = []] = validArgs(page.id).find(([entry]) => entry === name) ?? []
+      const target = argsOf(name, withValue(valid, flag, "not-a-value"))
+      await state.run(target.root, target.args)
+      expect({ name, exits: state.exits }).toEqual({ name, exits: [ExitCode.usage] })
+      expect(state.stderr.join("")).toContain(`--${flag}`)
+      expect(state.connections).toEqual([])
+    }
+  })
+
+  test("every allowed intent, source and reason is accepted and reaches the service as given", async () => {
+    const cases = [
+      ...Intent.options.map((value) => ["note", "intent", value] as const),
+      ...HookSource.options.map((value) => ["hook start", "source", value] as const),
+      ...HookEndReason.options.map((value) => ["hook end", "reason", value] as const),
+    ]
+    for (const [name, flag, value] of cases) {
+      const { state, page } = await fresh()
+      const [, valid = []] = validArgs(page.id).find(([entry]) => entry === name) ?? []
+      const target = argsOf(name, withValue(valid, flag, value))
+      await state.run(target.root, target.args)
+      expect({ name, value, exits: state.exits }).toEqual({ name, value, exits: [ExitCode.ok] })
+      expect({ ...(state.requests[0]?.body as Record<string, unknown>) }[flag]).toBe(value)
+    }
+  })
+
+  test.each(["-1", "-5", "1.5", "1e3", "0x10", "9007199254740993", "abc", ""])(
+    "pid and timeout %j are refused with usage before connecting",
+    async (value) => {
+      for (const [name, flag] of [
+        ["hook prompt", "pid"],
+        ["hook wait", "pid"],
+        ["hook wait", "timeout-seconds"],
+      ] as const) {
+        for (const form of ["separate", "equals"] as const) {
+          const { state, page } = await fresh()
+          const [, valid = []] = validArgs(page.id).find(([entry]) => entry === name) ?? []
+          const base = without(valid, flag)
+          const given = form === "separate" ? [`--${flag}`, value] : [`--${flag}=${value}`]
+          const target = argsOf(name, [...base, ...given])
+          await state.run(target.root, target.args)
+          expect({ name, flag, form, exits: state.exits }).toEqual({
+            name,
+            flag,
+            form,
+            exits: [ExitCode.usage],
+          })
+          expect(state.connections).toEqual([])
+        }
+      }
+    },
+  )
+
+  test.each([
+    ["hook start", "pid"],
+    ["hook start", "label"],
+    ["hook end", "label"],
+    ["note", "intent"],
+    ["note", "body"],
+    ["note", "at"],
+  ] as const)("%s with an explicit empty --%s is refused with usage", async (name, flag) => {
+    const { state, page } = await fresh()
+    const [, valid = []] = validArgs(page.id).find(([entry]) => entry === name) ?? []
+    const target = argsOf(name, withValue(valid, flag, ""))
+    await state.run(target.root, target.args)
+    expect(state.exits).toEqual([ExitCode.usage])
+    expect(state.connections).toEqual([])
+  })
+})
+
+describe("hook commands for another process", () => {
+  test("prompt, stop and end act on the owner of the given --pid, not the CLI's own, and start the service", async () => {
+    const state = setup()
+    const own = await state.start("claude", 9001)
+    const other = await state.start("claude", 9002)
+    const stateOf = (owner: typeof own.owner) => state.owners.state(owner).status
+
+    await state.run("hook", ["prompt", "--pid", "9002"])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect([stateOf(own.owner), stateOf(other.owner)]).toEqual(["live", "busy"])
+    expect(state.connections).toEqual([{ start: true }])
+    expect(state.requests[0]).toMatchObject({
+      path: "/hook/prompt",
+      body: { pid: 9002, startedAt: "linux:1:9002" },
+    })
+    state.clear()
+
+    await state.run("hook", ["stop", "--pid", "9002"])
+    expect([stateOf(own.owner), stateOf(other.owner)]).toEqual(["live", "live"])
+    expect(state.connections).toEqual([{ start: true }])
+    expect(state.requests[0]).toMatchObject({ path: "/hook/stop", body: { pid: 9002 } })
+    state.clear()
+
+    await state.run("hook", [
+      "end",
+      "--pid",
+      "9002",
+      "--label",
+      "session-9002",
+      "--reason",
+      "logout",
+    ])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect([stateOf(own.owner), stateOf(other.owner)]).toEqual(["live", "gone"])
+    expect(state.connections).toEqual([{ start: true }])
+    expect(state.requests[0]).toMatchObject({
+      path: "/hook/end",
+      body: { pid: 9002, startedAt: "linux:1:9002", label: "session-9002", reason: "logout" },
+    })
+  })
+})
+
+describe("open targets", () => {
+  test.each([
+    "https://localhost:5173",
+    "http://[::1]:5173",
+    "http://127.0.0.2:3000",
+    "http://127.255.255.254:8080/app",
+    "http://app.localhost:5173",
+    "http://a.b.localhost:5173/x?y=1",
+  ])("accepts %s as a primary target", async (target) => {
+    const state = setup()
+    await state.run("open", [target, "--json"])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.requests[0]?.body).toMatchObject({
+      target: { kind: "server", upstream: new URL(target).href },
+    })
+    const opened = OpenResult.parse(JSON.parse(state.stdout.join("")))
+    expect(opened.page.target).toMatchObject({
+      kind: "server",
+      upstream: new URL(target).origin,
+    })
+  })
+
+  test("prints the exact page url, landing url and forward hint", async () => {
+    const state = setup()
+    await state.run("open", ["http://localhost:5173", "--json"])
+    const page = OpenResult.parse(JSON.parse(state.stdout.join(""))).page
+    state.clear()
+
+    await state.run("open", ["http://localhost:5173"])
+    expect(state.exits).toEqual([ExitCode.ok])
+    const token = state.pages.get(page.id)?.token ?? ""
+    const fragment = new URLSearchParams({ m: state.machineId, p: page.id, t: token })
+    const forwards = [3990, 3991, 3992, 3993]
+      .map((port) => `-L ${port}:localhost:${port}`)
+      .join(" ")
+    expect(state.stdout).toEqual([
+      `${page.origin}/\n${page.origin}${LANDING_PATH}#${fragment}\nBrowser on another machine? Forward the pool once: ssh -N -o ExitOnForwardFailure=yes ${forwards} ${hostname()}. If the landing page shows anything but iter8, that port is taken on your laptop.\n`,
+    ])
+    expect(page.origin).toMatch(/^http:\/\/[a-z][a-z0-9-]*\.localhost:3990$/)
   })
 })
