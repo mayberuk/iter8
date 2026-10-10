@@ -27,6 +27,9 @@ commands.
 - Take ports, state dirs and browser contexts from the rig (`harness/rig`), which derives them
   from the test worker so scenario files run in parallel without colliding.
 - Wait for a condition (`waitFor` in the rig) with a stated timeout; never sleep for time.
+- Remove every temp dir and stop every process a test started, in the test or the rig helper that
+  created it (`scratchDir` returns a disposer). `file-safety.md`'s "leave scratch in place" is for
+  an agent's own shell work, not for test code: one day of leaked test scratch filled a 16 GB `/tmp`.
 - Prove the typing budget with the rig's long-task probe: longest main-thread task ≤ 250 ms while
   typing in the composer on the heavy fixture with enrichment running.
 - Start the cheapest fixture that proves the behaviour: the static folder or the Vite + React

@@ -12,6 +12,7 @@ One language, one toolchain, one schema. Each pick and its rejected alternatives
 | Overlay build | `Bun.build` to one script the service serves | Vite (the overlay is one injected script, not an app) |
 | Screenshots | `modern-screenshot` (`domToCanvas`) on a crop capped at two viewports and 300 nodes, after the composer paints | `html2canvas`, `html-to-image`, a whole-page render |
 | React element → source | `bippy` 0.7.3 | `element-source` 0.0.5, LocatorJS, click-to-component |
+| Source-map symbolication (service) | `@jridgewell/trace-mapping` | `source-map`, `source-map-js` |
 | Validation, schema | Zod 4 | TypeBox, yup, hand-written guards |
 | Store | `bun:sqlite`, one file under the state dir, numbered SQL migrations | JSON files written by hand, an ORM |
 | CLI parsing | citty | commander, yargs |
@@ -19,10 +20,8 @@ One language, one toolchain, one schema. Each pick and its rejected alternatives
 | Lint, format | Biome | ESLint, Prettier |
 | Dead code, boundaries | knip, dependency-cruiser | — |
 | Tests | `bun test`; fast-check for invariants; Playwright driving Chromium for anything in a browser | Jest, Vitest, a DOM emulator for overlay behaviour |
+| Phases that drive Chromium or a fixture dev server | pinned `engine="claude"` in the spec | the Codex sandbox, which cannot reach the Playwright browser path or write a temp dir there |
 | Dates | `Intl.*` | dayjs, date-fns |
-
-Source-map symbolication runs in the service; its library is chosen in the service part's spec
-and added to this table there.
 
 ## Always
 - Pin exact versions (no `^` or `~`); commit `bun.lock`.
