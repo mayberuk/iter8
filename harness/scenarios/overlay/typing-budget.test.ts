@@ -74,3 +74,61 @@ test("typing a note on the heavy page while enrichment runs keeps every main-thr
     await o.close()
   }
 }, 120_000)
+
+test("the composer is never shown without its note field focused, so no keystroke reaches the page", async () => {
+  const o = await openOverlay({
+    overlayDir: overlayBuild.path,
+    folder: heavy.path,
+    path: HEAVY_PAGE,
+    browser,
+  })
+  try {
+    const cell = o.page.locator("td").filter({ hasText: "Row 5941, cell 2," })
+    await until("the ticking rows to render", () => cell.isVisible().catch(() => false))
+    await cell.scrollIntoViewIfNeeded()
+    await o.page.keyboard.press("c")
+    const pick = o.overlay.getByRole("button", { name: "Pick element" })
+    await until("pick mode", async () => (await pick.getAttribute("aria-pressed")) === "true")
+
+    await o.page.evaluate(() => {
+      const watch = { shown: 0, shownUnfocused: 0, done: false }
+      Object.assign(window, { __composerFocus: watch })
+      const field = (root: Document | ShadowRoot): HTMLTextAreaElement | null => {
+        for (const el of root.querySelectorAll("*")) {
+          const inner =
+            el.shadowRoot && (el.shadowRoot.querySelector("textarea") ?? field(el.shadowRoot))
+          if (inner) return inner
+        }
+        return null
+      }
+      const sample = () => {
+        const note = field(document)
+        if (
+          note &&
+          getComputedStyle(note).visibility === "visible" &&
+          note.getClientRects().length > 0
+        ) {
+          watch.shown++
+          if ((note.getRootNode() as ShadowRoot).activeElement !== note) watch.shownUnfocused++
+        }
+        if (watch.shown < 50) setTimeout(sample, 0)
+        else watch.done = true
+      }
+      sample()
+    })
+    await cell.click()
+    const watched = () =>
+      o.page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __composerFocus: { shown: number; shownUnfocused: number; done: boolean }
+            }
+          ).__composerFocus,
+      )
+    await until("fifty samples of the shown composer", async () => (await watched()).done)
+    expect((await watched()).shownUnfocused).toBe(0)
+  } finally {
+    await o.close()
+  }
+}, 60_000)

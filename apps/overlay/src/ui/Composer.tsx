@@ -1,6 +1,6 @@
 import { Intent, type NoteTarget, type ResolvedSourceLead } from "@iter8/protocol"
 import type { JSX, RefObject } from "preact"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import composerCss from "./composer.css" with { type: "text" }
 import { useOverlay, useSheet } from "./context"
 import { Icon, IntentGlyph } from "./glyphs"
@@ -129,8 +129,10 @@ export function Composer({
     return () => cancelAnimationFrame(frame)
   }, [])
 
-  // `.pop` is visibility:hidden until `on` renders, and a hidden textarea refuses focus.
-  useEffect(() => {
+  // `.pop` is visibility:hidden until `on` renders, and a hidden textarea refuses focus. A layout
+  // effect focuses in the commit that shows it; a passive effect runs a task later, and a keystroke
+  // typed in between reaches the page.
+  useLayoutEffect(() => {
     if (on) textRef.current?.focus()
   }, [on])
 
