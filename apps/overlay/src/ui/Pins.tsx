@@ -85,8 +85,7 @@ function sameFrames(a: ReadonlyMap<string, Frame>, b: ReadonlyMap<string, Frame>
 
 function clampToPage(view: PinView, at: Point, extent: Point): Point {
   const offset = view.source.kind === "agent" ? AGENT_CENTRE : { x: 0, y: 0 }
-  const clamp = (value: number, max: number) =>
-    Math.min(Math.max(value, PIN_REACH), max - PIN_REACH)
+  const clamp = (value: number, max: number) => Math.min(value, max - PIN_REACH)
   return {
     x: clamp(at.x + offset.x, extent.x) - offset.x,
     y: clamp(at.y + offset.y, extent.y) - offset.y,
