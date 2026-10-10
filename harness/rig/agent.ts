@@ -2,6 +2,7 @@ import { join } from "node:path"
 import type { HookEndReason, HookSource } from "@iter8/protocol"
 import { type AgentCommand, AgentEvent } from "../stubs/agent-session"
 import { type CliEnv, type CliRun, childEnv, cliCommand, cliRun } from "./cli"
+import { reapWithParent } from "./reap"
 import { waitFor } from "./wait"
 
 const STUB = Bun.fileURLToPath(new URL("../stubs/agent-session.ts", import.meta.url))
@@ -60,6 +61,7 @@ export async function startAgentSession(
     stdout: "pipe",
     stderr: "pipe",
   })
+  reapWithParent(child)
 
   const events: AgentEvent[] = []
   const reading = (async () => {

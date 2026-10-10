@@ -13,6 +13,7 @@ One language, one toolchain, one schema. Each pick and its rejected alternatives
 | Screenshots | `modern-screenshot` (`domToCanvas`) on a crop capped at two viewports and 300 nodes, after the composer paints | `html2canvas`, `html-to-image`, a whole-page render |
 | React element → source | `bippy` 0.7.3 | `element-source` 0.0.5, LocatorJS, click-to-component |
 | Source-map symbolication (service) | `@jridgewell/trace-mapping` | `source-map`, `source-map-js` |
+| HTML parsing with source locations (service) | parse5 8.0.1 | a hand-written tokeniser, HTMLRewriter (no offsets), htmlparser2 (not spec tree-building) |
 | Validation, schema | Zod 4 | TypeBox, yup, hand-written guards |
 | Store | `bun:sqlite`, one file under the state dir, numbered SQL migrations | JSON files written by hand, an ORM |
 | CLI parsing | citty | commander, yargs |

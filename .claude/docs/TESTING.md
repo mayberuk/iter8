@@ -33,8 +33,13 @@ Import each module by path; there are no barrels.
   task after start. The typing budget is ≤ 250 ms. A test asserting any wall-clock budget lives in
   a `*.budget.test.ts` file, which `bun run test` runs alone after the parallel run: a long task is
   wall time, and on CI's 4-core runner three other Chromiums sharing the CPU turned one into 480 ms.
+  The parallel run is capped at 16 workers (`--parallel=16`): on a 32-core host 32 workers gave e2e
+  timing failures, two 16-worker runs gave none, at about 16 s slower (77 s against 61 s).
 - `harness/rig/cli.ts` — `runCli(env, args)`, `cliCommand(binary?)`: a given binary, else
   `ITER8_TEST_BINARY`, else `bun apps/iter8/src/main.ts`.
+- `harness/rig/reap.ts` — `reapWithParent(child, { group? })`: kills a spawned service, agent stub
+  or fixture dev server when its test worker dies, even with no teardown; `bun test` workers emit
+  no `exit` event, so a hook there would never run.
 - `harness/rig/service.ts` — `startService({ binary })` on a throwaway home and pool;
   `openThroughProxy(service, page, target, { session } | { owner })` returns `{ open, token }`.
 - `harness/rig/agent.ts` + `harness/stubs/agent-session.ts` — `startAgentSession(service)`: a real

@@ -15,6 +15,7 @@ import { expectLocatable, pickAndNote, sendRound, showRound, startBuiltService }
 const FORWARD_ADDRESS = "127.0.0.2"
 const SERVICE_ADDRESS = "127.0.0.1"
 const FORWARD_READY_MS = 10_000
+const SSH_PROBE_MS = 5000
 const UI_TIMEOUT_MS = 10_000
 
 const HEADING_BEFORE = "Spring menu"
@@ -68,6 +69,8 @@ async function sshLogsIn(options: string[]): Promise<boolean> {
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",
+      timeout: SSH_PROBE_MS,
+      killSignal: "SIGKILL",
     })
     return (await probe.exited) === 0
   } catch {

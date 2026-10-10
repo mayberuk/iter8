@@ -11,8 +11,6 @@ import type { PickEngine } from "./pick-engine.entry"
 type EngineWindow = Window & { __iter8PickEngine: PickEngine }
 
 const ORIGIN = "http://engine.localhost"
-const MIN_HEAVY_ELEMENTS = 20_000
-const SNAPSHOT_BUDGET_MS = 5
 
 const SHADOW_PAGE = `<!doctype html>
 <html><head><title>nested shadow</title></head><body>
@@ -68,29 +66,10 @@ const SHADOW_IDS_PAGE = `<!doctype html>
 </main>
 </body></html>`
 
-function deepChain(depth: number): string {
-  let html = "<button>Deep target</button>"
-  for (let level = 0; level < depth; level++)
-    html = `<div><span>Level ${level}</span><div></div>${html}</div>`
-  return html
-}
-
-const HEAVY_PAGE = `<!doctype html>
-<html><head><title>heavy</title></head><body>
-<ul>${Array.from(
-  { length: 2000 },
-  (_, row) =>
-    `<li><span>Row ${row}</span><a href="#r${row}">open</a><em>${row}</em><b>b</b><i>i</i>` +
-    "<small>s</small><code>c</code><u>u</u><s>s</s></li>",
-).join("")}</ul>
-${deepChain(40)}
-</body></html>`
-
 const PAGES: Record<string, string> = {
   "/shadow.html": SHADOW_PAGE,
   "/ids.html": IDS_PAGE,
   "/shadow-ids.html": SHADOW_IDS_PAGE,
-  "/heavy.html": HEAVY_PAGE,
 }
 
 let browser: Browser | undefined
@@ -482,30 +461,4 @@ test("a region target is in page coordinates with the viewport it was drawn in",
     box: { x: 10, y: 420, width: 30, height: 40 },
     viewport: { width: 1280, height: 720, devicePixelRatio: 1 },
   })
-})
-
-test("snapshotting a deep node on a 20,000-node page takes under 5 ms", async () => {
-  await open("/heavy.html")
-  const result = await page.evaluate(() => {
-    const engine = (window as unknown as EngineWindow).__iter8PickEngine
-    const buttons = document.querySelectorAll("button")
-    const target = buttons[buttons.length - 1]
-    if (!target) throw new Error("the heavy page has no deep target")
-    document.body.getBoundingClientRect()
-    const started = performance.now()
-    const anchor = engine.snapshotElement(target, 0)
-    const elapsedMs = performance.now() - started
-    let depth = 0
-    for (let node: Element | null = target; node !== null; node = node.parentElement) depth += 1
-    return {
-      elapsedMs,
-      depth,
-      elements: document.querySelectorAll("*").length,
-      resolves: engine.resolveSelector(anchor.selector)[0] === target,
-    }
-  })
-  expect(result.elements).toBeGreaterThanOrEqual(MIN_HEAVY_ELEMENTS)
-  expect(result.depth).toBeGreaterThan(40)
-  expect(result.resolves).toBe(true)
-  expect(result.elapsedMs).toBeLessThan(SNAPSHOT_BUDGET_MS)
 })

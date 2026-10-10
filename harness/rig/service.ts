@@ -11,6 +11,7 @@ import type { AgentSession } from "./agent"
 import { type CliEnv, type CliRun, childEnv, cliCommand, runCli } from "./cli"
 import { throwawayHome } from "./home"
 import { poolRange } from "./ports"
+import { reapWithParent } from "./reap"
 import type { Scratch } from "./scratch"
 import { waitFor } from "./wait"
 
@@ -94,6 +95,7 @@ async function launch(
     stdout: "pipe",
     stderr: "pipe",
   })
+  reapWithParent(child)
 
   let output = ""
   const drain = async (stream: ReadableStream<Uint8Array>) => {
