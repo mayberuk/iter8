@@ -10,6 +10,28 @@ export const ASSET_PREFIX = "/__iter8/assets/"
 
 const repoRoot = resolve(import.meta.dir, "..")
 
+/**
+ * Zod 4 anchors its config and registry singletons on `globalThis` (`__zod_globalConfig`,
+ * `__zod_globalRegistry`) so several copies on one page can share them. A bundle that runs inside
+ * someone else's page has exactly one copy and must add no global, so each of those two modules
+ * gets a private scope object instead.
+ */
+const zodPrivateScope: Bun.BunPlugin = {
+  name: "zod-private-scope",
+  setup(build) {
+    build.onLoad({ filter: /zod\/v4\/core\/(core|registries)\.js$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text()
+      if (!source.includes("globalThis")) {
+        throw new Error(`${path} no longer anchors Zod's singletons on globalThis`)
+      }
+      return {
+        contents: `const iter8ZodScope = {}\n${source.replaceAll("globalThis", "iter8ZodScope")}`,
+        loader: "js",
+      }
+    })
+  },
+}
+
 export async function buildOverlayBundles(
   options: { root?: string; outDir?: string } = {},
 ): Promise<string[]> {
@@ -36,6 +58,7 @@ export async function buildOverlayBundles(
       minify: true,
       publicPath: ASSET_PREFIX,
       naming: `${name}.[ext]`,
+      plugins: [zodPrivateScope],
     })
     if (!result.success) {
       throw new Error(`Bundle failed for ${entry}:\n${result.logs.join("\n")}`)
