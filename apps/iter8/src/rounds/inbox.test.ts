@@ -15,6 +15,7 @@ import {
   RoundId,
   type SendRequest,
 } from "@iter8/protocol"
+import fc from "fast-check"
 import { openStore } from "../store/db"
 import { createInbox } from "./inbox"
 
@@ -27,6 +28,136 @@ afterEach(async () => {
 })
 
 const ownerA = OwnerId.parse("own_a")
+
+describe("Send now", () => {
+  function queuedRound(state: ReturnType<typeof setup>) {
+    const note = state.inbox.createDraft(larkspur, draftBody("Heading"))
+    return accepted(state.inbox.send(larkspur, sendRequest([note.id])))
+  }
+
+  test("only a round of the calling page can be nudged", () => {
+    const s = setup()
+    const round = queuedRound(s)
+    expect(s.inbox.sendNow(meadow, round.id)).toBeNull()
+    expect(s.inbox.sendNow(larkspur, RoundId.parse("R999"))).toBeNull()
+    expect(s.inbox.round(round.id)?.state).not.toHaveProperty("sendNowAt")
+  })
+
+  test("queued rounds keep their first nudge time and pending can select just those rounds", () => {
+    const s = setup()
+    const first = queuedRound(s)
+    const second = queuedRound(s)
+    expect(s.inbox.pending(ownerA, "session-label", "send-now")).toEqual([])
+    s.clock.set(at(5))
+    const acceptedNow = s.inbox.sendNow(larkspur, second.id)
+    expect(acceptedNow).toMatchObject({
+      outcome: "accepted",
+      round: { id: second.id, state: { stage: "queued", sendNowAt: iso(5) } },
+    })
+    s.clock.set(at(10))
+    expect(s.inbox.sendNow(larkspur, second.id)).toEqual(acceptedNow)
+    expect(s.inbox.pending(ownerA, "session-label").map((pointer) => pointer.roundId)).toEqual([
+      first.id,
+      second.id,
+    ])
+    expect(
+      s.inbox.pending(ownerA, "session-label", "send-now").map((pointer) => pointer.roundId),
+    ).toEqual([second.id])
+    s.inbox.announce(ownerA, "session-label", [second.id])
+    expect(s.inbox.pending(ownerA, "session-label", "send-now")).toEqual([])
+  })
+
+  test("an unpaired page refuses before the orphan or announcement checks", () => {
+    const s = setup()
+    const orphan = queuedRound(s)
+    s.inbox.orphanFor(ownerA)
+    const queued = queuedRound(s)
+    const announced = queuedRound(s)
+    s.inbox.announce(ownerA, "session-label", [announced.id])
+    s.pairings.delete(larkspur)
+    s.ownerStates.set(ownerA, { status: "gone", reason: "ended" })
+    for (const round of [queued, announced, orphan]) {
+      expect(s.inbox.sendNow(larkspur, round.id)).toMatchObject({
+        outcome: "refused",
+        reason: "no-pairing",
+        round: { id: round.id },
+      })
+    }
+  })
+
+  test("orphaned rounds and rounds whose owner is gone refuse session-gone before not-waiting", () => {
+    const s = setup()
+    const orphan = queuedRound(s)
+    s.inbox.orphanFor(ownerA)
+    expect(s.inbox.sendNow(larkspur, orphan.id)).toMatchObject({
+      outcome: "refused",
+      reason: "session-gone",
+    })
+    const queued = queuedRound(s)
+    const announced = queuedRound(s)
+    s.inbox.announce(ownerA, "session-label", [announced.id])
+    const claimed = queuedRound(s)
+    s.inbox.claim(claimed.id)
+    s.ownerStates.set(ownerA, { status: "gone", reason: "ended" })
+    s.pairings.set(larkspur, pairingFor(ownerB, 3))
+    for (const round of [queued, announced, claimed]) {
+      expect(s.inbox.sendNow(larkspur, round.id)).toMatchObject({
+        outcome: "refused",
+        reason: "session-gone",
+        round: { id: round.id },
+      })
+    }
+  })
+
+  test("announced and claimed rounds refuse not-waiting and keep their state", () => {
+    const s = setup()
+    const announced = queuedRound(s)
+    const claimed = queuedRound(s)
+    s.inbox.announce(ownerA, "session-label", [announced.id])
+    s.inbox.claim(claimed.id)
+    for (const round of [announced, claimed]) {
+      const before = s.inbox.round(round.id)
+      if (!before) throw new Error("Seeded round is missing")
+      expect(s.inbox.sendNow(larkspur, round.id)).toEqual({
+        outcome: "refused",
+        reason: "not-waiting",
+        round: before,
+      })
+      expect(s.inbox.round(round.id)).toEqual(before)
+    }
+  })
+
+  test("a nudge survives announcement and claim and is dropped by every requeue", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("queued", "announced", "orphaned"),
+        fc.boolean(),
+        (stage, sameOwner) => {
+          const s = setup()
+          try {
+            const round = queuedRound(s)
+            s.clock.set(at(5))
+            s.inbox.sendNow(larkspur, round.id)
+            if (stage !== "queued") s.inbox.announce(ownerA, "session-label", [round.id])
+            if (stage === "announced")
+              expect(s.inbox.round(round.id)?.state).toHaveProperty("sendNowAt", iso(5))
+            if (stage === "orphaned") s.inbox.orphanFor(ownerA)
+            const owner = sameOwner ? ownerA : ownerB
+            s.inbox.requeuePage(larkspur, owner)
+            expect(s.inbox.round(round.id)).toMatchObject({ owner, state: { stage: "queued" } })
+            expect(s.inbox.round(round.id)?.state).not.toHaveProperty("sendNowAt")
+            expect(s.inbox.pending(owner, "session-label", "send-now")).toEqual([])
+            s.inbox.sendNow(larkspur, round.id)
+            s.inbox.announce(owner, "session-label", [round.id])
+            expect(s.inbox.claim(round.id)?.state).toHaveProperty("sendNowAt", iso(5))
+          } finally {
+            s.db.close()
+          }
+        },
+      ),
+    )
+  })
+})
 const ownerB = OwnerId.parse("own_b")
 const larkspur = PageId.parse("larkspur")
 const meadow = PageId.parse("meadow")

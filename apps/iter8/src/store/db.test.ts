@@ -11,6 +11,7 @@ import {
   readOrCreateMachineId,
   runMigrations,
 } from "./db"
+import initialSchema from "./migrations/001_init.sql" with { type: "text" }
 
 const databases: Database[] = []
 const directories: string[] = []
@@ -82,6 +83,19 @@ test("a fresh store applies every migration and creates exactly the contracted t
     announcements: ["owner_id", "label", "round_id", "at"],
     screenshots: ["ref", "page_id", "png", "width", "height", "created_at"],
     prefs: ["id", "prefs_json"],
+    messages: [
+      "id",
+      "page_id",
+      "round_id",
+      "owner_id",
+      "author_json",
+      "text",
+      "dedupe_key",
+      "at",
+      "ordinal",
+    ],
+    page_chat: ["page_id", "enabled"],
+    owner_focus: ["owner_id", "page_id", "round_id", "at"],
   }
   const tables = db.query<{ name: string }, []>(
     "SELECT name FROM sqlite_master WHERE type = 'table'",
@@ -162,9 +176,14 @@ test("machine identity reads and validates an existing value", () => {
 
 test("sequences increment independently from one", () => {
   const db = store()
-  const allocate = db.transaction((name: "note_seq" | "round_seq") => nextSequence(db, name))
+  const allocate = db.transaction((name: "note_seq" | "round_seq" | "message_seq") =>
+    nextSequence(db, name),
+  )
   expect([allocate("note_seq"), allocate("note_seq"), allocate("note_seq")]).toEqual([1, 2, 3])
   expect([allocate("round_seq"), allocate("round_seq"), allocate("round_seq")]).toEqual([1, 2, 3])
+  expect([allocate("message_seq"), allocate("message_seq"), allocate("message_seq")]).toEqual([
+    1, 2, 3,
+  ])
 })
 
 test("both new and existing sequence increments roll back with the caller's transaction", () => {
@@ -172,6 +191,7 @@ test("both new and existing sequence increments roll back with the caller's tran
   const abort = db.transaction(() => {
     nextSequence(db, "note_seq")
     nextSequence(db, "round_seq")
+    nextSequence(db, "message_seq")
     throw new Error("abort write")
   })
   expect(abort).toThrow("abort write")
@@ -179,10 +199,11 @@ test("both new and existing sequence increments roll back with the caller's tran
   const allocate = db.transaction(() => [
     nextSequence(db, "note_seq"),
     nextSequence(db, "round_seq"),
+    nextSequence(db, "message_seq"),
   ])
-  expect(allocate()).toEqual([1, 1])
+  expect(allocate()).toEqual([1, 1, 1])
   expect(abort).toThrow("abort write")
-  expect(allocate()).toEqual([2, 2])
+  expect(allocate()).toEqual([2, 2, 2])
 })
 
 test("the schema enforces foreign keys, target and note kinds, unique identities and singleton prefs", () => {
@@ -213,4 +234,58 @@ test("the schema enforces foreign keys, target and note kinds, unique identities
   }
   db.exec("INSERT INTO prefs (id, prefs_json) VALUES (1, '{}')")
   expect(() => db.exec("INSERT INTO prefs (id, prefs_json) VALUES (2, '{}')")).toThrow()
+})
+
+test("opening a version-one store preserves every row and seeds each paired owner's highest page focus", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "iter8-migrate-"))
+  const path = join(directory, "iter8.db")
+  const previous = new Database(path)
+  let migrated: Database | null = null
+  try {
+    previous.exec(initialSchema)
+    previous.exec(`
+      PRAGMA user_version = 1;
+      INSERT INTO owners VALUES ('owner-one', 'claude', 101, 'started', 'first', '/project', 'created', 0, 0, NULL);
+      INSERT INTO owners VALUES ('owner-two', 'claude', 102, 'started', 'second', '/project', 'created', 0, 0, NULL);
+      INSERT INTO owners VALUES ('unpaired', 'claude', 103, 'started', 'third', '/project', 'created', 0, 0, NULL);
+      INSERT INTO pages VALUES ('yarrow', 'token', '/project', 'server', 'http://localhost:3000', 3990, 'owner-one', 1, 'created');
+      INSERT INTO pages VALUES ('aster', 'token', '/project', 'server', 'http://localhost:3001', 3991, 'owner-one', 2, 'created');
+      INSERT INTO pages VALUES ('larkspur', 'token', '/project', 'server', 'http://localhost:3002', 3992, 'owner-two', 1, 'created');
+      INSERT INTO pages VALUES ('meadow', 'token', '/project', 'server', 'http://localhost:3003', 3993, NULL, 0, 'created');
+      INSERT INTO meta VALUES ('note_seq', '1');
+      INSERT INTO page_upstreams VALUES ('yarrow', 'http://localhost:3004', 3994);
+      INSERT INTO retired_labels VALUES ('yarrow');
+      INSERT INTO rounds VALUES ('R1', 'yarrow', 'owner-one', '{}', 'created');
+      INSERT INTO notes VALUES ('N1', 'yarrow', 'R1', 'sent', 1, '{}', 'fix', 'Keep this note', '{}', 'anchored', NULL, '{}', 'created');
+      INSERT INTO round_keys VALUES ('send-key', 'R1');
+      INSERT INTO announcements VALUES ('owner-one', 'first', 'R1', 'created');
+      INSERT INTO screenshots VALUES ('shot', 'yarrow', X'0102', 1, 1, 'created');
+      INSERT INTO prefs VALUES (1, '{}');
+    `)
+    const tables = previous
+      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+    const snapshots = tables.map(({ name }) => ({
+      name,
+      rows: previous.query(`SELECT * FROM ${name}`).all(),
+    }))
+    previous.close()
+    migrated = openStore(path)
+    expect(LATEST_MIGRATION_VERSION).toBe(2)
+    expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 2 })
+    for (const { name, rows } of snapshots)
+      expect(migrated.query(`SELECT * FROM ${name}`).all()).toEqual(rows)
+    expect(
+      migrated.query("SELECT owner_id, page_id, round_id FROM owner_focus ORDER BY owner_id").all(),
+    ).toEqual([
+      { owner_id: "owner-one", page_id: "yarrow", round_id: null },
+      { owner_id: "owner-two", page_id: "larkspur", round_id: null },
+    ])
+    runMigrations(migrated)
+    expect(migrated.query("SELECT COUNT(*) AS n FROM owner_focus").get()).toEqual({ n: 2 })
+  } finally {
+    previous.close()
+    migrated?.close()
+    await rm(directory, { recursive: true })
+  }
 })
