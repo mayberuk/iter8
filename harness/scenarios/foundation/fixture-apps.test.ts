@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { readdir } from "node:fs/promises"
+import { readdir, readFile, writeFile } from "node:fs/promises"
 import { extname, join, relative } from "node:path"
 import type { Browser } from "playwright"
 import { launchChromium, newPage } from "../../rig/browser"
 import { type Fixture, fixtureDir, MANIFEST, startFixture } from "../../rig/fixtures"
+import { WORKER } from "../../rig/ports"
+import { type Scratch, scratchDir } from "../../rig/scratch"
 
 const SKIPPED_DIRS = new Set(["node_modules", ".next", ".svelte-kit", ".astro", "dist"])
 const SOURCE_EXTENSIONS = new Set([
@@ -147,4 +149,157 @@ describe("fixture apps in Chromium", () => {
       FIXTURE_TIMEOUT_MS,
     )
   }
+})
+
+type Throwaway = {
+  /** Wait this long before listening at all. */
+  listenAfterMs?: number
+  /** Answer `status` until this long after the process started, then 200. */
+  readyAfterMs?: number
+  status?: number
+  /** Exit with this code before listening. */
+  exitCode?: number
+}
+
+const THROWAWAY_SERVER = `
+import { readFileSync, writeFileSync } from "node:fs"
+const config = JSON.parse(readFileSync("config.json", "utf8"))
+const port = Number(process.argv[process.argv.indexOf("--port") + 1])
+const started = Date.now()
+writeFileSync("pid", String(process.pid))
+writeFileSync("port", String(port))
+if (config.exitCode !== undefined) {
+  console.error("throwaway fixture refusing to start")
+  process.exit(config.exitCode)
+}
+await Bun.sleep(config.listenAfterMs ?? 0)
+Bun.serve({
+  hostname: "127.0.0.1",
+  port,
+  fetch() {
+    const ready = Date.now() - started >= (config.readyAfterMs ?? 0)
+    return new Response(ready ? "ready" : "warming", { status: ready ? 200 : (config.status ?? 503) })
+  },
+})
+`
+
+const throwaways: Scratch[] = []
+
+afterAll(async () => {
+  await Promise.all(throwaways.map((entry) => entry.dispose()))
+})
+
+async function throwawayFixture(config: Throwaway): Promise<string> {
+  const entry = await scratchDir(`/tmp/iter8-w${WORKER}-throwaway-`)
+  throwaways.push(entry)
+  await writeFile(
+    join(entry.path, "package.json"),
+    JSON.stringify({ name: "throwaway", private: true, scripts: { dev: "bun server.ts" } }),
+  )
+  await writeFile(join(entry.path, "server.ts"), THROWAWAY_SERVER)
+  await writeFile(join(entry.path, "config.json"), JSON.stringify(config))
+  return entry.path
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function recorded(dir: string, file: "pid" | "port"): Promise<number> {
+  return Number(await readFile(join(dir, file), "utf8"))
+}
+
+async function logDirs(): Promise<string[]> {
+  return (await readdir("/tmp")).filter((name) => name.startsWith(`iter8-w${WORKER}-vite-react-`))
+}
+
+async function expectNothingLeft(dir: string, logsBefore: string[]) {
+  expect(processAlive(await recorded(dir, "pid"))).toBe(false)
+  expect(portIsFree(await recorded(dir, "port"))).toBe(true)
+  expect(await logDirs()).toEqual(logsBefore)
+}
+
+async function failedStart(config: Throwaway, readyTimeoutMs: number) {
+  const dir = await throwawayFixture(config)
+  const logsBefore = await logDirs()
+  const started = performance.now()
+  const error = await startFixture("vite-react", { dir, readyTimeoutMs }).then(
+    () => null,
+    (cause: Error) => cause,
+  )
+  const elapsedMs = performance.now() - started
+  if (error === null) throw new Error("startFixture resolved for a fixture that never became ready")
+  await expectNothingLeft(dir, logsBefore)
+  return { error, elapsedMs }
+}
+
+const THROWAWAY_TIMEOUT_MS = 2_000
+const NAMED_FAILURE = /^vite-react did not become ready; dev log:/
+
+describe("startFixture readiness", () => {
+  test("returns only after the server is listening, not when the process spawns", async () => {
+    const dir = await throwawayFixture({ listenAfterMs: 1_200 })
+    const logsBefore = await logDirs()
+    const started = performance.now()
+    const running = await startFixture("vite-react", { dir, readyTimeoutMs: 20_000 })
+    try {
+      expect(performance.now() - started).toBeGreaterThanOrEqual(1_100)
+      const response = await fetch(running.url("/"))
+      expect({ status: response.status, body: await response.text() }).toEqual({
+        status: 200,
+        body: "ready",
+      })
+    } finally {
+      await running.stop()
+    }
+    await expectNothingLeft(dir, logsBefore)
+  }, 30_000)
+
+  test("returns only after the ready path answers 200, not after any HTTP answer", async () => {
+    const dir = await throwawayFixture({ readyAfterMs: 1_200, status: 503 })
+    const started = performance.now()
+    const running = await startFixture("vite-react", { dir, readyTimeoutMs: 20_000 })
+    try {
+      expect(performance.now() - started).toBeGreaterThanOrEqual(1_100)
+      const response = await fetch(running.url("/"))
+      expect({ status: response.status, body: await response.text() }).toEqual({
+        status: 200,
+        body: "ready",
+      })
+    } finally {
+      await running.stop()
+    }
+  }, 30_000)
+
+  test("a server that never listens fails with the fixture's name at the timeout and leaves nothing behind", async () => {
+    const { error, elapsedMs } = await failedStart({ listenAfterMs: 120_000 }, THROWAWAY_TIMEOUT_MS)
+    expect(error.message).toMatch(NAMED_FAILURE)
+    expect((error.cause as Error).message).toContain(`after ${THROWAWAY_TIMEOUT_MS} ms`)
+    expect(elapsedMs).toBeGreaterThanOrEqual(THROWAWAY_TIMEOUT_MS - 100)
+    expect(elapsedMs).toBeLessThan(THROWAWAY_TIMEOUT_MS + 5_000)
+  }, 30_000)
+
+  test("a server that only answers non-200 fails with the fixture's name at the timeout and leaves nothing behind", async () => {
+    const { error, elapsedMs } = await failedStart(
+      { readyAfterMs: 120_000, status: 503 },
+      THROWAWAY_TIMEOUT_MS,
+    )
+    expect(error.message).toMatch(NAMED_FAILURE)
+    expect((error.cause as Error).message).toContain(`after ${THROWAWAY_TIMEOUT_MS} ms`)
+    expect(elapsedMs).toBeGreaterThanOrEqual(THROWAWAY_TIMEOUT_MS - 100)
+    expect(elapsedMs).toBeLessThan(THROWAWAY_TIMEOUT_MS + 5_000)
+  }, 30_000)
+
+  test("a server that exits early fails at once with its output and leaves nothing behind", async () => {
+    const { error, elapsedMs } = await failedStart({ exitCode: 3 }, 60_000)
+    expect(error.message).toMatch(NAMED_FAILURE)
+    expect(error.message).toContain("throwaway fixture refusing to start")
+    expect((error.cause as Error).message).toContain("vite-react dev server exited early")
+    expect(elapsedMs).toBeLessThan(10_000)
+  }, 30_000)
 })

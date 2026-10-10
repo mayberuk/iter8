@@ -1,17 +1,36 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readdir, writeFile } from "node:fs/promises"
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { readdir, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { OwnerId, ServiceStatus } from "@iter8/protocol"
 import { startAgentSession } from "../../rig/agent"
 import { launchChromium, newPage } from "../../rig/browser"
 import { cliCommand } from "../../rig/cli"
 import { nextPort, portBlock, WORKER } from "../../rig/ports"
+import { type Scratch, scratchDir } from "../../rig/scratch"
 import { openThroughProxy, startService } from "../../rig/service"
 import { waitFor } from "../../rig/wait"
 import { FAKE_CLI_ENTRY, FAKE_CLI_TOKEN, readFakeCliCalls } from "../../stubs/fake-cli"
 
+const scratches: Scratch[] = []
+
+afterAll(async () => {
+  await Promise.all(scratches.map((entry) => entry.dispose()))
+})
+
 async function scratch(): Promise<string> {
-  return mkdtemp(`/tmp/iter8-fake-w${WORKER}-`)
+  const entry = await scratchDir(`/tmp/iter8-fake-w${WORKER}-`)
+  scratches.push(entry)
+  return entry.path
+}
+
+const exists = (path: string) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  )
+
+async function ownHomes(): Promise<string[]> {
+  return (await readdir("/tmp")).filter((name) => name.startsWith(`iter8-w${WORKER}-`)).sort()
 }
 
 function alive(pid: number): boolean {
@@ -98,11 +117,28 @@ test("two services in one file get different homes and disjoint pools", async ()
 test("a serve that exits before ready fails startService with its exit code and output", async () => {
   const entry = join(await scratch(), "exits-early.ts")
   await writeFile(entry, 'console.error("serve refused to start")\nprocess.exit(7)\n')
+  const homesBefore = await ownHomes()
   const started = performance.now()
   await expect(startService({ entry })).rejects.toThrow(
     /serve exited with code 7 before reporting ready[\s\S]*serve refused to start/,
   )
   expect(performance.now() - started).toBeLessThan(10_000)
+  expect(await ownHomes()).toEqual(homesBefore)
+}, 30_000)
+
+test("stop removes the throwaway home, and only that one", async () => {
+  const first = await startFake()
+  const second = await startFake()
+  try {
+    expect(await exists(first.service.home)).toBe(true)
+    await first.service.stop()
+    expect(await exists(first.service.home)).toBe(false)
+    expect(await exists(second.service.home)).toBe(true)
+  } finally {
+    await first.service.stop()
+    await second.service.stop()
+  }
+  expect(await exists(second.service.home)).toBe(false)
 }, 30_000)
 
 test("stop leaves no serve process behind", async () => {

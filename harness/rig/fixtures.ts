@@ -1,8 +1,9 @@
-import { cp, mkdtemp } from "node:fs/promises"
+import { cp } from "node:fs/promises"
 import { extname, join, resolve, sep } from "node:path"
 import { SourceConfidence } from "@iter8/protocol"
 import { z } from "zod"
 import { nextPort, WORKER } from "./ports"
+import { type Scratch, scratchDir } from "./scratch"
 import { waitFor } from "./wait"
 
 const REPO = Bun.fileURLToPath(new URL("../../", import.meta.url))
@@ -70,9 +71,20 @@ export type RunningFixture = {
   stop: () => Promise<void>
 }
 
-export async function startFixture(name: FixtureName): Promise<RunningFixture> {
+export type StartFixtureOptions = {
+  /** Runs this directory's `dev` script in place of the fixture's own app. */
+  dir?: string
+  readyTimeoutMs?: number
+}
+
+/** Resolves once `readyPath` has answered 200; `stop` also removes the fixture's log directory. */
+export async function startFixture(
+  name: FixtureName,
+  options: StartFixtureOptions = {},
+): Promise<RunningFixture> {
   const entry = fixture(name)
-  const dir = fixtureDir(name)
+  const dir = options.dir ?? fixtureDir(name)
+  const readyTimeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS
   const port = await nextPort()
   const origin = `http://127.0.0.1:${port}`
   const url = (path = "/") => new URL(path, origin).href
@@ -81,8 +93,8 @@ export async function startFixture(name: FixtureName): Promise<RunningFixture> {
     return { name, dir, origin, port, url, stop: () => server.stop(true) }
   }
 
-  const logs = await mkdtemp(`/tmp/iter8-w${WORKER}-${name}-`)
-  const log = { out: join(logs, "stdout.log"), err: join(logs, "stderr.log") }
+  const logs = await scratchDir(`/tmp/iter8-w${WORKER}-${name}-`)
+  const log = { out: join(logs.path, "stdout.log"), err: join(logs.path, "stderr.log") }
   const child = Bun.spawn(
     [
       "bun",
@@ -100,7 +112,13 @@ export async function startFixture(name: FixtureName): Promise<RunningFixture> {
       stderr: Bun.file(log.err),
     },
   )
-  const stop = () => stopGroup(child)
+  const stop = async () => {
+    try {
+      await stopGroup(child)
+    } finally {
+      await logs.dispose()
+    }
+  }
   try {
     await waitFor(
       `${name} to answer ${entry.readyPath} on port ${port}`,
@@ -109,16 +127,16 @@ export async function startFixture(name: FixtureName): Promise<RunningFixture> {
           throw new Error(`${name} dev server exited early:\n${await tail(log)}`)
         }
         const response = await fetch(url(entry.readyPath), {
-          signal: AbortSignal.timeout(READY_TIMEOUT_MS),
+          signal: AbortSignal.timeout(readyTimeoutMs),
         }).catch(() => null)
         await response?.body?.cancel()
         return response?.status === 200 ? true : null
       },
-      { timeoutMs: READY_TIMEOUT_MS, everyMs: 250 },
+      { timeoutMs: readyTimeoutMs, everyMs: 250 },
     )
   } catch (cause) {
-    await stop()
-    throw new Error(`${name} did not become ready; dev log:\n${await tail(log)}`, { cause })
+    const output = await stopAndRead(child, logs, log)
+    throw new Error(`${name} did not become ready; dev log:\n${output}`, { cause })
   }
   return { name, dir, origin, port, url, stop }
 }
@@ -171,6 +189,19 @@ async function stopGroup(child: Bun.Subprocess): Promise<void> {
   await child.exited
 }
 
+async function stopAndRead(
+  child: Bun.Subprocess,
+  logs: Scratch,
+  log: { out: string; err: string },
+): Promise<string> {
+  try {
+    await stopGroup(child)
+    return await tail(log)
+  } finally {
+    await logs.dispose()
+  }
+}
+
 async function tail(log: { out: string; err: string }): Promise<string> {
   const read = (path: string) =>
     Bun.file(path)
@@ -187,12 +218,22 @@ const STATIC_BUILD_TOOL: Partial<Record<FixtureName, string>> = {
   astro: "astro",
 }
 
-export async function buildFixture(name: FixtureName): Promise<string> {
+export async function buildFixture(name: FixtureName): Promise<Scratch> {
+  const out = await scratchDir(`/tmp/iter8-w${WORKER}-${name}-build-`)
+  try {
+    await buildInto(name, out.path)
+  } catch (error) {
+    await out.dispose()
+    throw error
+  }
+  return out
+}
+
+async function buildInto(name: FixtureName, out: string): Promise<void> {
   const dir = fixtureDir(name)
-  const out = await mkdtemp(`/tmp/iter8-w${WORKER}-${name}-build-`)
   if (fixture(name).kind === "folder") {
     await cp(dir, out, { recursive: true })
-    return out
+    return
   }
   const tool = STATIC_BUILD_TOOL[name]
   if (!tool) throw new Error(`${name} has no static build, so the mock service cannot serve it`)
@@ -209,5 +250,4 @@ export async function buildFixture(name: FixtureName): Promise<string> {
     new Response(child.stderr).text(),
   ])
   if (code !== 0) throw new Error(`${name} build exited ${code}:\n${stdout}\n${stderr}`)
-  return out
 }

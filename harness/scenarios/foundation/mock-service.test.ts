@@ -1,5 +1,5 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp } from "node:fs/promises"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import {
   ASSET_PREFIX,
@@ -18,6 +18,7 @@ import {
 import fc from "fast-check"
 import { fixtureDir } from "../../rig/fixtures"
 import { WORKER } from "../../rig/ports"
+import { type Scratch, scratchDir } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 import { type MockService, startMockService } from "../../stubs/mock-service"
 
@@ -44,11 +45,13 @@ function png(width: number, height: number): Uint8Array<ArrayBuffer> {
   return bytes
 }
 
+let overlay: Scratch
 let overlayDir: string
 let mock: MockService
 
 beforeAll(async () => {
-  overlayDir = await mkdtemp(`/tmp/iter8-w${WORKER}-overlay-`)
+  overlay = await scratchDir(`/tmp/iter8-w${WORKER}-overlay-`)
+  overlayDir = overlay.path
   await mkdir(join(overlayDir, "fonts"))
   await Bun.write(join(overlayDir, "fonts/probe.woff2"), FONT)
   await Bun.write(join(overlayDir, "overlay.js"), "export function mount() { return () => {} }\n")
@@ -61,6 +64,10 @@ async function start(options: Partial<Parameters<typeof startMockService>[0]> = 
 
 afterEach(async () => {
   await mock?.stop()
+})
+
+afterAll(async () => {
+  await overlay?.dispose()
 })
 
 type Call = { body?: unknown; bytes?: Uint8Array<ArrayBuffer>; headers?: Record<string, string> }

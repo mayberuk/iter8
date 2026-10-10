@@ -1,12 +1,20 @@
-import { expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, unlink } from "node:fs/promises"
+import { afterAll, expect, test } from "bun:test"
+import { mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { ASSET_PREFIX, BUILD_OUTPUTS, buildOverlayBundles, compileBinary } from "./build"
 import { validateReleaseTag } from "./release"
 
+const created: string[] = []
+
+afterAll(async () => {
+  await Promise.all(created.map((path) => rm(path, { recursive: true, force: true })))
+})
+
 async function standInRoot() {
-  return mkdtemp("/tmp/iter8-build-")
+  const path = await mkdtemp("/tmp/iter8-build-")
+  created.push(path)
+  return path
 }
 
 async function writeEntry(root: string, path: string, contents: string | Uint8Array) {

@@ -1,11 +1,17 @@
 import { expect, spyOn, test } from "bun:test"
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import fc from "fast-check"
 import { chromium } from "playwright"
 import { launchChromium, newPage } from "../../rig/browser"
 import { throwawayHome } from "../../rig/home"
 import { nextPort, portBlock, WORKER } from "../../rig/ports"
 import { waitFor } from "../../rig/wait"
+
+const exists = (path: string) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  )
 
 const portsModule = new URL("../../rig/ports.ts", import.meta.url).href
 const firstPortOf = (worker: number) => 21000 + 100 * (worker - 1)
@@ -274,26 +280,38 @@ test("waitFor gives up after timeoutMs, not before and not much later, even with
   }
 })
 
-test("throwawayHome leaves the contents of earlier homes untouched", async () => {
+test("throwawayHome leaves the contents of earlier homes untouched until their owner disposes them", async () => {
   const earlier = await throwawayHome()
-  await mkdir(`${earlier}/nested`)
-  await writeFile(`${earlier}/nested/keep.txt`, "kept")
-  await writeFile(`${earlier}/top.txt`, "also kept")
   const later = await throwawayHome()
-  expect(later).not.toBe(earlier)
-  expect(await readdir(later)).toEqual([])
-  expect((await readdir(earlier)).sort()).toEqual(["nested", "top.txt"])
-  expect(await readFile(`${earlier}/nested/keep.txt`, "utf8")).toBe("kept")
-  expect(await readFile(`${earlier}/top.txt`, "utf8")).toBe("also kept")
+  try {
+    await mkdir(`${earlier.path}/nested`)
+    await writeFile(`${earlier.path}/nested/keep.txt`, "kept")
+    await writeFile(`${earlier.path}/top.txt`, "also kept")
+    expect(later.path).not.toBe(earlier.path)
+    expect(await readdir(later.path)).toEqual([])
+    await later.dispose()
+    expect(await exists(later.path)).toBe(false)
+    expect((await readdir(earlier.path)).sort()).toEqual(["nested", "top.txt"])
+    expect(await readFile(`${earlier.path}/nested/keep.txt`, "utf8")).toBe("kept")
+    expect(await readFile(`${earlier.path}/top.txt`, "utf8")).toBe("also kept")
+  } finally {
+    await earlier.dispose()
+    await later.dispose()
+  }
+  expect(await exists(earlier.path)).toBe(false)
 })
 
 test("throwaway homes are distinct empty directories with short control socket paths", async () => {
   const homes = await Promise.all([throwawayHome(), throwawayHome()])
-  expect(new Set(homes).size).toBe(2)
-  for (const home of homes) {
-    expect(home).toMatch(new RegExp(`^/tmp/iter8-w${WORKER}-[a-zA-Z0-9]{6}$`))
-    expect(await readdir(home)).toEqual([])
-    expect(Buffer.byteLength(`${home}/control.sock`)).toBeLessThan(100)
+  try {
+    expect(new Set(homes.map((home) => home.path)).size).toBe(2)
+    for (const { path } of homes) {
+      expect(path).toMatch(new RegExp(`^/tmp/iter8-w${WORKER}-[a-zA-Z0-9]{6}$`))
+      expect(await readdir(path)).toEqual([])
+      expect(Buffer.byteLength(`${path}/control.sock`)).toBeLessThan(100)
+    }
+  } finally {
+    await Promise.all(homes.map((home) => home.dispose()))
   }
 })
 

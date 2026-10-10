@@ -1,6 +1,6 @@
-import { mkdtemp } from "node:fs/promises"
 import { WORKER } from "./ports"
+import { type Scratch, scratchDir } from "./scratch"
 
-export async function throwawayHome(): Promise<string> {
-  return mkdtemp(`/tmp/iter8-w${WORKER}-`)
+export async function throwawayHome(): Promise<Scratch> {
+  return scratchDir(`/tmp/iter8-w${WORKER}-`)
 }

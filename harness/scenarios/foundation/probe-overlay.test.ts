@@ -4,6 +4,7 @@ import type { Browser } from "playwright"
 import { launchChromium, newPage } from "../../rig/browser"
 import { buildBrowserBundle } from "../../rig/bundle"
 import { fixtureDir } from "../../rig/fixtures"
+import type { Scratch } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 import { type MockService, startMockService } from "../../stubs/mock-service"
 import { type Iter8Probe, PROBE_GLOBAL } from "../../stubs/probe-overlay"
@@ -17,18 +18,25 @@ const prefs = OverlayPrefs.parse({ ...(await sample("OverlayPrefs")), theme: "da
 
 let browser: Browser
 let mock: MockService
+let bundle: Scratch
 
 beforeAll(async () => {
-  const overlayDir = await buildBrowserBundle(
+  bundle = await buildBrowserBundle(
     Bun.fileURLToPath(new URL("../../stubs/probe-overlay.ts", import.meta.url)),
   )
-  mock = await startMockService({ folder: fixtureDir("static"), overlayDir, pairing, prefs })
+  mock = await startMockService({
+    folder: fixtureDir("static"),
+    overlayDir: bundle.path,
+    pairing,
+    prefs,
+  })
   browser = await launchChromium()
 })
 
 afterAll(async () => {
   await browser?.close()
   await mock?.stop()
+  await bundle?.dispose()
 })
 
 test("the probe overlay boots through the mock service on a *.localhost page", async () => {

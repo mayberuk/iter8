@@ -65,16 +65,27 @@ test("the heavy page idles with its ticker running under the page's long-task bo
 
 test("the prebuilt heavy page served by the mock service meets the same bound", async () => {
   const folder = await buildFixture("vite-react")
-  const overlayDir = await buildBrowserBundle(
-    Bun.fileURLToPath(new URL("../../stubs/probe-overlay.ts", import.meta.url)),
-  )
-  const mock = await startMockService({ folder, overlayDir })
   try {
-    const { longestMs, elements, errors } = await measureIdle(mock.pageUrl(HEAVY_PAGE))
-    expect(elements).toBeGreaterThanOrEqual(MIN_GRID_ELEMENTS)
-    expect(longestMs).toBeLessThan(PAGE_LONGEST_TASK_MS)
-    expect(errors).toEqual([])
+    const overlay = await buildBrowserBundle(
+      Bun.fileURLToPath(new URL("../../stubs/probe-overlay.ts", import.meta.url)),
+    )
+    try {
+      const mock = await startMockService({
+        folder: folder.path,
+        overlayDir: overlay.path,
+      })
+      try {
+        const { longestMs, elements, errors } = await measureIdle(mock.pageUrl(HEAVY_PAGE))
+        expect(elements).toBeGreaterThanOrEqual(MIN_GRID_ELEMENTS)
+        expect(longestMs).toBeLessThan(PAGE_LONGEST_TASK_MS)
+        expect(errors).toEqual([])
+      } finally {
+        await mock.stop()
+      }
+    } finally {
+      await overlay.dispose()
+    }
   } finally {
-    await mock.stop()
+    await folder.dispose()
   }
 }, 120_000)

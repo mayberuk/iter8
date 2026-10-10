@@ -1,6 +1,5 @@
-import { expect, test } from "bun:test"
-import { cp, lstat, mkdir, mkdtemp, readFile, realpath } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { afterAll, expect, test } from "bun:test"
+import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { z } from "zod"
@@ -24,6 +23,21 @@ const manifestPaths = [
   .flatMap((pattern) => [...new Bun.Glob(pattern).scanSync({ cwd: repoRoot })])
   .sort()
 
+let checkout: string | undefined
+
+afterAll(async () => {
+  if (checkout !== undefined) await rm(checkout, { recursive: true, force: true })
+})
+
+// A checkout on another filesystem than bun's cache makes the install copy every package (870 MB,
+// and /tmp is often RAM); beside the cache it hardlinks them.
+async function makeCheckout(): Promise<string> {
+  const cache = (await Bun.$`bun pm cache`.cwd(repoRoot).text()).trim()
+  await mkdir(dirname(cache), { recursive: true })
+  checkout = await mkdtemp(join(dirname(cache), "iter8-install-"))
+  return checkout
+}
+
 async function readManifest(path: string) {
   return manifestSchema.parse(JSON.parse(await readFile(path, "utf8")))
 }
@@ -43,15 +57,15 @@ async function installedPath(workspaceDir: string, root: string, name: string) {
 }
 
 test("bun install --frozen-lockfile on a checkout without node_modules installs every pin and leaves bun.lock untouched", async () => {
-  const checkout = await mkdtemp(join(tmpdir(), "iter8-install-"))
+  const root = await makeCheckout()
   for (const file of ["bun.lock", "bunfig.toml", ...manifestPaths]) {
-    await mkdir(dirname(join(checkout, file)), { recursive: true })
-    await cp(join(repoRoot, file), join(checkout, file))
+    await mkdir(dirname(join(root, file)), { recursive: true })
+    await cp(join(repoRoot, file), join(root, file))
   }
-  const lockBefore = await readFile(join(checkout, "bun.lock"))
+  const lockBefore = await readFile(join(root, "bun.lock"))
 
   const install = Bun.spawn(["bun", "install", "--frozen-lockfile"], {
-    cwd: checkout,
+    cwd: root,
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -60,18 +74,16 @@ test("bun install --frozen-lockfile on a checkout without node_modules installs 
     new Response(install.stderr).text(),
     install.exited,
   ])
-  expect(exitCode, `bun install --frozen-lockfile failed in ${checkout}\n${stdout}${stderr}`).toBe(
-    0,
-  )
+  expect(exitCode, `bun install --frozen-lockfile failed in ${root}\n${stdout}${stderr}`).toBe(0)
 
-  const lockAfter = await readFile(join(checkout, "bun.lock"))
+  const lockAfter = await readFile(join(root, "bun.lock"))
   expect(lockAfter.equals(lockBefore), "bun.lock changed during a frozen install").toBe(true)
 
   const manifests = await Promise.all(
     manifestPaths.map(async (path) => ({
-      dir: join(checkout, dirname(path)),
+      dir: join(root, dirname(path)),
       path,
-      manifest: await readManifest(join(checkout, path)),
+      manifest: await readManifest(join(root, path)),
     })),
   )
   const workspaceDirs = new Map(
@@ -85,7 +97,7 @@ test("bun install --frozen-lockfile on a checkout without node_modules installs 
     for (const section of installedSections) {
       for (const [name, pin] of Object.entries(manifest[section] ?? {})) {
         const where = `${path}: ${section}.${name} pinned ${pin}`
-        const installed = await installedPath(dir, checkout, name)
+        const installed = await installedPath(dir, root, name)
         if (!installed) {
           mismatches.push(`${where} but is not installed`)
         } else if (pin === "workspace:*") {

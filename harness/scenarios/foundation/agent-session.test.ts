@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rename, unlink, writeFile } from "node:fs/promises"
+import { rename, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { POINTER_LINE } from "@iter8/protocol"
 import { type AgentSession, startAgentSession } from "../../rig/agent"
 import { WORKER } from "../../rig/ports"
+import { scratchDir } from "../../rig/scratch"
 import { type RunningService, startService } from "../../rig/service"
 import { waitFor } from "../../rig/wait"
 import { FAKE_CLI_ENTRY, type FakeCliCall, readFakeCliCalls } from "../../stubs/fake-cli"
@@ -20,22 +21,27 @@ async function withSession(
   vars: Record<string, string>,
   body: (context: Context) => Promise<void>,
 ): Promise<void> {
-  const dir = await mkdtemp(`/tmp/iter8-fake-w${WORKER}-`)
-  const log = join(dir, "calls.jsonl")
-  const wake = join(dir, "wake.json")
-  const service = await startService({
-    entry: FAKE_CLI_ENTRY,
-    env: { FAKE_CLI_LOG: log, FAKE_CLI_WAKE: wake, ...vars },
-  })
+  const scratch = await scratchDir(`/tmp/iter8-fake-w${WORKER}-`)
   try {
-    const session = await startAgentSession(service)
+    const dir = scratch.path
+    const log = join(dir, "calls.jsonl")
+    const wake = join(dir, "wake.json")
+    const service = await startService({
+      entry: FAKE_CLI_ENTRY,
+      env: { FAKE_CLI_LOG: log, FAKE_CLI_WAKE: wake, ...vars },
+    })
     try {
-      await body({ service, session, dir, wake, calls: () => readFakeCliCalls(log) })
+      const session = await startAgentSession(service)
+      try {
+        await body({ service, session, dir, wake, calls: () => readFakeCliCalls(log) })
+      } finally {
+        if (alive(session.pid)) await session.exit()
+      }
     } finally {
-      if (alive(session.pid)) await session.exit()
+      await service.stop()
     }
   } finally {
-    await service.stop()
+    await scratch.dispose()
   }
 }
 

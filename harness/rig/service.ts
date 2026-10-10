@@ -11,6 +11,7 @@ import type { AgentSession } from "./agent"
 import { type CliEnv, type CliRun, childEnv, cliCommand, runCli } from "./cli"
 import { throwawayHome } from "./home"
 import { poolRange } from "./ports"
+import type { Scratch } from "./scratch"
 import { waitFor } from "./wait"
 
 const POOL_SIZE = 4
@@ -38,7 +39,10 @@ export type RunningService = {
   cli(args: string[], options?: { cwd?: string }): Promise<CliRun>
   /** Everything `serve` has written to stdout and stderr so far. */
   logs(): string
-  /** SIGTERM, then SIGKILL once the grace period passes; resolves when the process has exited. */
+  /**
+   * SIGTERM, then SIGKILL once the grace period passes; resolves when the process has exited and
+   * the throwaway home is removed.
+   */
   stop(): Promise<void>
 }
 
@@ -56,7 +60,22 @@ function parseJson(text: string): unknown {
 }
 
 export async function startService(options: StartServiceOptions = {}): Promise<RunningService> {
-  const home = await throwawayHome()
+  const pool = await poolRange(POOL_SIZE)
+  const scratch = await throwawayHome()
+  try {
+    return await launch(options, pool, scratch)
+  } catch (error) {
+    await scratch.dispose()
+    throw error
+  }
+}
+
+async function launch(
+  options: StartServiceOptions,
+  pool: string,
+  scratch: Scratch,
+): Promise<RunningService> {
+  const home = scratch.path
   const command =
     options.binary === undefined && options.entry !== undefined
       ? [process.execPath, options.entry]
@@ -64,7 +83,7 @@ export async function startService(options: StartServiceOptions = {}): Promise<R
   const env: CliEnv = {
     command,
     home,
-    pool: await poolRange(POOL_SIZE),
+    pool,
     ...(options.overlayDir === undefined ? {} : { overlayDir: options.overlayDir }),
     ...(options.env === undefined ? {} : { vars: options.env }),
   }
@@ -87,11 +106,15 @@ export async function startService(options: StartServiceOptions = {}): Promise<R
   let stopping: Promise<void> | null = null
   const stop = () => {
     stopping ??= (async () => {
-      if (exited()) return
-      child.kill("SIGTERM")
-      const grace = Bun.sleep(TERM_GRACE_MS).then(() => "grace-passed" as const)
-      if ((await Promise.race([child.exited, grace])) === "grace-passed") child.kill("SIGKILL")
-      await child.exited
+      try {
+        if (exited()) return
+        child.kill("SIGTERM")
+        const grace = Bun.sleep(TERM_GRACE_MS).then(() => "grace-passed" as const)
+        if ((await Promise.race([child.exited, grace])) === "grace-passed") child.kill("SIGKILL")
+        await child.exited
+      } finally {
+        await scratch.dispose()
+      }
     })()
     return stopping
   }
