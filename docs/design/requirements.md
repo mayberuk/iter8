@@ -12,7 +12,7 @@ Two loops share one tool: the mock loop (agent makes a mock, Biruk uses and mark
 - A page whose session has gone (closed, crashed, cleared) must say so; a round never silently reports to nothing — the reviewdesk "didn't reach the agent" failure.
 - A submitted round is retrievable by its session with no digging; Biruk telling the agent "I've left comments" is enough. It arrives labelled as a review round. A busy session gets it queued, never interrupted.
 - Annotating never makes the page lag or blocks typing — reviewdesk froze the first keystroke for 12.6 s; that is the precedent to beat.
-- Connects to Claude Code through its stable surfaces (hooks, skills, commands), not early-access ones — an early-access dependency adds a version floor and churn.
+- Connects to Claude Code through its stable surfaces (hooks, skills, commands, and mods — on by default since Claude Code 2.1.287), not early-access ones — an early-access dependency adds a version floor and churn. Amended 2026-10-10: mods are admitted because they are on by default in the terminal and desktop app; the iter8 mod requires Claude Code 2.1.296+ and is off in non-interactive sessions.
 - The agent can act on a note without coming back to ask which thing was meant — the whole point of pointing instead of describing.
 - Day one page kinds: agent-written HTML files and local framework dev servers.
 - Single user: only Biruk.
@@ -23,7 +23,7 @@ Two loops share one tool: the mock loop (agent makes a mock, Biruk uses and mark
 - A tool-spawned window that opens with the page and closes when the round is done; his everyday browser is fine too.
 - Screenshot on demand.
 - The agent can leave its own notes on the page for context (optional; flagged as possibly complicated).
-- Agent responses go to the terminal; nothing has to render back on the page.
+- Agent responses go to the terminal; nothing has to render back on the page. Amended 2026-10-10: the page also shows finished conversation messages, with older messages loaded on demand; no token streaming.
 
 ## Dealbreakers
 - Buggy.
@@ -59,3 +59,4 @@ Two loops share one tool: the mock loop (agent makes a mock, Biruk uses and mark
 - Everyday browser — challenged with unlock "no per-browser install, full control, open/close per round"; relaxed to spawned window OK, but kept hard that it must work over SSH on the LAN.
 - Instant delivery even when idle — challenged with unlock "next-prompt delivery is simpler and sturdier"; relaxed: "I've left comments" pull is acceptable, a Send button that pushes is better.
 - Fits agent primitives — challenged with unlock "stable hooks/skills avoid an early-access version floor"; agreed, stable surfaces only.
+- Amended 2026-10-10: mods were admitted because they are on by default in the terminal and desktop app; shell hooks remain the fallback where mods do not run (the VS Code panel, `-p`, desktop WSL).

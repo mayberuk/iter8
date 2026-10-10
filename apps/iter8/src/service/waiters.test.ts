@@ -267,6 +267,62 @@ test("re-polling keeps attachment and each owner's new lapse is reported once", 
   expect(waiters.lapsedMods()).toEqual([])
 })
 
+test("aborting an armed mod wait's signal settles it as cancelled and starts the grace at the abort", async () => {
+  let now = 0
+  const waiters = freshWaiters(() => now)
+  const stopping = new AbortController()
+  const outcome = waiters.armMod(owner, 60_000, stopping.signal)
+  now = 10_000
+  expect(waiters.modAttached(owner)).toBe(true)
+
+  stopping.abort()
+
+  expect(await outcome).toBe("cancelled")
+  now = 10_000 + MOD_GRACE_MS - 1
+  expect(waiters.modAttached(owner)).toBe(true)
+  expect(waiters.lapsedMods()).toEqual([])
+  now = 10_000 + MOD_GRACE_MS
+  expect(waiters.modAttached(owner)).toBe(false)
+  expect(waiters.isArmed(owner)).toBe(false)
+  expect(waiters.lapsedMods()).toEqual([owner])
+})
+
+test("a late abort of a settled wait neither settles nor removes a newer wait for the same owner", async () => {
+  let now = 0
+  const waiters = freshWaiters(() => now)
+  const stale = new AbortController()
+  const first = waiters.armMod(owner, 60_000, stale.signal)
+  waiters.wake(owner)
+  expect(await first).toBe("woken")
+  const second = waiters.armMod(owner, 60_000)
+  let settled: WaitOutcome | undefined
+  void second.then((outcome) => {
+    settled = outcome
+  })
+
+  stale.abort()
+  await Promise.resolve()
+
+  expect(settled).toBeUndefined()
+  now = 2 * MOD_GRACE_MS
+  expect(waiters.modAttached(owner)).toBe(true)
+  waiters.wake(owner)
+  expect(await second).toBe("woken")
+})
+
+test("a signal that is already aborted settles the mod wait as cancelled at once and leaves nothing pending", async () => {
+  let now = 0
+  const waiters = freshWaiters(() => now)
+  const outcome = waiters.armMod(owner, 60_000, AbortSignal.abort())
+
+  expect(await outcome).toBe("cancelled")
+  now = MOD_GRACE_MS - 1
+  expect(waiters.modAttached(owner)).toBe(true)
+  now = MOD_GRACE_MS
+  expect(waiters.modAttached(owner)).toBe(false)
+  expect(waiters.isArmed(owner)).toBe(false)
+})
+
 test("random waiter sequences keep one pending wait per owner and settle each once", async () => {
   const operation = fc.record({
     kind: fc.constantFrom("arm", "armMod", "wake", "advance"),

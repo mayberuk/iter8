@@ -7,7 +7,7 @@ export const MOD_GRACE_MS = 5000
 
 export type Waiters = {
   arm(ownerId: OwnerId, timeoutMs: number): Promise<WaitOutcome>
-  armMod(ownerId: OwnerId, timeoutMs: number): Promise<WaitOutcome>
+  armMod(ownerId: OwnerId, timeoutMs: number, signal?: AbortSignal): Promise<WaitOutcome>
   wake(ownerId: OwnerId): void
   isArmed(ownerId: OwnerId): boolean
   modAttached(ownerId: OwnerId): boolean
@@ -19,17 +19,26 @@ export function createWaiters(now: () => number = Date.now): Waiters {
   const pending = new Map<OwnerId, { mod: boolean; settle: (outcome: WaitOutcome) => void }>()
   const lastModSettled = new Map<OwnerId, number>()
 
-  const arm = (ownerId: OwnerId, timeoutMs: number, mod: boolean): Promise<WaitOutcome> => {
+  const arm = (
+    ownerId: OwnerId,
+    timeoutMs: number,
+    mod: boolean,
+    signal?: AbortSignal,
+  ): Promise<WaitOutcome> => {
     pending.get(ownerId)?.settle("replaced")
     return new Promise<WaitOutcome>((resolve) => {
       const timer = setTimeout(() => settle("timeout"), timeoutMs)
       const settle = (outcome: WaitOutcome): void => {
         clearTimeout(timer)
+        signal?.removeEventListener("abort", abort)
         pending.delete(ownerId)
         if (mod) lastModSettled.set(ownerId, now())
         resolve(outcome)
       }
+      const abort = () => settle("cancelled")
       pending.set(ownerId, { mod, settle })
+      if (signal?.aborted) abort()
+      else signal?.addEventListener("abort", abort, { once: true })
     })
   }
 
@@ -43,8 +52,8 @@ export function createWaiters(now: () => number = Date.now): Waiters {
     arm(ownerId, timeoutMs) {
       return arm(ownerId, timeoutMs, false)
     },
-    armMod(ownerId, timeoutMs) {
-      return arm(ownerId, timeoutMs, true)
+    armMod(ownerId, timeoutMs, signal) {
+      return arm(ownerId, timeoutMs, true, signal)
     },
     wake(ownerId) {
       pending.get(ownerId)?.settle("woken")

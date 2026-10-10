@@ -316,7 +316,11 @@ export function createControlApi(deps: ControlApiDeps) {
         if (deliveries.length) {
           return c.json(AgentWaitResult.parse({ outcome: "deliver", deliveries }), 200)
         }
-        const armed = deps.waiters.armMod(owner, Math.max(0, deadline - Date.now()))
+        const armed = deps.waiters.armMod(
+          owner,
+          Math.max(0, deadline - Date.now()),
+          c.req.raw.signal,
+        )
         pushPairing(owner)
         const outcome = await armed
         pushPairing(owner)
