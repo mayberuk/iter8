@@ -15,7 +15,7 @@ const HOP_BY_HOP = ["connection", "keep-alive", "transfer-encoding", "te", "trai
 const DECODED_BY_FETCH = new Set(["gzip", "x-gzip", "deflate", "br", "zstd"])
 const NULL_BODY_STATUS = new Set([101, 204, 205, 304])
 
-function withoutHopByHop(source: Headers): Headers {
+export function withoutHopByHop(source: Headers): Headers {
   const headers = new Headers(source)
   const named = (source.get("connection") ?? "").split(",").map((name) => name.trim())
   for (const name of [...HOP_BY_HOP, ...named]) if (name !== "") headers.delete(name)

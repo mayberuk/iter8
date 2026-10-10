@@ -1,0 +1,25 @@
+import type { CommandDef } from "citty"
+import type { CliDeps } from "../client"
+import { attach } from "./attach"
+import { done } from "./done"
+import { hook } from "./hook"
+import { note } from "./note"
+import { open } from "./open"
+import { rounds } from "./rounds"
+import { show } from "./show"
+import { status } from "./status"
+import { version } from "./version"
+
+export function cliCommands(deps: CliDeps): Record<string, CommandDef> {
+  return {
+    open: open(deps),
+    attach: attach(deps),
+    rounds: rounds(deps),
+    show: show(deps),
+    done: done(deps),
+    note: note(deps),
+    status: status(deps),
+    version: version(deps),
+    hook: hook(deps),
+  }
+}
