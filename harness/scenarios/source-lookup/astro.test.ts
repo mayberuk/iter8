@@ -100,7 +100,7 @@ test(
     expect(openingLine).toBeGreaterThan(1)
     await withStrippedPage(async (view) => {
       const resolved = await resolvedCard(view, MULTILINE)
-      expect(resolved).toMatchObject({ framework: "astro", file: site.file })
+      expect(resolved).toMatchObject({ confidence: "exact", framework: "astro", file: site.file })
       if (!("line" in resolved) || resolved.line === undefined) throw new Error("no line resolved")
       expect(resolved.line).toBeGreaterThanOrEqual(openingLine)
       expect(resolved.line).toBeLessThanOrEqual(closingLine)
@@ -115,6 +115,7 @@ test(
     const { site, closingLine } = await multilineTag()
     await withStrippedPage(async (view) => {
       expect(await resolvedCard(view, MULTILINE)).toMatchObject({
+        confidence: "exact",
         framework: "astro",
         file: site.file,
         line: closingLine,
