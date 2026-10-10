@@ -193,6 +193,10 @@ describe("command palette", () => {
 
   test("a seeded draft appears under Notes and Enter opens the sheet on it", async () => {
     const o = await open({ pairing: LIVE, pageState: seed(TWO_DRAFTS), prefs: TOUR_DONE })
+    // The dock springs to its place, so a box read mid-slide is not where it rests.
+    await dock(o.overlay).evaluate((el) =>
+      Promise.all(el.getAnimations().map((animation) => animation.finished)),
+    )
     const before = await dock(o.overlay).boundingBox()
     await openPalette(o)
     await commandInput(o.overlay).fill("n22")
@@ -209,9 +213,14 @@ describe("command palette", () => {
 
     await commandInput(o.overlay).press("Enter")
     await until("the palette to close", async () => !(await palette(o.overlay).isVisible()))
+    let after: Awaited<ReturnType<Locator["boundingBox"]>> = null
     await until("the dock to make room for the sheet", async () => {
-      const after = await dock(o.overlay).boundingBox()
+      after = await dock(o.overlay).boundingBox()
       return before !== null && after !== null && after.x < before.x - 100
+    }).catch((error: Error) => {
+      throw new Error(
+        `${error.message}; dock before ${JSON.stringify(before)}, after ${JSON.stringify(after)}`,
+      )
     })
 
     await o.page.keyboard.press("Backspace")
