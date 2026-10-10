@@ -992,6 +992,35 @@ describe("hook waits and prompts, in depth", () => {
     expect(await afterwards.json()).toEqual({ pointers: [] })
   })
 
+  test("a prompt points at and announces only its own owner's rounds, leaving another owner's eligible", async () => {
+    const t = setup()
+    const a = await t.startSession(4821, "session-a")
+    const b = await t.startSession(5133, "session-b")
+    const pageA = (await t.openServer(a)).page
+    const pageB = (await t.openServer(b, "http://localhost:4000")).page
+    const roundA = t.sendRound(pageA.id, "For session a")
+    const roundB = t.sendRound(pageB.id, "For session b")
+    const announced = () =>
+      t.db.query("SELECT owner_id, round_id FROM announcements ORDER BY round_id").all()
+
+    const promptA = await t.post("/hook/prompt", { pid: a.pid })
+    expect(await promptA.json()).toEqual({
+      pointers: [{ roundId: roundA.id, pageId: pageA.id, noteCount: 1 }],
+    })
+    expect(announced()).toEqual([{ owner_id: a.ownerId, round_id: roundA.id }])
+    expect(t.inbox.round(roundA.id)?.state.stage).toBe("announced")
+    expect(t.inbox.round(roundB.id)?.state.stage).toBe("queued")
+
+    const promptB = await t.post("/hook/prompt", { pid: b.pid })
+    expect(await promptB.json()).toEqual({
+      pointers: [{ roundId: roundB.id, pageId: pageB.id, noteCount: 1 }],
+    })
+    expect(announced()).toEqual([
+      { owner_id: a.ownerId, round_id: roundA.id },
+      { owner_id: b.ownerId, round_id: roundB.id },
+    ])
+  })
+
   test("hook stop and end answer ok", async () => {
     const t = setup()
     const session = await t.startSession(4821, "larkspur-session")
