@@ -38,8 +38,9 @@ export function chooseAnchor(
   const [only] = exact
   if (only !== undefined && exact.length === 1) return { kind: "anchored", index: only.index }
 
-  const identified = stored.role !== undefined || stored.name !== undefined
-  const pool = exact.length > 1 ? exact : identified ? sameRoleAndName : []
+  // Without an accessible name the text is the only identity, so a different text is a different
+  // element: a removed button's same-role neighbour reflows into its box and must not take its note.
+  const pool = exact.length > 1 ? exact : stored.name !== undefined ? sameRoleAndName : []
   const reach = Math.hypot(stored.box.width, stored.box.height) / 2 + NEAR_SLACK_PX
   const [nearest, runnerUp] = pool
     .map(({ candidate, index }) => ({ index, distance: centreDistance(stored.box, candidate.box) }))
