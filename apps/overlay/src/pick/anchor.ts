@@ -105,6 +105,11 @@ export function resolveAnchor(
   stored: ElementAnchor,
 ): { kind: "anchored"; el: Element } | { kind: "lost"; reason: "missing" | "ambiguous" } {
   const matched = resolveSelector(stored.selector)
+  // An agent's `iter8 note --at` anchor carries a selector and no identity, which no candidate's
+  // role, name and text can match; its selector alone names the element when it matches one.
+  const [only] = matched
+  if (stored.role === undefined && stored.name === undefined && stored.text === undefined)
+    if (only !== undefined && matched.length === 1) return { kind: "anchored", el: only }
   const elements = matched.length > 0 ? matched : sameTagElements(stored.selector)
   const choice = chooseAnchor(stored, elements.map(candidateOf))
   if (choice.kind === "lost") return choice

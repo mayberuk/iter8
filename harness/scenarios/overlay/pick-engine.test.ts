@@ -338,6 +338,31 @@ test("ids and test ids with CSS-special characters are escaped and still round-t
   )
 })
 
+test("an anchor with only a selector resolves to the one element it matches, and is lost when it matches none or several", async () => {
+  await open("/static/index.html")
+  const result = await page.evaluate(() => {
+    const engine = (window as unknown as EngineWindow).__iter8PickEngine
+    const card = document.querySelector('[data-source-target="card"]')
+    if (!card) throw new Error("the static fixture has no card")
+    const bare = (selector: string) => ({
+      selector: [selector],
+      box: { x: 0, y: 0, width: 0, height: 0 },
+      renderGeneration: 0,
+    })
+    const one = engine.resolveAnchor(bare('[data-source-target="card"]'))
+    const none = engine.resolveAnchor(bare("#no-such-element"))
+    const several = engine.resolveAnchor(bare("button"))
+    return {
+      one: one.kind === "anchored" && one.el === card,
+      none: none.kind,
+      several: several.kind,
+      buttons: document.querySelectorAll("button").length,
+    }
+  })
+  expect(result.buttons).toBeGreaterThan(1)
+  expect(result).toMatchObject({ one: true, none: "lost", several: "lost" })
+})
+
 test("a node replaced by an identical re-render re-anchors to the new node", async () => {
   await open("/static/index.html")
   const result = await page.evaluate(() => {
