@@ -1348,6 +1348,9 @@ describe("the source lead", () => {
       await o.overlay.getByRole("button", { name: "Note 1, Fix" }).click()
       await o.overlay.getByRole("button", { name: "Delete" }).click()
       await until("the draft to be gone", () => o.mock.draft().length === 0)
+      // The composer stays open until the overlay reads the delete reply, and the pick tool reads
+      // as pressed while it does, so picking before it closes would race that reply.
+      await until("the composer to close", async () => !(await noteBox(o).isVisible()))
 
       hold.release()
       await composeOn(o, o.page.locator(DETAILS))
