@@ -1,0 +1,838 @@
+.sheet {
+  position: fixed;
+  top: 12px;
+  right: 14px;
+  bottom: 16px;
+  width: 416px;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--lift);
+  animation: sheet-in 0.3s var(--out) both;
+}
+@keyframes sheet-in {
+  from {
+    transform: translateX(calc(100% + 24px));
+    opacity: 0;
+  }
+}
+.sheet .sh-h {
+  padding: 16px 16px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.sheet .sh-h h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.sheet .sh-h .sub {
+  font-size: 12.5px;
+  color: var(--mute);
+  margin-top: 5px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+.sheet .sh-h .sub b {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.sheet .sh-h .sub .mono {
+  font-size: 11px;
+  color: var(--faint);
+}
+.sheet .sh-h .sub .meter {
+  width: 17px;
+  height: 11px;
+  margin-right: 2px;
+}
+.sheet .sh-h .sub .av {
+  --s: 16px;
+}
+.sheet .sh-h .iconbtn {
+  margin-left: auto;
+  margin-top: -4px;
+}
+.sheet .tab .ct {
+  font: 500 11px var(--mono);
+  color: var(--mute);
+  background: var(--well);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.sheet .tab[aria-selected="true"] .ct {
+  background: var(--solid);
+  color: var(--on-solid);
+}
+.sheet .sh-b {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 12px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+.sheet .notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sheet .note {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px 120px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 10px 10px 4px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  --c: var(--fix);
+  --cd: var(--fix-d);
+  --ct: var(--fix-t);
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    box-shadow 0.12s,
+    opacity 0.12s;
+}
+.sheet .note.fix,
+.sheet .hn.fix {
+  --c: var(--fix);
+  --cd: var(--fix-d);
+  --ct: var(--fix-t);
+}
+.sheet .note.change,
+.sheet .hn.change {
+  --c: var(--change);
+  --cd: var(--change-d);
+  --ct: var(--change-t);
+}
+.sheet .note.question,
+.sheet .hn.question {
+  --c: var(--question);
+  --cd: var(--question-d);
+  --ct: var(--question-t);
+}
+.sheet .note.keep,
+.sheet .hn.keep {
+  --c: var(--keep);
+  --cd: var(--keep-d);
+  --ct: var(--keep-t);
+}
+.sheet .note + .note {
+  margin-top: 7px;
+}
+.sheet .note + .note::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 10px;
+  top: -5px;
+  height: 1px;
+  background: var(--line);
+}
+.sheet .note:hover {
+  background: var(--paper-2);
+}
+.sheet .note.focus {
+  background: var(--raised);
+  border-color: var(--cobalt);
+  box-shadow: 0 3px 0 var(--cobalt-d);
+}
+.sheet .note.dragging {
+  opacity: 0.4;
+}
+.sheet .note.over {
+  box-shadow: 0 -3px 0 0 var(--cobalt);
+}
+.sheet .note .grip {
+  color: var(--edge-2);
+  cursor: grab;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.sheet .note:hover .grip,
+.sheet .note.focus .grip {
+  opacity: 1;
+}
+.sheet .frame {
+  position: relative;
+  width: 120px;
+  height: 76px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 0 var(--base-2);
+}
+.sheet .frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+}
+.sheet .frame .fn {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  font: 600 10px / 1 var(--mono);
+  color: var(--on-accent);
+  background: var(--c);
+  padding: 3px 4px;
+  border-radius: 4px;
+  box-shadow: 0 1.5px 0 var(--cd);
+}
+.sheet .frame .edge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--c);
+}
+.sheet .frame .multi {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  font: 500 10px / 1 var(--mono);
+  color: var(--ink-2);
+  background: var(--paper);
+  padding: 3px 4px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.sheet .eb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+  color: var(--faint);
+}
+.sheet .eb .gl {
+  width: 15px;
+  height: 15px;
+}
+.sheet .it {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ct);
+}
+.sheet .nb {
+  min-width: 0;
+}
+.sheet .nb .txt {
+  margin-top: 3px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  word-spacing: 0.04em;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sheet .nb .tgt {
+  font: 400 11px var(--mono);
+  color: var(--mute);
+  margin-top: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet .nb .moved {
+  margin-top: 7px;
+  padding: 0 8px;
+}
+.sheet .nb .acts {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.sheet .note:hover .acts,
+.sheet .note.focus .acts,
+.sheet .note:focus-within .acts {
+  opacity: 1;
+}
+.sheet .nb .acts .iconbtn {
+  width: 28px;
+  height: 26px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 0 var(--edge);
+}
+.sheet .nb .acts .iconbtn:hover {
+  background: var(--raised);
+}
+.sheet .nb .acts .iconbtn:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--edge);
+}
+.sheet .nb .acts .iconbtn.del:hover {
+  color: var(--fix-d);
+}
+.sheet .empty-r {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--mute);
+}
+.sheet .empty-r .ring2 {
+  width: 56px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--cobalt);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 4px 0 var(--edge);
+}
+.sheet .empty-r h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.sheet .empty-r p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.sheet .empty-r p kbd {
+  margin: 0 1px;
+}
+
+.sheet .sh-f {
+  border-top: 1px solid var(--line);
+  padding: 12px 16px 14px;
+  background: var(--paper-2);
+  border-radius: 0 0 12px 12px;
+}
+.sheet .sum {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sheet .sum .txt {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--mute);
+  line-height: 1.35;
+}
+.sheet .sum .txt b {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-right: 6px;
+}
+.sheet .sum .bars {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 3px;
+  overflow: hidden;
+  width: 160px;
+  background: var(--well);
+}
+.sheet .sum .bars i {
+  display: block;
+  height: 100%;
+  background: var(--c);
+  box-shadow: inset 0 -2px 0 var(--cd);
+}
+.sheet .sum .bars i.fix {
+  --c: var(--fix);
+  --cd: var(--fix-d);
+}
+.sheet .sum .bars i.change {
+  --c: var(--change);
+  --cd: var(--change-d);
+}
+.sheet .sum .bars i.question {
+  --c: var(--question);
+  --cd: var(--question-d);
+}
+.sheet .sum .bars i.keep {
+  --c: var(--keep);
+  --cd: var(--keep-d);
+}
+.sheet .sh-f .send {
+  height: 36px;
+}
+.sheet .gonebox {
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 0 var(--base-2);
+}
+.sheet .gonebox h4 {
+  margin: 0 0 2px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.sheet .gonebox p {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--mute);
+}
+.sheet .busyline {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--busy-t);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sheet .wakeline {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--mute);
+}
+.sheet .busyline .meter {
+  width: 17px;
+  height: 11px;
+}
+
+.sheet .round {
+  margin-bottom: 6px;
+}
+.sheet .round + .round {
+  margin-top: 22px;
+  border-top: 2px solid var(--line);
+}
+.sheet .rh {
+  position: sticky;
+  top: -12px;
+  z-index: 3;
+  margin: 0 -12px;
+  padding: 12px 16px 10px;
+  background: var(--paper);
+}
+.sheet .rh1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.sheet .rh h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.sheet .rh .out {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--keep-t);
+}
+.sheet .rh .out.open {
+  color: var(--amber-t);
+}
+.sheet .rh .out.sent {
+  color: var(--cobalt-t);
+}
+.sheet .rh .out.failed {
+  color: var(--fix-t);
+}
+.sheet .rh2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+.sheet .rh2 b {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.sheet .rh2 .mono {
+  font-size: 11px;
+  color: var(--faint);
+}
+.sheet .rh2 .av {
+  --s: 16px;
+}
+.sheet .rh .ticks {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.sheet .rh .ticks i {
+  width: 10px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--line-2);
+  box-shadow: inset 0 -1.5px 0 var(--edge);
+}
+.sheet .rh .ticks i.done,
+.sheet .rh .ticks i.answered {
+  background: var(--keep);
+  box-shadow: inset 0 -1.5px 0 var(--keep-d);
+}
+.sheet .rh .ticks i.working,
+.sheet .rh .ticks i.queued {
+  background: var(--change);
+  box-shadow: inset 0 -1.5px 0 var(--change-d);
+}
+.sheet .rh .ticks i.delivered {
+  background: var(--cobalt);
+  box-shadow: inset 0 -1.5px 0 var(--cobalt-d);
+}
+.sheet .rh .ticks i.failed {
+  background: var(--fix);
+  box-shadow: inset 0 -1.5px 0 var(--fix-d);
+}
+.sheet .orphan-rows {
+  margin: 0 0 6px;
+}
+.sheet .orphan-rows p {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.sheet .strip {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--film);
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 3px 0 var(--film-d);
+}
+.sheet .strip::before,
+.sheet .strip::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 6px,
+    rgba(255, 250, 235, 0.14) 6px 10px
+  );
+}
+.sheet .strip::before {
+  top: 2px;
+}
+.sheet .strip::after {
+  bottom: 2px;
+}
+.sheet .sframe {
+  position: relative;
+  flex: none;
+  width: 78px;
+  height: 50px;
+  padding: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--film-frame);
+  cursor: pointer;
+  transition:
+    transform 0.14s var(--spring),
+    box-shadow 0.14s;
+}
+.sheet .sframe:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 1.5px #fcfbf6;
+}
+.sheet .sframe img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+}
+.sheet .sframe .fn {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  font: 600 9.5px / 1 var(--mono);
+  color: #fff;
+  background: rgba(34, 31, 25, 0.8);
+  padding: 2px 3px;
+  border-radius: 3px;
+}
+.sheet .sframe .stamp {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  background: var(--sc);
+  color: #fff;
+  box-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.45);
+}
+.sheet .sframe .stamp svg {
+  width: 9px;
+  height: 9px;
+}
+.sheet .strip + .hn {
+  margin-top: 6px;
+}
+.sheet .hn {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 0 10px;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--line);
+  --c: var(--fix);
+  --cd: var(--fix-d);
+  --ct: var(--fix-t);
+}
+.sheet .hn:last-child {
+  border-bottom: 0;
+}
+.sheet .hn .num {
+  font: 500 10px / 1 var(--mono);
+  color: var(--faint);
+  padding-top: 2px;
+  text-align: center;
+}
+.sheet .hn .num .gl {
+  width: 20px;
+  height: 20px;
+  margin: 0 auto 5px;
+}
+.sheet .hn .body {
+  min-width: 0;
+}
+.sheet .hn .hl1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+}
+.sheet .hn .hl1 .st-chip {
+  margin-left: auto;
+}
+.sheet .hn .q {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.42;
+  word-spacing: 0.04em;
+  color: var(--ink);
+}
+.sheet .hn .prov {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  font: 400 11px var(--mono);
+  color: var(--mute);
+  white-space: nowrap;
+  min-width: 0;
+}
+.sheet .hn .prov .cmp {
+  color: var(--ink-2);
+  flex: none;
+}
+.sheet .hn .prov .fl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.sheet .hn .prov .sep {
+  color: var(--edge-2);
+}
+.sheet .hn .when {
+  margin-top: 2px;
+  font: 400 10.5px var(--mono);
+  color: var(--faint);
+}
+.sheet .reply {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px 11px;
+  border-radius: 10px;
+  background: var(--reply-bg);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.sheet .reply.claude {
+  background: var(--claude-tint);
+  border-color: var(--claude-tint-line);
+}
+.sheet .reply .av {
+  --s: 20px;
+  margin-top: 1px;
+}
+.sheet .reply .who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.sheet .reply .who span {
+  font: 400 10.5px var(--mono);
+  color: var(--mute);
+}
+.sheet .reply p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sheet .hn .row2 {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  align-items: center;
+}
+.sheet .chipbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  box-shadow:
+    0 2px 0 var(--edge),
+    var(--top);
+  margin-bottom: 2px;
+  transition:
+    transform 0.09s var(--press),
+    box-shadow 0.09s var(--press),
+    background 0.12s;
+}
+.sheet .chipbtn:hover {
+  background: var(--raised);
+}
+.sheet .chipbtn:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--edge);
+}
+.sheet .chipbtn[aria-expanded="true"] {
+  background: var(--well);
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--edge);
+}
+
+.sheet .compare {
+  position: relative;
+  margin-top: 10px;
+  height: 168px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 0 var(--base-2);
+  background: var(--paper-2);
+  user-select: none;
+  touch-action: none;
+  cursor: ew-resize;
+}
+.sheet .compare .lay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 400 11px var(--mono);
+  color: var(--mute);
+}
+.sheet .compare .lay img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  pointer-events: none;
+}
+.sheet .compare .after {
+  clip-path: inset(0 0 0 var(--p));
+}
+.sheet .compare .lbl {
+  position: absolute;
+  bottom: 8px;
+  font: 600 10px / 1 var(--mono);
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--solid);
+  color: var(--on-solid);
+  letter-spacing: 0.04em;
+  box-shadow: 0 2px 0 var(--solid-d);
+}
+.sheet .compare .lbl.b {
+  left: 8px;
+}
+.sheet .compare .lbl.a {
+  right: 8px;
+}
+.sheet .compare .bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--p);
+  width: 2px;
+  margin-left: -1px;
+  background: var(--cobalt);
+}
+.sheet .compare .knob {
+  position: absolute;
+  top: 50%;
+  left: var(--p);
+  width: 34px;
+  height: 30px;
+  margin: -17px 0 0 -17px;
+  border-radius: 8px;
+  background: var(--paper);
+  border: 1.5px solid var(--cobalt-d);
+  box-shadow: 0 3px 0 var(--cobalt-d);
+  display: grid;
+  place-items: center;
+  color: var(--cobalt);
+}
+.sheet .compare .slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+}
+.sheet .compare:has(.slide:focus-visible) .knob {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}

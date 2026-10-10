@@ -198,6 +198,11 @@ export function sessionName(pairing: Pick<Pairing, "cwd"> | null, pageId: PageId
   return segments.at(-1) ?? pageId
 }
 
+/** Round ids are not contiguous, so the next one is the highest number plus one, as the service allocates it. */
+export function nextRoundNumber(rounds: readonly Round[]): number {
+  return Math.max(0, ...rounds.map((round) => Number(round.id.slice(1)))) + 1
+}
+
 function roundLabel(id: RoundId): string {
   return `Round ${id.slice(1)}`
 }
@@ -260,6 +265,11 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
   const anchors = signal<Map<NoteId, AnchorResolution>>(new Map())
 
   const lastSentNoteIds = signal<NoteId[]>([])
+  /** One in-flight guard and one key for every surface that sends, so overlapping sends make one round. */
+  const sending: { inFlight: boolean; key: { revision: string; key: IdempotencyKey } | null } = {
+    inFlight: false,
+    key: null,
+  }
   const deliveredUntil = signal<number | null>(null)
 
   const orderedDrafts = computed(() =>
@@ -694,6 +704,7 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
     upstreamFailures,
     anchors,
     lastSentNoteIds,
+    sending,
     deliveredUntil,
     orderedDrafts,
     name,

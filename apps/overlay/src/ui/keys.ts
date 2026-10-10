@@ -7,6 +7,10 @@ import { regionTarget, snapshotElement } from "../pick/snapshot"
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
 
+function togglesPalette(event: KeyboardEvent): boolean {
+  return (IS_MAC ? event.metaKey : event.ctrlKey) && event.key.toLowerCase() === "k"
+}
+
 function editable(target: EventTarget | undefined): target is HTMLElement {
   if (target instanceof HTMLInputElement) return !/^(radio|checkbox|button)$/.test(target.type)
   return (
@@ -115,7 +119,7 @@ export function listenKeys(deps: {
     const mod = IS_MAC ? event.metaKey : event.ctrlKey
     const mode = model.mode.value
 
-    if (mod && key.toLowerCase() === "k") {
+    if (togglesPalette(event)) {
       model.paletteOpen.value = !model.paletteOpen.value
       return true
     }
@@ -242,7 +246,7 @@ export function listenKeys(deps: {
     const target = event.composedPath()[0]
     const ours = target instanceof Node && root.contains(target)
     const typing = editable(target)
-    if (typing && !ours) return
+    if (typing && !ours && !togglesPalette(event)) return
     // A focused control of ours answers Enter and Space itself.
     if (
       ours &&

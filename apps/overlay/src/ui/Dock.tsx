@@ -13,6 +13,7 @@ import {
   type ConnectionState,
   type DockState,
   type Mode,
+  nextRoundNumber,
   sessionName,
 } from "../model"
 import { adoptSheet, useOverlay, useSheet } from "./context"
@@ -132,44 +133,42 @@ export function NoticeDock(props: { root: ShadowRoot; boot: OverlayBoot; state: 
   )
 }
 
-/** @public Shared with the round sheet's Send. */
 export function useSendRound(): {
   send: () => Promise<void>
   blocked: "no-pairing" | "gone" | "empty" | null
   label: "Send" | "Queue"
 } {
   const { model, connection } = useOverlay()
-  const inFlight = useRef(false)
-  const key = useRef<{ revision: string; key: IdempotencyKey } | null>(null)
   const blocked = model.sendBlocked.value
   const label = model.pairing.value?.state.status === "busy" ? "Queue" : "Send"
 
   async function send() {
     const pairing = model.pairing.value
-    if (inFlight.current || !pairing || model.sendBlocked.value) return
+    const { sending } = model
+    if (sending.inFlight || !pairing || model.sendBlocked.value) return
     const noteIds = model.draftOrder.value
     // A retry of the same drafts reuses its key, so a send that landed before a dropped reply is not sent twice.
     const revision = JSON.stringify([pairing.generation, model.orderedDrafts.value])
-    if (key.current?.revision !== revision)
-      key.current = { revision, key: IdempotencyKey.parse(crypto.randomUUID()) }
-    inFlight.current = true
+    const key =
+      sending.key?.revision === revision
+        ? sending.key.key
+        : IdempotencyKey.parse(crypto.randomUUID())
+    sending.key = { revision, key }
+    sending.inFlight = true
     try {
-      model.applySendResult(
-        await connection.send(buildSendRequest(noteIds, pairing, key.current.key)),
-      )
+      model.applySendResult(await connection.send(buildSendRequest(noteIds, pairing, key)))
     } catch {
       model.pushToast("Couldn't reach iter8 — your notes are still here, send again", {
         tone: "failed",
       })
     } finally {
-      inFlight.current = false
+      sending.inFlight = false
     }
   }
 
   return { send, blocked, label }
 }
 
-/** @public Shared with the round sheet and the palette, which list the same sessions. */
 export function SessionRows(props: {
   sessions: readonly LiveSession[]
   current: OwnerId | null
@@ -721,7 +720,7 @@ export function Dock() {
           data-kbd="R"
           onClick={() => model.toggleSheet("round")}
         >
-          <span class="rl">ROUND {model.rounds.value.length + 1}</span>
+          <span class="rl">ROUND {nextRoundNumber(model.rounds.value)}</span>
           <span class={["n", count ? "" : "zero", bump ? "bump" : ""].filter(Boolean).join(" ")}>
             {count}
           </span>

@@ -41,9 +41,30 @@ const QUEUED = Round.parse({
 })
 const QUEUED_THEN_ORPHANED = Round.parse({ ...QUEUED, state: orphanedJson.state })
 const SEEDED = { drafts: [DRAFT], rounds: [], agentNotes: [] }
+const FIXTURE_HEADINGS = [
+  { id: "overview-heading", text: "Overview" },
+  { id: "details-heading", text: "Details" },
+  { id: "notes-heading", text: "Notes" },
+]
 const THREE_DRAFTS = {
-  drafts: ["N21", "N22", "N23"].map((id) =>
-    Note.parse({ ...noteJson, id, pageId: "mockpage", body: `Body of ${id}` }),
+  drafts: ["N21", "N22", "N23"].map((id, i) =>
+    Note.parse({
+      ...noteJson,
+      id,
+      pageId: "mockpage",
+      body: `Body of ${id}`,
+      target: {
+        kind: "element",
+        anchor: {
+          selector: [`#${FIXTURE_HEADINGS[i]?.id}`],
+          role: "heading",
+          text: FIXTURE_HEADINGS[i]?.text,
+          box: { x: 0, y: 0, width: 100, height: 30 },
+          renderGeneration: 0,
+        },
+      },
+      capture: undefined,
+    }),
   ),
   rounds: [],
   agentNotes: [],
@@ -675,7 +696,7 @@ describe("rounds that change after the page loaded", () => {
       liveSessions: [OTHER],
       pageState: { drafts: [], rounds: [QUEUED], agentNotes: [] },
     })
-    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 2")
+    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 14")
     const notice = o.overlay.getByRole("status").filter({ hasText: "Round 13 wasn't delivered" })
     expect(await notice.count()).toBe(0)
     await socketOpen(o)
@@ -687,7 +708,7 @@ describe("rounds that change after the page loaded", () => {
         .filter({ hasText: /^Round 13 not delivered/ })
         .isVisible(),
     )
-    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 2")
+    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 14")
     expect(await notice.count()).toBe(1)
   }, 30_000)
 })

@@ -189,6 +189,9 @@ describe("the host page is left as it was", () => {
     const shape = await page.evaluate(() => {
       const hosts = document.querySelectorAll("iter8-overlay")
       const root = hosts[0]?.shadowRoot
+      const texts = [...(root?.adoptedStyleSheets ?? [])].map((sheet) =>
+        [...sheet.cssRules].map((rule) => rule.cssText).join("\n"),
+      )
       return {
         hosts: hosts.length,
         parent: hosts[0]?.parentElement?.tagName,
@@ -196,9 +199,12 @@ describe("the host page is left as it was", () => {
         dockInRoot: root?.querySelector('[role="toolbar"]') !== null,
         dockInPage: document.querySelector('[role="toolbar"]') !== null,
         styleElements: root?.querySelectorAll("style").length,
-        sheets: root?.adoptedStyleSheets.length,
+        linkElements: root?.querySelectorAll("link").length,
+        sheets: texts.length,
+        distinctSheets: new Set(texts).size,
       }
     })
+    expect(shape.sheets).toBeGreaterThan(0)
     expect(shape).toEqual({
       hosts: 1,
       parent: "HTML",
@@ -206,7 +212,9 @@ describe("the host page is left as it was", () => {
       dockInRoot: true,
       dockInPage: false,
       styleElements: 0,
-      sheets: 2,
+      linkElements: 0,
+      sheets: shape.sheets,
+      distinctSheets: shape.sheets,
     })
   }, 30_000)
 
@@ -324,7 +332,9 @@ describe("teardown", () => {
     await until("the attach menu", () =>
       overlay.getByRole("dialog", { name: "Attach this page to a session" }).isVisible(),
     )
-    expect(await pageListeners(page)).toContain("window:pointerdown:capture")
+    await until("the menu's listener", async () =>
+      (await pageListeners(page)).includes("window:pointerdown:capture"),
+    )
     await removeHostAndExpectBaseline(page, baseline)
   }, 30_000)
 

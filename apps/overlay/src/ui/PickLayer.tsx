@@ -1,5 +1,790 @@
+import type {
+  Box,
+  Capture,
+  ElementAnchor,
+  NoteId,
+  NoteTarget,
+  ResolvedSourceLead,
+} from "@iter8/protocol"
+import { batch, computed, effect, untracked, useComputed } from "@preact/signals"
 import type { JSX } from "preact"
+import { useEffect, useRef, useState } from "preact/hooks"
+import { enrich } from "../enrich/run"
+import { loadSourceLookup } from "../enrich/source"
+import { type Mode, toDraftBody } from "../model"
+import { parentAcrossShadow, resolveAnchor, resolveSelector } from "../pick/anchor"
+import { identityOf, regionTarget, snapshotElement } from "../pick/snapshot"
+import { Composer, shake } from "./Composer"
+import { useOverlay, useSheet } from "./context"
+import { SHOT_READY } from "./Markup"
+import pickCss from "./pick.css" with { type: "text" }
+
+const ACTIVE: ReadonlySet<Mode> = new Set(["pick", "region", "compose"])
+const SWALLOWED = ["mousedown", "mouseup", "click", "dblclick", "auxclick"] as const
+const DRAG_PX = 6
+const REGION_MIN_PX = 8
+/** The sketch's lens spring: tracks a fast pointer without overshooting the target. */
+const STIFFNESS = 560
+const DAMPING = 36
+/** Caps a step after a stalled frame, where a larger one would make the spring explode. */
+const MAX_STEP_S = 0.05
+/** Within this many pixels and pixels per second the ring snaps, so a settled lens stops writing. */
+const SETTLE = 0.1
+const EDGE = 12
+const COMPOSER_GAP = 16
+const CHIP_GAP = 14
+const CLIMB_DEPTH = 4
+
+type Rect = { x: number; y: number; w: number; h: number }
+type Lead = ResolvedSourceLead | "pending" | null
+
+type Run = {
+  controller: AbortController
+  target: NoteTarget
+  before: ReadonlySet<NoteId>
+  noteId: NoteId | null
+  attach: boolean
+  marked: boolean
+  lastInput: number
+  capture: Capture | null
+}
+
+function viewRect(el: Element): Rect {
+  const r = el.getBoundingClientRect()
+  return { x: r.left, y: r.top, w: r.width, h: r.height }
+}
+
+function boxRect(box: Box): Rect {
+  return { x: box.x - window.scrollX, y: box.y - window.scrollY, w: box.width, h: box.height }
+}
+
+function roundedPath({ x, y, w, h }: Rect, radius = 6): string {
+  const k = Math.max(0, Math.min(radius, w / 2, h / 2))
+  return `M${x + k} ${y}H${x + w - k}A${k} ${k} 0 0 1 ${x + w} ${y + k}V${y + h - k}A${k} ${k} 0 0 1 ${x + w - k} ${y + h}H${x + k}A${k} ${k} 0 0 1 ${x} ${y + h - k}V${y + k}A${k} ${k} 0 0 1 ${x + k} ${y}Z`
+}
+
+function anchorsOf(target: NoteTarget): readonly ElementAnchor[] {
+  switch (target.kind) {
+    case "element":
+      return [target.anchor]
+    case "elements":
+      return target.anchors
+    case "region":
+      return []
+  }
+}
+
+function withoutScreenshot(capture: Capture): Capture {
+  const { screenshot: _screenshot, ...rest } = capture
+  return rest
+}
+
+/** A marked-up capture's screenshot is attached by the markup layer, which enrichment never sees. */
+function keepMarkedShot(next: Capture, held: Capture | undefined): Capture {
+  if (held?.screenshot) return { ...next, screenshot: held.screenshot }
+  if (!held?.omittedParts.includes("screenshot") || next.omittedParts.includes("screenshot"))
+    return next
+  return {
+    ...next,
+    completeness: next.completeness === "complete" ? "partial" : next.completeness,
+    omittedParts: [...next.omittedParts, "screenshot"],
+  }
+}
+
+function tagOf(el: Element): string {
+  const first = el.classList[0]
+  return first ? `${el.localName}.${first}` : el.localName
+}
+
+function describe(el: Element) {
+  const rect = el.getBoundingClientRect()
+  const { name, text } = identityOf(el)
+  const path: Element[] = []
+  for (
+    let at: Element | null = el;
+    at && at !== document.body && at !== document.documentElement && path.length < CLIMB_DEPTH;
+    at = parentAcrossShadow(at)
+  )
+    path.unshift(at)
+  return {
+    tag: tagOf(el),
+    dims: `${Math.round(rect.width)} × ${Math.round(rect.height)}`,
+    name: name ?? text,
+    path: path.map(tagOf),
+  }
+}
+
+async function afterPaint(): Promise<void> {
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  await scheduler.yield()
+}
 
 export function PickLayer(): JSX.Element | null {
-  return null
+  useSheet(pickCss)
+  const { model, connection, root, host, boot, errors, renderGeneration } = useOverlay()
+  const ringRef = useRef<HTMLDivElement>(null)
+  const veilRef = useRef<HTMLDivElement>(null)
+  const chipRef = useRef<HTMLDivElement>(null)
+  const marksRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const markEls = useRef<Element[]>([])
+  const picked = useRef<Element[]>([])
+  const targets = useRef<(Element | null)[]>([])
+  const run = useRef<Run | null>(null)
+  const stored = useRef<Capture | undefined>(undefined)
+  const lookup = useRef<ReturnType<typeof loadSourceLookup> | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const [lead, setLead] = useState<Lead>(null)
+  const [thumb, setThumb] = useState<string | null>(null)
+  const [attach, setAttach] = useState(true)
+  const target = useComputed(() => model.composer.value?.target ?? null).value
+
+  useEffect(() => {
+    if (thumb === null) return
+    return () => URL.revokeObjectURL(thumb)
+  }, [thumb])
+
+  useEffect(() => {
+    const onReady = (event: Event) => {
+      if (!(event instanceof CustomEvent) || !model.composer.peek()?.shot) return
+      if (event.detail instanceof Blob) setThumb(URL.createObjectURL(event.detail))
+    }
+    root.addEventListener(SHOT_READY, onReady)
+    return () => root.removeEventListener(SHOT_READY, onReady)
+  }, [root, model])
+
+  useEffect(() => {
+    function deliver(current: Run) {
+      const capture = current.capture
+      if (!capture) return
+      const applied = current.attach ? capture : withoutScreenshot(capture)
+      if (current.noteId === null) {
+        const open = model.composer.peek()
+        if (open?.target === current.target)
+          model.enrichmentDone(current.marked ? keepMarkedShot(applied, open.capture) : applied)
+        return
+      }
+      const note = model.drafts.peek().find((draft) => draft.id === current.noteId)
+      if (!note) return
+      const body = toDraftBody(
+        {
+          intent: note.intent,
+          body: note.body,
+          target: note.target,
+          anchorStatus: note.anchorStatus,
+        },
+        current.marked ? keepMarkedShot(applied, note.capture) : applied,
+      )
+      connection.putDraft(note.id, body)
+      model.noteUpdated({ ...note, ...body })
+    }
+
+    function elementAt(box: Box): Element | null {
+      const x = box.x - window.scrollX + box.width / 2
+      const y = box.y - window.scrollY + box.height / 2
+      return (
+        document
+          .elementsFromPoint(x, y)
+          .find(
+            (el) =>
+              el !== host &&
+              el !== document.body &&
+              el !== document.documentElement &&
+              !host.contains(el),
+          ) ?? null
+      )
+    }
+
+    async function enrichRun(current: Run, first: Element | null) {
+      const { signal } = current.controller
+      const shown = () => run.current === current
+      try {
+        await afterPaint()
+        signal.throwIfAborted()
+        const el = current.target.kind === "region" ? elementAt(current.target.box) : first
+        const anchor = anchorsOf(current.target)[0]
+        if (!el) {
+          if (shown()) setLead(null)
+          return
+        }
+        lookup.current ??= loadSourceLookup(boot.sourceBundleUrl)
+        const lookupSource = await lookup.current
+        signal.throwIfAborted()
+        current.capture = await enrich(
+          { el, anchor: anchor ?? snapshotElement(el, renderGeneration()) },
+          {
+            signal,
+            lookupSource,
+            symbolicate: async (raw) => {
+              const resolved = await connection.symbolicate(raw)
+              if (shown()) setLead(resolved)
+              return resolved
+            },
+            uploadScreenshot: (png) => {
+              if (shown()) setThumb(URL.createObjectURL(png))
+              return connection.uploadScreenshot(png)
+            },
+            errors,
+            shot: current.target.kind !== "region",
+            idleSinceInput: () => performance.now() - current.lastInput,
+            exclude: host,
+          },
+        )
+        if (shown() && current.target.kind !== "region") setLead(current.capture.sourceLead ?? null)
+        deliver(current)
+      } catch {
+        if (!signal.aborted && shown()) setLead(null)
+      }
+    }
+
+    function start(composer: { target: NoteTarget; shot: object | null }) {
+      const current: Run = {
+        controller: new AbortController(),
+        target: composer.target,
+        before: new Set(model.draftOrder.peek()),
+        noteId: null,
+        attach: true,
+        marked: composer.shot !== null,
+        lastInput: performance.now(),
+        capture: null,
+      }
+      run.current = current
+      const candidates = [
+        ...picked.current,
+        ...[model.hover.peek(), ...model.multi.peek()].flatMap((ref) => ref?.deref() ?? []),
+      ]
+      picked.current = []
+      targets.current = anchorsOf(composer.target).map((anchor) => {
+        const matches = resolveSelector(anchor.selector)
+        return candidates.find((el) => matches.includes(el)) ?? matches[0] ?? null
+      })
+      setLead(composer.target.kind === "region" ? null : "pending")
+      setThumb(null)
+      setAttach(true)
+      void enrichRun(current, targets.current[0] ?? null)
+    }
+
+    function showStored(composer: {
+      target: NoteTarget
+      editing: NoteId
+      capture: Capture | undefined
+    }) {
+      const { editing, capture } = composer
+      stored.current = capture
+      targets.current = anchorsOf(composer.target).map((anchor) => {
+        const resolved = resolveAnchor(anchor)
+        return resolved.kind === "anchored" ? resolved.el : null
+      })
+      setLead(composer.target.kind === "region" ? null : (capture?.sourceLead ?? null))
+      setThumb(null)
+      setAttach(capture?.screenshot !== undefined)
+      const ref = capture?.screenshot?.ref
+      if (ref === undefined) return
+      connection
+        .fetchScreenshot(ref)
+        .then((blob) => {
+          if (model.composer.peek()?.editing === editing) setThumb(URL.createObjectURL(blob))
+        })
+        .catch(() => {})
+    }
+
+    function bindSaved(current: Run) {
+      run.current = null
+      const id = model.draftOrder.peek().find((noteId) => !current.before.has(noteId))
+      if (id === undefined) {
+        current.controller.abort()
+        return
+      }
+      current.noteId = id
+      const note = model.drafts.peek().find((draft) => draft.id === id)
+      if (current.capture && !note?.capture) deliver(current)
+    }
+
+    let previous = model.composer.peek()
+    const stop = effect(() => {
+      const composer = model.composer.value
+      const was = previous
+      previous = composer
+      if (composer?.target === was?.target && composer?.editing === was?.editing) return
+      untracked(() => {
+        const current = run.current
+        if (!composer && was?.saving && current?.target === was.target) bindSaved(current)
+        else if (current) {
+          current.controller.abort()
+          run.current = null
+        }
+        stored.current = undefined
+        if (!composer) {
+          targets.current = []
+          setLead(null)
+          setThumb(null)
+        } else if (composer.editing) showStored({ ...composer, editing: composer.editing })
+        else start(composer)
+      })
+    })
+    return () => {
+      stop()
+      run.current?.controller.abort()
+      run.current = null
+    }
+  }, [model, connection, host, boot, errors, renderGeneration])
+
+  useEffect(() => {
+    const ring = ringRef.current
+    const veil = veilRef.current
+    if (!ring || !veil) return
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)")
+
+    function attach(): () => void {
+      let drag: {
+        x0: number
+        y0: number
+        shift: boolean
+        raw: Element | null
+        rect: Rect | null
+      } | null = null
+      let pending: { raw: Element | null } | null = null
+      let pointer: { x: number; y: number } | null = null
+      let lastRaw: Element | null = null
+      let spring: { cur: Rect; vel: Rect } | null = null
+      let lastTime = 0
+      let frame = 0
+      const written = new Map<Element, string>()
+
+      function write(el: Element & ElementCSSInlineStyle, css: string) {
+        if (written.get(el) === css) return
+        written.set(el, css)
+        el.style.cssText = css
+      }
+
+      function setClass(el: Element, name: string) {
+        if (el.className !== name) el.className = name
+      }
+
+      function usable(node: EventTarget | undefined): Element | null {
+        if (!(node instanceof Element)) return null
+        if (node === host || node === document.body || node === document.documentElement)
+          return null
+        return host.contains(node) ? null : node
+      }
+
+      function ours(event: Event): boolean {
+        return event.composedPath().includes(host)
+      }
+
+      function swallow(event: Event) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+      }
+
+      function onSwallowed(event: Event) {
+        if (!ours(event)) swallow(event)
+      }
+
+      function onMove(event: PointerEvent) {
+        pointer = { x: event.clientX, y: event.clientY }
+        if (drag) {
+          const moved =
+            drag.rect !== null ||
+            Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) > DRAG_PX
+          if (!moved) return
+          if (drag.rect === null) setDragging(true)
+          drag.rect = {
+            x: Math.min(drag.x0, event.clientX),
+            y: Math.min(drag.y0, event.clientY),
+            w: Math.abs(event.clientX - drag.x0),
+            h: Math.abs(event.clientY - drag.y0),
+          }
+          return
+        }
+        if (ours(event)) return
+        pending = { raw: usable(event.composedPath()[0]) }
+      }
+
+      function onScroll() {
+        if (pointer && !drag) pending = { raw: null }
+      }
+
+      /**
+       * Keeps the rest of a gesture that dismissed the composer from reaching the page, after the
+       * mode change has already removed the regular listeners. One listener does both jobs: a
+       * second one registered after the blocker would never run, because the blocker stops
+       * propagation on the same target.
+       */
+      function swallowRestOfGesture() {
+        const types = ["pointerup", "pointerdown", "pointercancel", ...SWALLOWED] as const
+        const release = () => {
+          for (const type of types) window.removeEventListener(type, hold, true)
+        }
+        function hold(event: Event) {
+          if (event.type === "pointerdown" || event.type === "pointercancel") {
+            release()
+            return
+          }
+          onSwallowed(event)
+          if (event.type === "pointerup") setTimeout(release)
+        }
+        for (const type of types) window.addEventListener(type, hold, true)
+      }
+
+      function onDown(event: PointerEvent) {
+        if (ours(event)) return
+        swallow(event)
+        if (event.button !== 0) return
+        if (model.mode.peek() === "compose") {
+          const composer = model.composer.peek()
+          if (composer && composer.body.trim() === "" && !composer.saving) {
+            swallowRestOfGesture()
+            model.setMode("idle")
+          } else shake(panelRef.current)
+          return
+        }
+        drag = {
+          x0: event.clientX,
+          y0: event.clientY,
+          shift: event.shiftKey,
+          raw: usable(event.composedPath()[0]),
+          rect: null,
+        }
+      }
+
+      function onUp(event: PointerEvent) {
+        if (ours(event)) return
+        swallow(event)
+        const done = drag
+        drag = null
+        if (!done) return
+        const mode = model.mode.peek()
+        if (done.rect) {
+          setDragging(false)
+          const { x, y, w, h } = done.rect
+          if (w < REGION_MIN_PX || h < REGION_MIN_PX) return
+          if (mode === "pick" || mode === "region")
+            model.openComposer({ target: regionTarget(new DOMRect(x, y, w, h)) })
+          return
+        }
+        if (mode !== "pick") return
+        const fresh = done.raw !== null && done.raw !== lastRaw
+        const el = fresh ? done.raw : (model.hover.peek()?.deref() ?? done.raw)
+        if (!el) return
+        if (fresh) {
+          lastRaw = el
+          batch(() => {
+            model.hover.value = new WeakRef(el)
+            model.climbStack.value = []
+          })
+        }
+        const multi = model.multi.peek().flatMap((ref) => ref.deref() ?? [])
+        if (done.shift) {
+          model.multi.value = multi.includes(el)
+            ? multi.filter((at) => at !== el).map((at) => new WeakRef(at))
+            : [...multi, el].map((at) => new WeakRef(at))
+          return
+        }
+        const chosen = multi.length === 0 ? [el] : multi.includes(el) ? multi : [...multi, el]
+        picked.current = chosen
+        const generation = renderGeneration()
+        const [only, ...more] = chosen.map((at) => snapshotElement(at, generation))
+        if (!only) return
+        model.openComposer({
+          target:
+            more.length === 0
+              ? { kind: "element", anchor: only }
+              : { kind: "elements", anchors: [only, ...more] },
+        })
+      }
+
+      function hoverFromPointer() {
+        const next = pending
+        pending = null
+        if (!next || drag || model.mode.peek() !== "pick") return
+        const raw =
+          next.raw ??
+          (pointer ? usable(document.elementFromPoint(pointer.x, pointer.y) ?? undefined) : null)
+        if (!raw || raw === lastRaw) return
+        lastRaw = raw
+        batch(() => {
+          model.hover.value = new WeakRef(raw)
+          model.climbStack.value = []
+        })
+      }
+
+      function lens(): { rect: Rect; region: boolean; tags: boolean } | null {
+        if (drag?.rect) return { rect: drag.rect, region: true, tags: true }
+        const mode = model.mode.peek()
+        if (mode === "pick") {
+          const el = model.hover.peek()?.deref()
+          return el?.isConnected ? { rect: viewRect(el), region: false, tags: true } : null
+        }
+        if (mode !== "compose") return null
+        const composer = model.composer.peek()
+        if (composer?.target.kind === "region")
+          return { rect: boxRect(composer.target.box), region: true, tags: true }
+        const el = targets.current[0]
+        return el?.isConnected ? { rect: viewRect(el), region: false, tags: false } : null
+      }
+
+      function step(target: Rect, dt: number, snap: boolean): Rect {
+        if (!spring || snap) {
+          spring = { cur: { ...target }, vel: { x: 0, y: 0, w: 0, h: 0 } }
+          return spring.cur
+        }
+        const { cur, vel } = spring
+        let settled = true
+        for (const key of ["x", "y", "w", "h"] as const) {
+          vel[key] += (STIFFNESS * (target[key] - cur[key]) - DAMPING * vel[key]) * dt
+          cur[key] += vel[key] * dt
+          if (Math.abs(target[key] - cur[key]) > SETTLE || Math.abs(vel[key]) > SETTLE)
+            settled = false
+        }
+        if (settled) spring = { cur: { ...target }, vel: { x: 0, y: 0, w: 0, h: 0 } }
+        return spring.cur
+      }
+
+      function placeChip(around: Rect) {
+        const chip = chipRef.current
+        if (!chip?.classList.contains("on")) return
+        const width = chip.offsetWidth
+        const height = chip.offsetHeight
+        const x = Math.min(Math.max(around.x, EDGE), window.innerWidth - width - EDGE)
+        let y = around.y + around.h + CHIP_GAP
+        if (y + height > window.innerHeight - EDGE) y = around.y - height - 2 * CHIP_GAP
+        if (y < EDGE)
+          y = Math.min(Math.max(around.y + CHIP_GAP, EDGE), window.innerHeight - height - EDGE)
+        write(chip, `transform:translate(${Math.round(x)}px,${Math.round(y)}px)`)
+      }
+
+      function placeComposer(panel: HTMLDivElement) {
+        const composer = model.composer.peek()
+        if (!composer) return
+        const rects =
+          composer.target.kind === "region"
+            ? [boxRect(composer.target.box)]
+            : targets.current.flatMap((el) => (el?.isConnected ? [viewRect(el)] : []))
+        if (rects.length === 0) return
+        const left = Math.min(...rects.map((r) => r.x))
+        const top = Math.min(...rects.map((r) => r.y))
+        const right = Math.max(...rects.map((r) => r.x + r.w))
+        const bottom = Math.max(...rects.map((r) => r.y + r.h))
+        const width = panel.offsetWidth
+        const height = panel.offsetHeight
+        const { dock: anchor, collapsed } = model.prefs.peek()
+        const dock = root.querySelector(collapsed ? ".iter8btn" : ".dock")?.getBoundingClientRect()
+        const floor = dock && anchor.startsWith("b") ? dock.top - EDGE : window.innerHeight - EDGE
+        const ceiling = dock && anchor.startsWith("t") ? dock.bottom + EDGE : EDGE
+        const fitsRight = right + COMPOSER_GAP + width < window.innerWidth - EDGE
+        const fitsLeft = left - COMPOSER_GAP - width > EDGE
+        let x: number
+        let y = Math.min(Math.max(top, ceiling), floor - height)
+        let side = "left"
+        if (fitsRight) x = right + COMPOSER_GAP
+        else if (fitsLeft) {
+          x = left - COMPOSER_GAP - width
+          side = "right"
+        } else {
+          x = Math.min(Math.max(left, EDGE), window.innerWidth - width - EDGE)
+          y = bottom + COMPOSER_GAP
+          if (y + height > floor) y = Math.max(ceiling, top - height - COMPOSER_GAP)
+        }
+        write(panel, `left:${Math.round(x)}px;top:${Math.round(y)}px;--ox:${side}`)
+      }
+
+      function tick(time: number) {
+        frame = requestAnimationFrame(tick)
+        const dt = lastTime === 0 ? 1 / 60 : Math.min(MAX_STEP_S, (time - lastTime) / 1000)
+        lastTime = time
+        hoverFromPointer()
+        const target = lens()
+        let hole: Rect | null = null
+        if (target && ring) {
+          const shown = ring.classList.contains("on")
+          const cur = step(target.rect, dt, reduced.matches || target.region || !shown)
+          hole = cur
+          write(
+            ring,
+            `transform:translate(${cur.x.toFixed(1)}px,${cur.y.toFixed(1)}px);width:${Math.max(0, cur.w).toFixed(1)}px;height:${Math.max(0, cur.h).toFixed(1)}px`,
+          )
+          setClass(ring, `ring on${target.region ? " region" : ""}${target.tags ? "" : " notags"}`)
+          const [wtag, htag] = ring.querySelectorAll("span")
+          const w = String(Math.round(target.rect.w))
+          const h = String(Math.round(target.rect.h))
+          if (wtag && wtag.textContent !== w) wtag.textContent = w
+          if (htag && htag.textContent !== h) htag.textContent = h
+          placeChip(cur)
+        } else if (ring) {
+          spring = null
+          setClass(ring, "ring")
+        }
+
+        const mode = model.mode.peek()
+        const marks = markEls.current
+        const veilOn = target !== null || mode === "region"
+        if (veil) {
+          setClass(veil, veilOn ? "veil on" : "veil")
+          if (veilOn) {
+            const holes = [
+              ...(hole ? [roundedPath(hole)] : []),
+              ...marks.flatMap((el) => (el.isConnected ? [roundedPath(viewRect(el))] : [])),
+            ]
+            write(
+              veil,
+              `clip-path:path(evenodd,"M0 0H${window.innerWidth}V${window.innerHeight}H0Z ${holes.join(" ")}")`,
+            )
+          }
+        }
+        const nodes = marksRef.current?.children ?? []
+        marks.forEach((el, i) => {
+          const node = nodes[i]
+          if (!(node instanceof HTMLElement) || !el.isConnected) return
+          const r = viewRect(el)
+          write(
+            node,
+            `transform:translate(${r.x.toFixed(1)}px,${r.y.toFixed(1)}px);width:${r.w.toFixed(1)}px;height:${r.h.toFixed(1)}px`,
+          )
+        })
+        if (panelRef.current) placeComposer(panelRef.current)
+      }
+
+      window.addEventListener("pointermove", onMove, { capture: true, passive: true })
+      window.addEventListener("scroll", onScroll, { capture: true, passive: true })
+      window.addEventListener("pointerdown", onDown, { capture: true })
+      window.addEventListener("pointerup", onUp, { capture: true })
+      for (const type of SWALLOWED) window.addEventListener(type, onSwallowed, { capture: true })
+      frame = requestAnimationFrame(tick)
+
+      return () => {
+        window.removeEventListener("pointermove", onMove, { capture: true })
+        window.removeEventListener("scroll", onScroll, { capture: true })
+        window.removeEventListener("pointerdown", onDown, { capture: true })
+        window.removeEventListener("pointerup", onUp, { capture: true })
+        for (const type of SWALLOWED)
+          window.removeEventListener(type, onSwallowed, { capture: true })
+        cancelAnimationFrame(frame)
+        if (ring) setClass(ring, "ring")
+        if (veil) setClass(veil, "veil")
+        setDragging(false)
+      }
+    }
+
+    const active = computed(() => ACTIVE.has(model.mode.value))
+    return effect(() => {
+      if (active.value) return untracked(attach)
+    })
+  }, [model, root, host, renderGeneration])
+
+  const mode = model.mode.value
+  const hoverEl = mode === "pick" ? model.hover.value?.deref() : undefined
+  const multi = model.multi.value.flatMap((ref) => ref.deref() ?? [])
+  const marks =
+    mode === "pick"
+      ? multi
+      : mode === "compose"
+        ? targets.current.slice(1).flatMap((el) => el ?? [])
+        : []
+  markEls.current = marks
+  const info = hoverEl && !dragging ? describe(hoverEl) : null
+
+  function onAttach(on: boolean) {
+    setAttach(on)
+    const current = run.current
+    if (current) {
+      current.attach = on
+      if (!current.capture) return
+      const composer = model.composer.peek()
+      if (composer)
+        model.composer.value = {
+          ...composer,
+          capture: on ? current.capture : withoutScreenshot(current.capture),
+        }
+      return
+    }
+    const composer = model.composer.peek()
+    const capture = stored.current
+    if (composer?.editing && capture)
+      model.composer.value = { ...composer, capture: on ? capture : withoutScreenshot(capture) }
+  }
+
+  function onInput() {
+    if (run.current) run.current.lastInput = performance.now()
+  }
+
+  return (
+    <div class="layer pick">
+      <div ref={veilRef} class="veil" />
+      <div ref={marksRef}>
+        {marks.map((_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: marks are numbered by position
+          <div key={i} class="mark">
+            {mode === "pick" && <b>{i + 1}</b>}
+          </div>
+        ))}
+      </div>
+      <div ref={ringRef} class="ring">
+        <i />
+        <i />
+        <i />
+        <i />
+        <span class="wtag" />
+        <span class="htag" />
+      </div>
+      <div
+        ref={chipRef}
+        class={info ? "chip on" : "chip"}
+        role="status"
+        aria-live="polite"
+        aria-hidden={info ? undefined : "true"}
+      >
+        {info && (
+          <>
+            <div class="c1">
+              <span class="comp tag">{info.tag}</span>
+              <span class="dim">{info.dims}</span>
+            </div>
+            <div class="nm">{info.name ? `“${info.name}”` : "—"}</div>
+            <div class="path">
+              {info.path.map((label, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: ancestors are listed by depth
+                <span key={i}>
+                  {i > 0 && <i>›</i>}
+                  {i === info.path.length - 1 ? <strong>{label}</strong> : <span>{label}</span>}
+                </span>
+              ))}
+            </div>
+            <div class="hints">
+              {multi.length > 0 ? (
+                <>
+                  <span class="count">{multi.length} selected</span>
+                  <span>click adds and opens</span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    <kbd>↑</kbd>
+                    <kbd>↓</kbd> climb
+                  </span>
+                  <span>
+                    <kbd>⇧</kbd> click to add
+                  </span>
+                  <span>drag for region</span>
+                  <span>
+                    <kbd>↵</kbd> note
+                  </span>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      {target && (
+        <Composer
+          panelRef={panelRef}
+          lead={lead}
+          thumb={thumb}
+          attach={attach}
+          onAttach={onAttach}
+          onInput={onInput}
+        />
+      )}
+    </div>
+  )
 }
