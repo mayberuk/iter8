@@ -11,15 +11,15 @@ import {
   PAGE_MESSAGE_OPEN,
   type Page,
   PageId,
+  type Pairing,
   POINTER_LINE,
   type PostMessageRequest,
   RoundId,
   type TranscriptRow,
 } from "@iter8/protocol"
 import { nextSequence } from "../store/db"
-import type { InboxDeps } from "./inbox"
 
-export type Focus = Pick<ConversationMessage, "pageId" | "roundId">
+type Focus = Pick<ConversationMessage, "pageId" | "roundId">
 
 export type Conversation = {
   list(pageId: PageId, query: { before: MessageId | null; limit: number }): MessagePage
@@ -62,7 +62,10 @@ function messageFromRow(row: MessageRow): ConversationMessage {
   })
 }
 
-export function createConversation(db: Database, deps: InboxDeps): Conversation {
+export function createConversation(
+  db: Database,
+  deps: { now: () => Date; pairing: (pageId: PageId) => Pairing | null },
+): Conversation {
   const byDedupeKey = db.query<MessageRow, [string]>(
     `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE dedupe_key = ?`,
   )

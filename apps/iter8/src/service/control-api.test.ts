@@ -1,14 +1,21 @@
 import type { Database } from "bun:sqlite"
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { realpathSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  AGENT_ROUTES,
   AgentNoteResult,
+  AgentState,
+  AgentWaitResult,
   type Capture,
   DoneResult,
   DraftBody,
+  ExitCode,
+  formatPageMessage,
+  formatPointer,
+  HookPointers,
   IdempotencyKey,
   LANDING_PATH,
   LandingFragment,
@@ -24,22 +31,31 @@ import {
   ServerMessage,
   ServiceStatus,
   ShowResult,
+  TranscriptResult,
 } from "@iter8/protocol"
+import { runCommand } from "citty"
 import fc from "fast-check"
+import { hc } from "hono/client"
+import type { CliDeps } from "../cli/client"
+import { hook } from "../cli/commands/hook"
 import { createAgentNotes } from "../pages/agent-notes"
 import { createPages, type PageRecord } from "../pages/pages"
 import { createScreenshots } from "../pages/screenshots"
 import { createOwners } from "../pairing/owners"
 import { createInbox } from "../rounds/inbox"
 import { openStore, readOrCreateMachineId } from "../store/db"
-import { createControlApi } from "./control-api"
+import { type ControlApp, createControlApi } from "./control-api"
 import { createLiveHub } from "./live"
-import { createWaiters } from "./waiters"
+import { createWaiters, type Waiters } from "./waiters"
 
 const databases: Database[] = []
 const directories: string[] = []
+const waiterSets: Waiters[] = []
+const pendingRequests: Promise<Response>[] = []
 
 afterEach(async () => {
+  for (const waiters of waiterSets.splice(0)) waiters.cancelAll()
+  await Promise.allSettled(pendingRequests.splice(0))
   for (const db of databases.splice(0)) db.close()
   for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true })
 })
@@ -59,6 +75,7 @@ function setup() {
     randomToken: () => PageToken.parse(`token${String(++tokens).padStart(40, "0")}`),
   })
   const waiters = createWaiters()
+  waiterSets.push(waiters)
   const live = createLiveHub()
   const listener = (owner: OwnerId) => (waiters.isArmed(owner) ? "armed" : "none")
   const inbox = createInbox(db, {
@@ -101,6 +118,15 @@ function setup() {
     onPageOpened: (record) => opened.push(record),
     poolPorts: () => [3990, 3991, 3992, 3993],
     machineId,
+  })
+
+  const client = hc<ControlApp>("http://iter8", {
+    fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const response = Promise.resolve(app.request(`${url.pathname}${url.search}`, init))
+      pendingRequests.push(response)
+      return response
+    },
   })
 
   const post = (path: string, body: unknown) =>
@@ -181,6 +207,7 @@ function setup() {
   return {
     db,
     app,
+    client,
     owners,
     pages,
     inbox,
@@ -233,11 +260,10 @@ function captureWith(text: string): Capture {
 }
 
 async function until(label: string, condition: () => boolean, timeoutMs = 2000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
+  const deadline = performance.now() + timeoutMs
   while (!condition()) {
-    if (Date.now() > deadline)
-      throw new Error(`Timed out after ${timeoutMs} ms waiting for ${label}`)
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    if (performance.now() >= deadline) throw new Error(`Timed out waiting for ${label}`)
+    await Bun.sleep(5)
   }
 }
 
@@ -249,6 +275,475 @@ function pngBytes(width: number, height: number): Uint8Array<ArrayBuffer> {
   view.setUint32(20, height)
   return bytes
 }
+
+describe("agent control routes", () => {
+  const row = (
+    key: string,
+    text = "Changed the heading",
+    role: "assistant" | "user" = "assistant",
+  ) => ({
+    key,
+    role,
+    text,
+    at: "2026-10-09T18:00:00.000Z",
+  })
+
+  test("every agent route validates its response for a known owner", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    await t.openServer(session)
+    const bodies = {
+      wait: { owner: session.ownerId, timeoutSeconds: "1" },
+      state: { owner: session.ownerId },
+      transcript: { owner: session.ownerId, rows: [row("parity")] },
+      turn: { owner: session.ownerId, state: "idle" },
+      hookTool: { pid: session.pid },
+    }
+    for (const [name, route] of Object.entries(AGENT_ROUTES)) {
+      const body = bodies[name as keyof typeof bodies]
+      const response =
+        route.method === "GET"
+          ? await t.app.request(
+              `${route.path}?${new URLSearchParams(body as Record<string, string>)}`,
+            )
+          : await t.post(route.path, body)
+      expect(response.status).toBe(200)
+      expect(route.response.safeParse(await response.json()).success).toBe(true)
+    }
+  })
+
+  test("an idle agent wait returns pointer text and announces the round", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    const round = t.sendRound(page.id, "Improve heading")
+    const pointer = { roundId: round.id, pageId: page.id, noteCount: 1 }
+    const response = await t.client.agent.wait.$get({
+      query: { owner: session.ownerId, timeoutSeconds: "1" },
+    })
+    expect(AgentWaitResult.parse(await response.json())).toEqual({
+      outcome: "deliver",
+      deliveries: [{ kind: "round", pointer, text: formatPointer(pointer) }],
+    })
+    expect(formatPointer(pointer)).toBe(
+      "Review round R1 from larkspur · 1 note — run `iter8 show R1`",
+    )
+    expect(t.inbox.round(round.id)?.state.stage).toBe("announced")
+  })
+
+  test.each([
+    ["agent", "idle"],
+    ["agent", "stop"],
+    ["hook", "idle"],
+    ["hook", "stop"],
+  ] as const)("%s wait holds a busy round across wakes until %s", async (channel, idle) => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    await t.client.agent.turn.$post({ json: { owner: session.ownerId, state: "busy" } })
+    const round = t.sendRound(page.id, "Mid-turn round")
+    const arm = spyOn(t.waiters, channel === "agent" ? "armMod" : "arm")
+    try {
+      const waiting =
+        channel === "agent"
+          ? t.client.agent.wait.$get({ query: { owner: session.ownerId, timeoutSeconds: "25" } })
+          : t.client.hook.wait.$get({ query: { pid: String(session.pid), timeoutSeconds: "25" } })
+      await until("busy waiter to arm", () => arm.mock.calls.length === 1)
+      expect(t.inbox.round(round.id)?.state.stage).toBe("queued")
+      t.waiters.wake(session.ownerId)
+      await until("busy waiter to re-arm", () => arm.mock.calls.length === 2)
+      expect(t.inbox.round(round.id)?.state.stage).toBe("queued")
+      if (idle === "idle") {
+        await t.client.agent.turn.$post({ json: { owner: session.ownerId, state: "idle" } })
+      } else {
+        await t.client.hook.stop.$post({ json: { pid: session.pid } })
+      }
+      const pointer = { roundId: round.id, pageId: page.id, noteCount: 1 }
+      expect(await (await waiting).json()).toEqual(
+        channel === "agent"
+          ? {
+              outcome: "deliver",
+              deliveries: [{ kind: "round", pointer, text: formatPointer(pointer) }],
+            }
+          : { outcome: "woken", pointers: [pointer] },
+      )
+      expect(t.inbox.round(round.id)?.state.stage).toBe("announced")
+    } finally {
+      arm.mockRestore()
+    }
+  })
+
+  test("agent wait delivers page messages after round pointers and pushes their delivery updates", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    const round = t.sendRound(page.id, "Review first")
+    const message = t.inbox.conversation.post(page.id, session.ownerId, {
+      generation: page.pairing?.generation ?? PairingGeneration.parse(0),
+      idempotencyKey: IdempotencyKey.parse("page-message-key"),
+      text: "Can you make the heading smaller?",
+    })
+    const events = t.socket(page.id)
+    const response = await t.client.agent.wait.$get({
+      query: { owner: session.ownerId, timeoutSeconds: "1" },
+    })
+    const pointer = { roundId: round.id, pageId: page.id, noteCount: 1 }
+    expect(AgentWaitResult.parse(await response.json())).toEqual({
+      outcome: "deliver",
+      deliveries: [
+        { kind: "round", pointer, text: formatPointer(pointer) },
+        {
+          kind: "page-message",
+          messageId: message.id,
+          pageId: page.id,
+          text: formatPageMessage(message),
+        },
+      ],
+    })
+    const delivered = {
+      ...message,
+      author: {
+        ...message.author,
+        delivery: { status: "delivered" as const, at: "2026-10-09T18:00:00.000Z" },
+      },
+    }
+    expect(t.inbox.conversation.byKey(page.id, IdempotencyKey.parse("page-message-key"))).toEqual(
+      delivered,
+    )
+    expect(events).toContainEqual({ type: "message", message: delivered })
+    expect(t.inbox.conversation.takeQueued(session.ownerId)).toEqual([])
+    expect(t.inbox.conversation.focus(session.ownerId)).toEqual({ pageId: page.id, roundId: null })
+  })
+
+  test("an empty agent wait times out and pushes reachable chat when first armed", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    const events = t.socket(page.id)
+    const waiting = t.client.agent.wait.$get({
+      query: { owner: session.ownerId, timeoutSeconds: "1" },
+    })
+    await until("mod wait to arm", () => t.waiters.modAttached(session.ownerId))
+    expect(events).toContainEqual({
+      type: "chat",
+      chat: { enabled: true, defaultEnabled: true, reachable: true },
+    })
+    expect(await (await waiting).json()).toEqual({ outcome: "timeout" })
+  })
+
+  test("a mod wait replaces a pending hook and blocks hook waits during its grace window", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const hookWait = t.client.hook.wait.$get({
+      query: { pid: String(session.pid), timeoutSeconds: "25" },
+    })
+    await until("hook wait to arm", () => t.waiters.isArmed(session.ownerId))
+    const modWait = t.client.agent.wait.$get({
+      query: { owner: session.ownerId, timeoutSeconds: "25" },
+    })
+    expect(await (await hookWait).json()).toEqual({ outcome: "replaced" })
+    await until("mod wait to arm", () => t.waiters.modAttached(session.ownerId))
+    const arm = spyOn(t.waiters, "arm")
+    try {
+      const query = { pid: String(session.pid), timeoutSeconds: "25" }
+      expect(await (await t.client.hook.wait.$get({ query })).json()).toEqual({
+        outcome: "replaced",
+      })
+      t.waiters.cancelAll()
+      expect(await (await modWait).json()).toEqual({ outcome: "cancelled" })
+      expect(await (await t.client.hook.wait.$get({ query })).json()).toEqual({
+        outcome: "replaced",
+      })
+      expect(arm).not.toHaveBeenCalled()
+    } finally {
+      arm.mockRestore()
+    }
+  })
+
+  test("a woken agent wait collects a newly queued page message while busy", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    t.owners.setBusy(session.ownerId, true)
+    const round = t.sendRound(page.id, "Held round")
+    const waiting = t.client.agent.wait.$get({
+      query: { owner: session.ownerId, timeoutSeconds: "25" },
+    })
+    await until("mod wait to arm", () => t.waiters.modAttached(session.ownerId))
+    const message = t.inbox.conversation.post(page.id, session.ownerId, {
+      generation: page.pairing?.generation ?? PairingGeneration.parse(0),
+      idempotencyKey: IdempotencyKey.parse("mid-turn-chat"),
+      text: "A page question",
+    })
+    t.waiters.wake(session.ownerId)
+    expect(await (await waiting).json()).toEqual({
+      outcome: "deliver",
+      deliveries: [
+        {
+          kind: "page-message",
+          messageId: message.id,
+          pageId: page.id,
+          text: formatPageMessage(message),
+        },
+      ],
+    })
+    expect(t.inbox.round(round.id)?.state.stage).toBe("queued")
+  })
+
+  test("transcripts use attach focus, then the page and round claimed by show, and push each stored row", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const first = (await t.openServer(session)).page
+    const second = (await t.openServer(session, "http://localhost:4000")).page
+    const round = t.sendRound(second.id, "Second page round")
+    await t.post("/attach", { page: first.id, identities: session.identities, owner: null })
+    const firstEvents = t.socket(first.id)
+    const secondEvents = t.socket(second.id)
+    const firstResponse = await t.client.agent.transcript.$post({
+      json: {
+        owner: session.ownerId,
+        rows: [row("first"), row("user-first", "Please update this", "user")],
+      },
+    })
+    const firstResult = TranscriptResult.parse(await firstResponse.json())
+    expect(firstResult.pageId).toBe(first.id)
+    expect(firstResult.stored).toHaveLength(2)
+    const firstMessages = t.inbox.conversation.list(first.id, { before: null, limit: 30 }).messages
+    expect(firstMessages.map((message) => message.roundId)).toEqual([null, null])
+    expect(firstMessages[0]?.author).toEqual({
+      kind: "agent",
+      owner: session.ownerId,
+      name: session.label,
+      agent: "claude",
+    })
+    expect(firstMessages[1]?.author).toEqual({ kind: "user", owner: session.ownerId })
+    expect(firstEvents).toEqual(firstMessages.map((message) => ({ type: "message", message })))
+    expect(secondEvents).toEqual([])
+    await t.post("/show", { round: round.id, identities: session.identities, owner: null })
+    secondEvents.length = 0
+    const secondResponse = await t.client.agent.transcript.$post({
+      json: { owner: session.ownerId, rows: [row("second")] },
+    })
+    expect(TranscriptResult.parse(await secondResponse.json())).toMatchObject({ pageId: second.id })
+    const secondMessages = t.inbox.conversation.list(second.id, {
+      before: null,
+      limit: 30,
+    }).messages
+    expect(secondMessages[0]?.roundId).toBe(round.id)
+    expect(secondEvents).toEqual(secondMessages.map((message) => ({ type: "message", message })))
+    const repeat = await t.client.agent.transcript.$post({
+      json: { owner: session.ownerId, rows: [row("second")] },
+    })
+    expect(await repeat.json()).toEqual({ pageId: second.id, stored: [] })
+    expect(secondEvents).toHaveLength(1)
+  })
+
+  test("transcripts skip user echoes of delivered page messages and pointer lines", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    const round = t.sendRound(page.id, "Review heading")
+    const message = t.inbox.conversation.post(page.id, session.ownerId, {
+      generation: page.pairing?.generation ?? PairingGeneration.parse(0),
+      idempotencyKey: IdempotencyKey.parse("echo-chat"),
+      text: "Please make the heading smaller",
+    })
+    const delivery = await t.client.agent.wait.$get({
+      query: { owner: session.ownerId, timeoutSeconds: "1" },
+    })
+    expect(delivery.status).toBe(200)
+    const events = t.socket(page.id)
+    const response = await t.client.agent.transcript.$post({
+      json: {
+        owner: session.ownerId,
+        rows: [
+          row("echo", formatPageMessage(message), "user"),
+          row(
+            "pointer",
+            formatPointer({ roundId: round.id, pageId: page.id, noteCount: 1 }),
+            "user",
+          ),
+          row("answer"),
+        ],
+      },
+    })
+    expect(TranscriptResult.parse(await response.json()).stored).toHaveLength(1)
+    expect(t.inbox.conversation.list(page.id, { before: null, limit: 30 }).messages).toHaveLength(2)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: "message", message: { text: "Changed the heading" } })
+  })
+
+  test("agent state keeps active rounds in order and reports gone sessions from their pairing", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    const announced = t.sendRound(page.id, "Announced")
+    await t.client.agent.wait.$get({ query: { owner: session.ownerId, timeoutSeconds: "1" } })
+    const claimed = t.sendRound(page.id, "Claimed and open")
+    await t.post("/show", { round: claimed.id, identities: session.identities, owner: null })
+    const complete = t.sendRound(page.id, "Complete")
+    await t.post("/show", { round: complete.id, identities: session.identities, owner: null })
+    await t.post("/done", {
+      note: complete.notes[0]?.id,
+      reply: null,
+      identities: session.identities,
+      owner: null,
+    })
+    const queued = t.sendRound(page.id, "Queued")
+    const response = await t.client.agent.state.$get({ query: { owner: session.ownerId } })
+    const state = AgentState.parse(await response.json())
+    expect(state.session).toMatchObject({ owner: session.ownerId, state: { status: "live" } })
+    expect(state.focus).toEqual({ pageId: page.id, roundId: complete.id })
+    expect(state.pages).toEqual([
+      {
+        pageId: page.id,
+        origin: page.origin,
+        chat: { enabled: true, defaultEnabled: true, reachable: false },
+      },
+    ])
+    expect(state.rounds.map((round) => round.id)).toEqual([announced.id, claimed.id, queued.id])
+    await t.post("/hook/end", { pid: session.pid, label: session.label, reason: "logout" })
+    const gone = AgentState.parse(
+      await (await t.client.agent.state.$get({ query: { owner: session.ownerId } })).json(),
+    )
+    expect(gone.session.state).toEqual({ status: "gone", reason: "ended" })
+    expect(gone.rounds.map((round) => round.state.stage)).toEqual([
+      "orphaned",
+      "claimed",
+      "orphaned",
+    ])
+    expect(gone.pages[0]?.chat.reachable).toBe(false)
+  })
+
+  test("unknown and gone owners refuse agent wait, transcript and turn; state can read gone owners", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const unknown = OwnerId.parse("unknown-owner")
+    const requests = (owner: OwnerId) => [
+      t.client.agent.wait.$get({ query: { owner, timeoutSeconds: "1" } }),
+      t.client.agent.transcript.$post({ json: { owner, rows: [row("error")] } }),
+      t.client.agent.turn.$post({ json: { owner, state: "idle" } }),
+    ]
+    for (const response of await Promise.all(requests(unknown))) expect(response.status).toBe(404)
+    expect((await t.client.agent.state.$get({ query: { owner: unknown } })).status).toBe(404)
+    await t.post("/hook/end", { pid: session.pid, label: session.label, reason: "logout" })
+    for (const response of await Promise.all(requests(session.ownerId)))
+      expect(response.status).toBe(409)
+  })
+
+  test("agent queries and bodies reject malformed requests", async () => {
+    const t = setup()
+    for (const timeout of ["0", "26", "01", "nope"]) {
+      expect(
+        (await t.app.request(`/agent/wait?owner=owner-test&timeoutSeconds=${timeout}`)).status,
+      ).toBe(400)
+    }
+    expect((await t.app.request("/agent/state")).status).toBe(400)
+    expect((await t.post("/agent/transcript", { owner: "owner-test", rows: [] })).status).toBe(400)
+    expect((await t.post("/agent/turn", { owner: "owner-test", state: "gone" })).status).toBe(400)
+    expect((await t.post("/hook/tool", { pid: 0 })).status).toBe(400)
+    expect((await t.post("/hook/tool", { pid: 7777 })).status).toBe(404)
+  })
+
+  test("gone hook end fails queued page messages and pushes the failed updates", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    const key = IdempotencyKey.parse("failed-chat")
+    const message = t.inbox.conversation.post(page.id, session.ownerId, {
+      generation: page.pairing?.generation ?? PairingGeneration.parse(0),
+      idempotencyKey: key,
+      text: "Left queued",
+    })
+    const events = t.socket(page.id)
+    await t.post("/hook/end", { pid: session.pid, label: session.label, reason: "logout" })
+    const failed = {
+      ...message,
+      author: {
+        ...message.author,
+        delivery: { status: "failed" as const, reason: "session-gone" as const },
+      },
+    }
+    expect(t.inbox.conversation.byKey(page.id, key)).toEqual(failed)
+    expect(events).toContainEqual({ type: "message", message: failed })
+    expect(events).toContainEqual({
+      type: "chat",
+      chat: { enabled: true, defaultEnabled: true, reachable: false },
+    })
+  })
+})
+
+describe("send-now hook pointers", () => {
+  test("hook tool returns only send-now rounds once, including while busy", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    const ordinary = t.sendRound(page.id, "Wait for idle")
+    const urgent = t.sendRound(page.id, "Send now")
+    t.owners.setBusy(session.ownerId, true)
+    t.inbox.sendNow(page.id, urgent.id)
+    const response = await t.client.hook.tool.$post({ json: { pid: session.pid } })
+    expect(HookPointers.parse(await response.json())).toEqual({
+      pointers: [{ roundId: urgent.id, pageId: page.id, noteCount: 1 }],
+    })
+    expect(t.inbox.round(ordinary.id)?.state.stage).toBe("queued")
+    expect(t.inbox.round(urgent.id)?.state.stage).toBe("announced")
+    expect(await (await t.client.hook.tool.$post({ json: { pid: session.pid } })).json()).toEqual({
+      pointers: [],
+    })
+  })
+
+  test.each([false, true])(
+    "hook tool prints pointer lines once with json=%s and never starts the service",
+    async (json) => {
+      const t = setup()
+      const session = await t.startSession(4821, "larkspur-session")
+      const { page } = await t.openServer(session)
+      const round = t.sendRound(page.id, "Send now")
+      t.inbox.sendNow(page.id, round.id)
+      const stdout: string[] = []
+      const stderr: string[] = []
+      const exits: number[] = []
+      const connections: { start: boolean }[] = []
+      const deps: CliDeps = {
+        connect: async (options) => {
+          connections.push(options)
+          return t.client
+        },
+        stdout: (text) => stdout.push(text),
+        stderr: (text) => stderr.push(text),
+        exit: (code) => exits.push(code),
+        cwd: projectRoot,
+        pid: cliPid,
+        ancestry: () => [],
+        processStart: (pid) => `linux:1:${pid}`,
+        makeTempDir: async () => {
+          throw new Error("Unexpected temporary directory")
+        },
+        version: "0.1.0",
+      }
+      const rawArgs = ["tool", "--pid", String(session.pid), ...(json ? ["--json"] : [])]
+      await runCommand(hook(deps), { rawArgs })
+      expect(stdout).toEqual([
+        `${formatPointer({ roundId: round.id, pageId: page.id, noteCount: 1 })}\n`,
+      ])
+      expect(exits).toEqual([ExitCode.ok])
+      stdout.length = 0
+      await runCommand(hook(deps), { rawArgs })
+      expect(stdout).toEqual([])
+      expect(exits).toEqual([ExitCode.ok, ExitCode.ok])
+      expect(stderr).toEqual([])
+      deps.connect = async (options) => {
+        connections.push(options)
+        return null
+      }
+      await runCommand(hook(deps), { rawArgs })
+      expect(exits).toEqual([ExitCode.ok, ExitCode.ok, ExitCode.serviceUnavailable])
+      expect(connections).toEqual([{ start: false }, { start: false }, { start: false }])
+      expect(stdout).toEqual([])
+    },
+  )
+})
 
 describe("hook routes", () => {
   test("agent claude from hook start reaches its pairing, status, live sessions and note author", async () => {

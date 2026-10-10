@@ -2,17 +2,22 @@ import { zValidator } from "@hono/zod-validator"
 import {
   ASSET_PREFIX,
   type AttachResult,
+  type ChatSetting,
   type HelloResult,
   LANDING_PATH,
   liveSubprotocols,
   type MachineId,
+  MESSAGE_PAGE_DEFAULT,
+  MessageQuery,
   NoteId,
   OVERLAY_PREFIX,
   OVERLAY_ROUTES,
   OverlayBoot,
   type PageId,
   type Pairing,
+  type PostMessageResult,
   PROTOCOL_VERSION,
+  RoundId,
   ScreenshotRef,
   type SendResult,
   SOURCE_BUNDLE_PATH,
@@ -74,6 +79,13 @@ export function pagePairing(deps: OverlayApiDeps, record: PageRecord): Pairing |
   if (!paired) return null
   const listener = deps.waiters.isArmed(paired.owner) ? "armed" : "none"
   return deps.owners.pairing(paired.owner, paired.generation, listener)
+}
+
+export function pageChat(deps: OverlayApiDeps, record: PageRecord): ChatSetting {
+  const pairing = pagePairing(deps, record)
+  const reachable =
+    pairing !== null && pairing.state.status !== "gone" && deps.waiters.modAttached(pairing.owner)
+  return deps.inbox.conversation.chatSetting(record.page, reachable)
 }
 
 /** Checked before the upgrade: a browser WebSocket carries no token header, only subprotocols. */
@@ -208,6 +220,64 @@ export function createOverlayApi(deps: OverlayApiDeps) {
     .get(R.listRounds.path, (c) =>
       c.json(deps.inbox.summaries({ pageId: c.var.match.record.page.id })),
     )
+    .get(R.listMessages.path, zValidator("query", MessageQuery), (c) => {
+      const { before, limit } = c.req.valid("query")
+      return c.json(
+        deps.inbox.conversation.list(c.var.match.record.page.id, {
+          before: before ?? null,
+          limit: limit === undefined ? MESSAGE_PAGE_DEFAULT : Number(limit),
+        }),
+      )
+    })
+    .post(R.postMessage.path, zValidator("json", R.postMessage.request), (c) => {
+      const { record } = c.var.match
+      const pageId = record.page.id
+      const request = c.req.valid("json")
+      const stored = deps.inbox.conversation.byKey(pageId, request.idempotencyKey)
+      if (stored) return c.json({ outcome: "accepted" as const, message: stored })
+      const pairing = pagePairing(deps, record)
+      const chat = pageChat(deps, record)
+      const reason =
+        pairing === null
+          ? "no-pairing"
+          : request.generation !== pairing.generation
+            ? "stale-generation"
+            : pairing.state.status === "gone"
+              ? "session-gone"
+              : !chat.enabled
+                ? "chat-off"
+                : !chat.reachable
+                  ? "unreachable"
+                  : null
+      if (reason !== null) {
+        const refused: PostMessageResult = { outcome: "refused", reason, chat, pairing }
+        return c.json(refused)
+      }
+      if (!pairing) throw new Error(`Page ${pageId} has no pairing after chat acceptance`)
+      const message = deps.inbox.conversation.post(pageId, pairing.owner, request)
+      deps.live.push(pageId, { type: "message", message })
+      deps.waiters.wake(pairing.owner)
+      return c.json({ outcome: "accepted" as const, message })
+    })
+    .get(R.getChat.path, (c) => c.json(pageChat(deps, c.var.match.record)))
+    .put(R.setChat.path, zValidator("json", R.setChat.request), (c) => {
+      const { record } = c.var.match
+      deps.inbox.conversation.setChat(record.page.id, c.req.valid("json").enabled)
+      const chat = pageChat(deps, record)
+      deps.live.push(record.page.id, { type: "chat", chat })
+      return c.json(chat)
+    })
+    .post(R.sendNow.path, (c) => {
+      const roundId = RoundId.safeParse(c.req.param("roundId"))
+      const result = roundId.success
+        ? deps.inbox.sendNow(c.var.match.record.page.id, roundId.data)
+        : null
+      if (!result) return c.body(null, 404)
+      if (result.outcome === "accepted") {
+        deps.live.push(result.round.pageId, { type: "round", round: result.round })
+      }
+      return c.json(result)
+    })
     .post(R.uploadScreenshot.path, async (c) => {
       const bytes = new Uint8Array(await c.req.arrayBuffer())
       const screenshot = deps.screenshots.store(c.var.match.record.page.id, bytes)
@@ -247,11 +317,13 @@ export function createOverlayApi(deps: OverlayApiDeps) {
       }
       const pageId = c.var.match.record.page.id
       deps.owners.pairPage(pageId, owner)
+      deps.inbox.conversation.setFocus(owner, pageId, null)
       const requeued = deps.inbox.requeuePage(pageId, owner)
       const record = deps.pages.get(pageId)
       const pairing = record && pagePairing(deps, record)
-      if (!pairing) throw new Error(`Page ${pageId} has no pairing right after attach`)
+      if (!record || !pairing) throw new Error(`Page ${pageId} has no pairing right after attach`)
       deps.live.push(pageId, { type: "pairing", pairing })
+      deps.live.push(pageId, { type: "chat", chat: pageChat(deps, record) })
       for (const round of requeued) deps.live.push(pageId, { type: "round", round })
       if (requeued.length > 0) deps.waiters.wake(owner)
       const accepted: AttachResult = {

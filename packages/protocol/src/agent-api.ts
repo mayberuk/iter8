@@ -20,7 +20,8 @@ export const AgentDelivery = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("round"), pointer: RoundPointer, text: z.string().min(1) }),
   z.object({
     kind: z.literal("page-message"),
-    message: ConversationMessage,
+    messageId: MessageId,
+    pageId: ConversationMessage.shape.pageId,
     text: z.string().min(1),
   }),
 ])

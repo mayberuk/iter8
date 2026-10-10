@@ -1,9 +1,16 @@
 import { zValidator } from "@hono/zod-validator"
 import {
+  AGENT_ROUTES,
+  type AgentDelivery,
   AgentNoteResult,
+  AgentState,
+  AgentWaitResult,
   DoneResult,
   ElementAnchor,
+  formatPageMessage,
+  formatPointer,
   HookEndReason,
+  HookPointers,
   HookSource,
   HttpUrl,
   Intent,
@@ -28,6 +35,7 @@ import {
   ScreenshotRef,
   ServiceStatus,
   ShowResult,
+  TranscriptResult,
 } from "@iter8/protocol"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -90,7 +98,7 @@ const HookWaitQuery = z.object({
 })
 
 const HookStartResult = PairResult.extend({ pointers: z.array(RoundPointer) })
-const Pointers = z.object({ pointers: z.array(RoundPointer) })
+const A = AGENT_ROUTES
 const HookWaitResult = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("woken"), pointers: z.array(RoundPointer).min(1) }),
   z.object({ outcome: z.enum(["replaced", "timeout", "cancelled"]) }),
@@ -154,15 +162,30 @@ export function createControlApi(deps: ControlApiDeps) {
     deps.live.push(round.pageId, { type: "round", round })
   }
 
+  function pushChat(ownerId: OwnerId): void {
+    for (const pageId of deps.owners.pagesOf(ownerId)) {
+      const record = deps.pages.get(pageId)
+      if (!record) continue
+      const pairing = pagePairing(record)
+      const reachable =
+        pairing !== null && pairing.state.status !== "gone" && deps.waiters.modAttached(ownerId)
+      deps.live.push(pageId, {
+        type: "chat",
+        chat: deps.inbox.conversation.chatSetting(record.page, reachable),
+      })
+    }
+  }
+
   function pushPairing(ownerId: OwnerId): void {
     for (const pageId of deps.owners.pagesOf(ownerId)) {
       const record = deps.pages.get(pageId)
       if (record) deps.live.push(pageId, { type: "pairing", pairing: pagePairing(record) })
     }
+    pushChat(ownerId)
   }
 
-  function deliver(ownerId: OwnerId, label: string): RoundPointer[] {
-    const pointers = deps.inbox.pending(ownerId, label)
+  function deliver(ownerId: OwnerId, label: string, only?: "send-now"): RoundPointer[] {
+    const pointers = deps.inbox.pending(ownerId, label, only)
     deps.inbox.announce(
       ownerId,
       label,
@@ -177,9 +200,11 @@ export function createControlApi(deps: ControlApiDeps) {
 
   function pair(pageId: PageId, ownerId: OwnerId): PageRecord {
     deps.owners.pairPage(pageId, ownerId)
+    deps.inbox.conversation.setFocus(ownerId, pageId, null)
     const requeued = deps.inbox.requeuePage(pageId, ownerId)
     const record = requirePage(pageId)
     deps.live.push(pageId, { type: "pairing", pairing: pagePairing(record) })
+    pushChat(ownerId)
     for (const round of requeued) pushRound(round)
     if (requeued.length) deps.waiters.wake(ownerId)
     return record
@@ -209,13 +234,14 @@ export function createControlApi(deps: ControlApiDeps) {
       deps.owners.setBusy(ownerId, true)
       const pointers = deliver(ownerId, labelOf(ownerId))
       pushPairing(ownerId)
-      return c.json(Pointers.parse({ pointers }), 200)
+      return c.json(HookPointers.parse({ pointers }), 200)
     })
     .post("/hook/stop", zValidator("json", HookPid), (c) => {
       const { pid } = c.req.valid("json")
       const ownerId = deps.owners.byPid(pid)
       if (!ownerId) return c.text(`No owner registered for pid ${pid}`, 404)
       deps.owners.setBusy(ownerId, false)
+      deps.waiters.wake(ownerId)
       pushPairing(ownerId)
       return c.json(Ok.parse({ ok: true }), 200)
     })
@@ -223,7 +249,11 @@ export function createControlApi(deps: ControlApiDeps) {
       const { pid, timeoutSeconds } = c.req.valid("query")
       const ownerId = deps.owners.byPid(pid)
       if (!ownerId) return c.text(`No owner registered for pid ${pid}`, 404)
-      const ready = deliver(ownerId, labelOf(ownerId))
+      if (deps.waiters.modAttached(ownerId)) {
+        return c.json(HookWaitResult.parse({ outcome: "replaced" }), 200)
+      }
+      const ready =
+        deps.owners.state(ownerId).status === "busy" ? [] : deliver(ownerId, labelOf(ownerId))
       if (ready.length) {
         return c.json(HookWaitResult.parse({ outcome: "woken", pointers: ready }), 200)
       }
@@ -236,7 +266,8 @@ export function createControlApi(deps: ControlApiDeps) {
         const outcome = await armed
         pushPairing(ownerId)
         if (outcome !== "woken") return c.json(HookWaitResult.parse({ outcome }), 200)
-        const pointers = deliver(ownerId, labelOf(ownerId))
+        const pointers =
+          deps.owners.state(ownerId).status === "busy" ? [] : deliver(ownerId, labelOf(ownerId))
         if (pointers.length) return c.json(HookWaitResult.parse({ outcome, pointers }), 200)
       }
     })
@@ -246,8 +277,104 @@ export function createControlApi(deps: ControlApiDeps) {
       if (!pairing) return c.text(`No owner registered for pid ${pid}`, 404)
       if (pairing.state.status === "gone") {
         for (const round of deps.inbox.orphanFor(pairing.owner)) pushRound(round)
+        for (const message of deps.inbox.conversation.failQueued(pairing.owner)) {
+          deps.live.push(message.pageId, { type: "message", message })
+        }
       }
       pushPairing(pairing.owner)
+      return c.json(Ok.parse({ ok: true }), 200)
+    })
+    .post(A.hookTool.path, zValidator("json", A.hookTool.request), (c) => {
+      const { pid } = c.req.valid("json")
+      const owner = deps.owners.byPid(pid)
+      if (!owner) return c.text(`No owner registered for pid ${pid}`, 404)
+      const pointers = deliver(owner, labelOf(owner), "send-now")
+      return c.json(HookPointers.parse({ pointers }), 200)
+    })
+    .get(A.wait.path, zValidator("query", A.wait.request), async (c) => {
+      const { owner, timeoutSeconds } = c.req.valid("query")
+      if (!deps.owners.resolve([], owner)) return c.text(`Unknown owner ${owner}`, 404)
+      if (deps.owners.state(owner).status === "gone") return c.text(`Owner ${owner} is gone`, 409)
+
+      const deadline = Date.now() + Number(timeoutSeconds) * 1000
+      for (;;) {
+        const deliveries: AgentDelivery[] = []
+        if (deps.owners.state(owner).status !== "busy") {
+          for (const pointer of deliver(owner, labelOf(owner))) {
+            deliveries.push({ kind: "round", pointer, text: formatPointer(pointer) })
+          }
+        }
+        for (const message of deps.inbox.conversation.takeQueued(owner)) {
+          deps.live.push(message.pageId, { type: "message", message })
+          deliveries.push({
+            kind: "page-message",
+            messageId: message.id,
+            pageId: message.pageId,
+            text: formatPageMessage(message),
+          })
+        }
+        if (deliveries.length) {
+          return c.json(AgentWaitResult.parse({ outcome: "deliver", deliveries }), 200)
+        }
+        const armed = deps.waiters.armMod(owner, Math.max(0, deadline - Date.now()))
+        pushPairing(owner)
+        const outcome = await armed
+        pushPairing(owner)
+        if (outcome !== "woken") return c.json(AgentWaitResult.parse({ outcome }), 200)
+      }
+    })
+    .get(A.state.path, zValidator("query", A.state.request), (c) => {
+      const { owner } = c.req.valid("query")
+      if (!deps.owners.resolve([], owner)) return c.text(`Unknown owner ${owner}`, 404)
+      const session =
+        deps.owners.liveSessions().find((session) => session.owner === owner) ??
+        deps.owners.pairing(owner, PairingGeneration.parse(0), listenerOf(owner))
+      const pages = deps.owners.pagesOf(owner).map((pageId) => {
+        const record = requirePage(pageId)
+        const { page } = record
+        const pairing = pagePairing(record)
+        const reachable =
+          pairing !== null && pairing.state.status !== "gone" && deps.waiters.modAttached(owner)
+        return {
+          pageId,
+          origin: page.origin,
+          chat: deps.inbox.conversation.chatSetting(page, reachable),
+        }
+      })
+      const rounds = deps.inbox.summaries({ ownerId: owner }).flatMap((summary) => {
+        const round = deps.inbox.round(summary.id)
+        if (!round) return []
+        return round.state.stage === "queued" ||
+          round.state.stage === "announced" ||
+          round.state.stage === "orphaned" ||
+          (round.state.stage === "claimed" &&
+            round.notes.some((note) => note.resolution.status === "open"))
+          ? [round]
+          : []
+      })
+      return c.json(
+        AgentState.parse({ session, focus: deps.inbox.conversation.focus(owner), pages, rounds }),
+        200,
+      )
+    })
+    .post(A.transcript.path, zValidator("json", A.transcript.request), (c) => {
+      const { owner, rows } = c.req.valid("json")
+      if (!deps.owners.resolve([], owner)) return c.text(`Unknown owner ${owner}`, 404)
+      if (deps.owners.state(owner).status === "gone") return c.text(`Owner ${owner} is gone`, 409)
+      const { pageId, stored } = deps.inbox.conversation.appendTranscript(owner, rows)
+      for (const message of stored) deps.live.push(message.pageId, { type: "message", message })
+      return c.json(
+        TranscriptResult.parse({ pageId, stored: stored.map((message) => message.id) }),
+        200,
+      )
+    })
+    .post(A.turn.path, zValidator("json", A.turn.request), (c) => {
+      const { owner, state } = c.req.valid("json")
+      if (!deps.owners.resolve([], owner)) return c.text(`Unknown owner ${owner}`, 404)
+      if (deps.owners.state(owner).status === "gone") return c.text(`Owner ${owner} is gone`, 409)
+      deps.owners.setBusy(owner, state === "busy")
+      if (state === "idle") deps.waiters.wake(owner)
+      pushPairing(owner)
       return c.json(Ok.parse({ ok: true }), 200)
     })
     .post("/open", zValidator("json", OpenBody), (c) => {
@@ -326,6 +453,9 @@ export function createControlApi(deps: ControlApiDeps) {
         return c.text(`Round ${round.id} belongs to another owner`, 409)
       }
       const claimed = deps.inbox.claim(round.id) ?? round
+      if (claimed.owner) {
+        deps.inbox.conversation.setFocus(claimed.owner, claimed.pageId, claimed.id)
+      }
       pushRound(claimed)
       return c.json(
         ShowResult.parse({

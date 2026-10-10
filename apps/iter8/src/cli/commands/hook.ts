@@ -70,6 +70,19 @@ export const hook = (deps: CliDeps) => {
             pointers(result.pointers, deps.stdout)
           }),
       }),
+      tool: defineCommand({
+        meta: { name: "tool", description: CLI_SURFACE["hook tool"].summary },
+        args: commandArgs("hook tool"),
+        run: ({ rawArgs }) =>
+          runCli(deps, "hook tool", rawArgs, async ({ values }) => {
+            const body = identity(textFlag(values, "pid"))
+            const client = await connect(deps, false)
+            const result = await (
+              await request(() => client.hook.tool.$post({ json: body }))
+            ).json()
+            pointers(result.pointers, deps.stdout)
+          }),
+      }),
       stop: defineCommand({
         meta: { name: "stop", description: CLI_SURFACE["hook stop"].summary },
         args: commandArgs("hook stop"),
