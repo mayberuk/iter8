@@ -1,0 +1,52 @@
+import { afterAll, beforeAll, expect, test } from "bun:test"
+import { HEAVY_PAGE, MANIFEST, type RunningFixture, startFixture } from "../../rig/fixtures"
+import { startLongTaskProbe } from "../../rig/long-task"
+import { lookupInPage, startSourceRig } from "./lookup"
+
+const RIG_TIMEOUT_MS = 120_000
+// The Long Tasks API reports only tasks over 50 ms, so any reported task is one too many.
+const LONG_TASK_MS = 50
+
+const confidence = MANIFEST.find((entry) => entry.name === "vite-react")?.confidence
+if (confidence === undefined) throw new Error("fixtures/manifest.json has no vite-react entry")
+
+let fixture: RunningFixture | undefined
+let rig: Awaited<ReturnType<typeof startSourceRig>> | undefined
+
+beforeAll(async () => {
+  fixture = await startFixture("vite-react")
+  rig = await startSourceRig()
+}, RIG_TIMEOUT_MS)
+
+afterAll(async () => {
+  try {
+    await rig?.stop()
+  } finally {
+    await fixture?.stop()
+  }
+}, RIG_TIMEOUT_MS)
+
+function started() {
+  if (fixture === undefined || rig === undefined) throw new Error("the rig never started")
+  return { fixture, rig }
+}
+
+test(
+  "a lookup of the last cell on the heavy page adds no long task",
+  async () => {
+    const { fixture, rig } = started()
+    const view = await rig.open(fixture, HEAVY_PAGE)
+    try {
+      const selector = "tbody > tr:last-child > td:last-child"
+      await view.page.waitForSelector(selector)
+      const probe = await startLongTaskProbe(view.page)
+      const lead = await lookupInPage(view, selector)
+      const { longestMs } = await probe.stop()
+      expect(lead).toMatchObject({ confidence, framework: "react" })
+      expect(longestMs).toBeLessThanOrEqual(LONG_TASK_MS)
+    } finally {
+      await view.close()
+    }
+  },
+  RIG_TIMEOUT_MS,
+)

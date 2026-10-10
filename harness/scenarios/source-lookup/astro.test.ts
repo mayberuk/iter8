@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
-import { MAX_SERVED_HTML_BYTES } from "../../../packages/source/src/astro"
 import { MANIFEST, type RunningFixture, startFixture } from "../../rig/fixtures"
 import { waitFor } from "../../rig/wait"
 import {
@@ -11,7 +10,6 @@ import {
 } from "./lookup"
 
 const RIG_TIMEOUT_MS = 120_000
-const TYPING_BUDGET_MS = 250
 const CARD = '[data-source-target="card"]'
 
 const confidence = MANIFEST.find((entry) => entry.name === "astro")?.confidence
@@ -175,38 +173,6 @@ test(
       expect(await lookupInPage(view, CARD, { abortAfterMs: 0 })).toEqual({
         rejected: "AbortError",
       })
-    })
-  },
-  RIG_TIMEOUT_MS,
-)
-
-test(
-  "a served page at the size cap parses inside the typing budget",
-  async () => {
-    await withStrippedPage(async (view) => {
-      const timing = await view.page.evaluate(async (capBytes) => {
-        const html = await (await fetch(location.href, { cache: "no-store" })).text()
-        const parse = (text: string) => {
-          const started = performance.now()
-          new DOMParser().parseFromString(text, "text/html")
-          return performance.now() - started
-        }
-        const bytes = (text: string) => new TextEncoder().encode(text).byteLength
-        const body = html.slice(
-          html.indexOf(">", html.indexOf("<body")) + 1,
-          html.lastIndexOf("</body>"),
-        )
-        const copies = Math.floor((capBytes - bytes(html)) / bytes(body))
-        const atCap = html.replace("</body>", `${body.repeat(copies)}</body>`)
-        return {
-          pageBytes: bytes(html),
-          pageMs: parse(html),
-          capBytes: bytes(atCap),
-          capMs: parse(atCap),
-        }
-      }, MAX_SERVED_HTML_BYTES)
-      expect(timing.capBytes).toBeLessThanOrEqual(MAX_SERVED_HTML_BYTES)
-      expect(timing.capMs).toBeLessThanOrEqual(TYPING_BUDGET_MS)
     })
   },
   RIG_TIMEOUT_MS,

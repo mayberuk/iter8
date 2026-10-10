@@ -30,7 +30,9 @@ Import each module by path; there are no barrels.
   because macOS temp paths push a control socket past the 104-byte `sun_path` limit.
 - `harness/rig/browser.ts` — `launchChromium({ args })` (headless, no flags of its own), `newPage`.
 - `harness/rig/long-task.ts` — `startLongTaskProbe(page)`; `.stop()` reports the longest main-thread
-  task after start. The typing budget is ≤ 250 ms.
+  task after start. The typing budget is ≤ 250 ms. A test asserting any wall-clock budget lives in
+  a `*.budget.test.ts` file, which `bun run test` runs alone after the parallel run: a long task is
+  wall time, and on CI's 4-core runner three other Chromiums sharing the CPU turned one into 480 ms.
 - `harness/rig/cli.ts` — `runCli(env, args)`, `cliCommand(binary?)`: a given binary, else
   `ITER8_TEST_BINARY`, else `bun apps/iter8/src/main.ts`.
 - `harness/rig/service.ts` — `startService({ binary })` on a throwaway home and pool;
