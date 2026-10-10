@@ -40,6 +40,8 @@ Import each module by path; there are no barrels.
   `runHook({ command, input, env, timeoutMs })`, `hookInput(event, extra)`.
 - `harness/rig/fixtures.ts` — `startFixture(name)` (waits for readiness, stops the process group),
   `buildFixture(name)`, `HEAVY_PAGE`, `MANIFEST`; `fixtures/manifest.json`.
+  Next fixtures get a per-start `distDir` and scratch prefixes (`SCRATCH_ROOT` in `scratch.ts`) carry
+  the pid, so concurrent runs don't collide.
 - `harness/rig/bundle.ts` — `buildBrowserBundle(entry)`.
 - `harness/stubs/mock-service.ts` — `startMockService({ folder, overlayDir, … })`: the overlay API
   over a built folder; controls `setPairing`, `setLiveSessions`, `push`, `draft()`, `rounds()`,

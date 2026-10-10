@@ -22,8 +22,7 @@ import { type AgentSession, startAgentSession } from "../../rig/agent"
 import { launchChromium, newPage } from "../../rig/browser"
 import { buildBrowserBundle } from "../../rig/bundle"
 import { fixtureDir } from "../../rig/fixtures"
-import { WORKER } from "../../rig/ports"
-import { type Scratch, scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import { openThroughProxy, type RunningService, startService } from "../../rig/service"
 import { waitFor } from "../../rig/wait"
 import { type Iter8Probe, PROBE_GLOBAL } from "../../stubs/probe-overlay"
@@ -74,7 +73,7 @@ async function makePair(
   service: RunningService,
   disposers: (() => Promise<void>)[],
 ): Promise<Pair> {
-  const copy = await scratchDir(`/tmp/iter8-w${WORKER}-static-`)
+  const copy = await scratchDir(`${SCRATCH_ROOT}static-`)
   disposers.push(copy.dispose)
   await cp(fixtureDir("static"), copy.path, { recursive: true })
 

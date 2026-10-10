@@ -2,13 +2,13 @@ import { expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { portBlock, WORKER } from "./ports"
-import { scratchDir } from "./scratch"
+import { SCRATCH_ROOT, scratchDir } from "./scratch"
 
 const portsModule = new URL("./ports.ts", import.meta.url).href
 const FIRST = portBlock(WORKER).first
 
 async function withClaimsDir<T>(run: (claims: string) => Promise<T>): Promise<T> {
-  const scratch = await scratchDir(`/tmp/iter8-w${WORKER}-claims-`)
+  const scratch = await scratchDir(`${SCRATCH_ROOT}claims-`)
   try {
     return await run(join(scratch.path, "claims"))
   } finally {

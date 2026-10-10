@@ -1,9 +1,8 @@
-import { WORKER } from "./ports"
-import { type Scratch, scratchDir } from "./scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "./scratch"
 
 /** Bundles a browser entry to `overlay.js` in a fresh directory, servable as an overlay build. */
 export async function buildBrowserBundle(entry: string): Promise<Scratch> {
-  const outdir = await scratchDir(`/tmp/iter8-w${WORKER}-bundle-`)
+  const outdir = await scratchDir(`${SCRATCH_ROOT}bundle-`)
   try {
     const result = await Bun.build({
       entrypoints: [entry],

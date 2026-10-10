@@ -20,8 +20,7 @@ import {
 } from "@iter8/protocol"
 import fc from "fast-check"
 import { fixtureDir } from "../../rig/fixtures"
-import { WORKER } from "../../rig/ports"
-import { type Scratch, scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 import { type MockService, startMockService } from "../../stubs/mock-service"
 
@@ -62,7 +61,7 @@ let overlayDir: string
 let mock: MockService
 
 beforeAll(async () => {
-  overlay = await scratchDir(`/tmp/iter8-w${WORKER}-overlay-`)
+  overlay = await scratchDir(`${SCRATCH_ROOT}overlay-`)
   overlayDir = overlay.path
   await mkdir(join(overlayDir, "fonts"))
   await Bun.write(join(overlayDir, "fonts/probe.woff2"), FONT)
