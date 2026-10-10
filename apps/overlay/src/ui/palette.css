@@ -1,5 +1,6 @@
 .scrim {
   position: fixed;
+  z-index: 2;
   inset: 0;
   pointer-events: auto;
   background: var(--scrim);
@@ -7,6 +8,7 @@
 }
 .palette {
   position: fixed;
+  z-index: 2;
   left: 50%;
   top: 16vh;
   width: min(600px, calc(100vw - 32px));
@@ -123,6 +125,7 @@
 
 .keysheet {
   position: fixed;
+  z-index: 2;
   left: 50%;
   top: 50%;
   width: min(700px, calc(100vw - 32px));

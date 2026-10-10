@@ -21,7 +21,8 @@ export function mount(input: OverlayBoot): () => void {
   const boot = parsed.data
 
   const host = document.createElement("iter8-overlay")
-  host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none"
+  host.style.cssText =
+    "position:absolute;top:0;left:0;width:0;height:0;z-index:2147483000;pointer-events:none"
   document.documentElement.append(host)
   const root = host.attachShadow({ mode: "open" })
   adoptSheet(root, tokensCss)
