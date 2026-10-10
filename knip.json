@@ -31,8 +31,7 @@
       "ignoreDependencies": ["zod", "fast-check"]
     },
     "harness": {
-      "entry": ["rig/*.ts", "stubs/*.ts", "scenarios/**/*.ts"],
-      "ignoreDependencies": ["hono", "zod", "playwright", "fast-check", "@iter8/protocol"]
+      "entry": ["rig/*.ts", "stubs/*.ts", "scenarios/**/*.ts"]
     }
   }
 }
