@@ -144,6 +144,27 @@ describe("headers", () => {
     expect(await metaCsp(out)).toEqual([`script-src 'self' ${bootHash(boot)}`])
   })
 
+  test("each boot value gets the hash of its own script text", async () => {
+    const other = OverlayBoot.parse({
+      ...boot,
+      token: "Zz9yX8wV7uT6sR5qP4oN3mL2kJ1iH0gF",
+      pageId: "heron",
+    })
+    expect(renderBootScript(other)).not.toBe(renderBootScript(boot))
+    const policy = "script-src 'nonce-r4nd0m' 'strict-dynamic'"
+    for (const value of [boot, other, boot]) {
+      const res = await injectBoot(
+        html(`<head>${metaOf(policy)}</head>`, { "content-security-policy": policy }),
+        value,
+        ORIGIN,
+      )
+      const expected = `script-src 'nonce-r4nd0m' 'strict-dynamic' ${bootHash(value)}`
+      expect(res.headers.get("content-security-policy")).toBe(expected)
+      expect(await metaCsp(await res.text())).toEqual([expected])
+    }
+    expect(bootHash(boot)).not.toBe(bootHash(other))
+  })
+
   test("an unsafe-inline policy gets no hash", async () => {
     const policy = "script-src 'self' 'unsafe-inline'"
     const markup = `<head><meta http-equiv="content-security-policy" content="${policy}"></head>`

@@ -183,6 +183,33 @@ describe("HTML responses", () => {
     expect(await res.text()).toBe("compressed bytes")
   })
 
+  test("a restrictive CSP header and a restrictive meta CSP both arrive amended", async () => {
+    const header = "script-src 'nonce-r4nd0m' 'strict-dynamic'; object-src 'none'"
+    const meta = "script-src 'self'; img-src 'self'"
+    const { target } = upstream(
+      () =>
+        new Response(
+          `<html><head><meta http-equiv="Content-Security-Policy" content="${meta}"></head><body>x</body></html>`,
+          { headers: { "content-type": "text/html", "content-security-policy": header } },
+        ),
+    )
+    const res = await proxyHttp(pageRequest("/"), target, deps)
+    const hash = `'sha256-${createHash("sha256").update(renderBootScript(boot)).digest("base64")}'`
+    expect(res.headers.get("content-security-policy")).toBe(
+      `script-src 'nonce-r4nd0m' 'strict-dynamic' ${hash}; object-src 'none'`,
+    )
+    const contents: string[] = []
+    await new HTMLRewriter()
+      .on("meta[http-equiv]", {
+        element(element) {
+          contents.push(element.getAttribute("content") ?? "")
+        },
+      })
+      .transform(new Response(await res.text()))
+      .text()
+    expect(contents).toEqual([`script-src 'self' ${hash}; img-src 'self' blob:`])
+  })
+
   test("an HTML response with no boot passes through uninjected", async () => {
     const page = "<html><head></head><body>x</body></html>"
     const { target } = upstream(
@@ -499,6 +526,47 @@ describe("responses", () => {
     )
     expect(await follow(`${extra}/api`)).toBe("http://larkspur.localhost:3991/api")
     expect(await follow("https://auth.example/sso?x=1")).toBe("https://auth.example/sso?x=1")
+  })
+
+  test.each([
+    ["a root-relative", "/login?next=%2Fhome#form", `${PAGE}/login?next=%2Fhome#form`],
+    ["a path-relative", "next/step?x=1", `${PAGE}/go/next/step?x=1`],
+    ["a parent-relative", "../up", `${PAGE}/up`],
+    ["a scheme-relative to the upstream", "//SELF/api?y=2", `${PAGE}/api?y=2`],
+    [
+      "a scheme-relative to another mapped upstream",
+      "//127.0.0.1:1/api",
+      "http://larkspur.localhost:3991/api",
+    ],
+  ])("%s Location that resolves to a mapped origin is rewritten", async (_name, sent, expected) => {
+    const { origin, target } = upstream((req) => {
+      const to = (new URL(req.url).searchParams.get("to") ?? "").replace(
+        "//SELF",
+        `//${new URL(origin).host}`,
+      )
+      return new Response(null, { status: 302, headers: { location: to } })
+    })
+    const mapped = {
+      ...target,
+      originMap: new Map([
+        [origin, PAGE],
+        ["http://127.0.0.1:1", "http://larkspur.localhost:3991"],
+      ]),
+    }
+    const res = await proxyHttp(
+      pageRequest(`/go/here?to=${encodeURIComponent(sent)}`),
+      mapped,
+      deps,
+    )
+    expect(res.headers.get("location")).toBe(expected)
+  })
+
+  test("a scheme-relative Location to an unmapped host is left as sent", async () => {
+    const { target } = upstream(
+      () => new Response(null, { status: 302, headers: { location: "//auth.example/sso" } }),
+    )
+    const res = await proxyHttp(pageRequest("/go"), target, deps)
+    expect(res.headers.get("location")).toBe("//auth.example/sso")
   })
 
   test("a non-HTML body is decoded and otherwise unchanged, with every Set-Cookie kept", async () => {

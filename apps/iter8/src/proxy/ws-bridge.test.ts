@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import type { Server, ServerWebSocket, TCPSocketListener } from "bun"
 import { type BridgeSocketData, bridgeHandlers, upgradeBridged } from "./ws-bridge"
 
@@ -549,4 +550,67 @@ test.each([
   expect(client.received[0]).toBe(`0 ${expectedPath}?q=1`)
   expect(upstream.offered).toHaveLength(1)
   expect(elsewhere.offered).toEqual([])
+})
+
+test("text and binary frames queued before the client opens keep their arrival order", async () => {
+  const interleaved: Array<string | Uint8Array> = []
+  for (let i = 0; i < 6; i++) {
+    interleaved.push(`text ${i}`, Uint8Array.of(i, i + 1), Uint8Array.of(), `more ${i}`)
+  }
+  const upstream = startUpstream(undefined, {
+    afterOpen: (ws) => {
+      for (const frame of interleaved) ws.send(frame)
+    },
+  })
+  const bridge = startBridge(upstream.url, { deferUpgradeMs: 200 })
+  const client = connect(bridge.port, "/hmr", ["vite-hmr"])
+  await client.opened
+  const total = EARLY_TEXT_FRAMES + 1 + interleaved.length
+  await until("every queued frame", () => client.received.length === total)
+
+  expect(bridge.backlogAtOpen).toEqual([total])
+  const texts = Array.from({ length: EARLY_TEXT_FRAMES }, (_, i) => `${i} /hmr`)
+  expect(client.received).toEqual([...texts, EARLY_BINARY, ...interleaved])
+})
+
+test("an upstream that opens at about 4.6 s is used, not timed out", async () => {
+  const upstream = startUpstream(undefined, { acceptDelayMs: 4_600 })
+  const bridge = startBridge(upstream.url)
+
+  const startedAt = Date.now()
+  const client = connect(bridge.port, "/hmr", ["vite-hmr"])
+  await client.opened
+  const elapsed = Date.now() - startedAt
+  expect(elapsed).toBeGreaterThanOrEqual(4_500)
+  expect(elapsed).toBeLessThan(5_000)
+  expect(bridge.statuses).toEqual([101])
+  await until("the first upstream frame", () => client.received.length > 0)
+  expect(client.received[0]).toBe("0 /hmr")
+}, 15_000)
+
+test("an upstream that ignores the offered subprotocols is refused with 502, since Bun's client fails that handshake", async () => {
+  const offers: string[] = []
+  const ignoring: TCPSocketListener = Bun.listen({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: {
+      data(socket, chunk) {
+        const text = chunk.toString()
+        offers.push(/sec-websocket-protocol: (.+)\r\n/i.exec(text)?.[1]?.trim() ?? "")
+        const key = /sec-websocket-key: (.+)\r\n/i.exec(text)?.[1]?.trim() ?? ""
+        const accept = createHash("sha1")
+          .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+          .digest("base64")
+        socket.write(
+          `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+        )
+      },
+    },
+  })
+  stops.push(() => ignoring.stop(true))
+  const bridge = startBridge(`http://127.0.0.1:${ignoring.port}`)
+
+  await expect(connect(bridge.port, "/hmr", ["vite-hmr"]).opened).rejects.toThrow("refused")
+  expect(offers).toEqual(["vite-hmr"])
+  expect(bridge.statuses).toEqual([502])
 })
