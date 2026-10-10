@@ -103,22 +103,32 @@ test("identical matches all out of reach are ambiguous, not missing", () => {
   expect(choice).toEqual({ kind: "lost", reason: "ambiguous" })
 })
 
+const SAVE_NAMED: Identity = { role: "button", name: "Save draft", text: "Save" }
+
 test("with no exact match, a same role and name candidate is anchored only inside half the diagonal plus 48 px", () => {
   // A 30 × 40 box has a 50 px diagonal, so the reach is 25 + 48 = 73 px from its centre.
-  const edited = { role: "button", name: undefined, text: "Saved" }
-  expect(chooseAnchor(stored(SAVE, HOME), [{ ...edited, box: at(172, 100) }])).toEqual({
+  const edited = { role: "button", name: "Save draft", text: "Saved" }
+  expect(chooseAnchor(stored(SAVE_NAMED, HOME), [{ ...edited, box: at(172, 100) }])).toEqual({
     kind: "anchored",
     index: 0,
   })
-  expect(chooseAnchor(stored(SAVE, HOME), [{ ...edited, box: at(173, 100) }])).toEqual({
+  expect(chooseAnchor(stored(SAVE_NAMED, HOME), [{ ...edited, box: at(173, 100) }])).toEqual({
     kind: "lost",
     reason: "missing",
   })
 })
 
+test("an element with no accessible name whose text differs never re-anchors, even in its own box", () => {
+  const drop = stored({ role: "button", name: undefined, text: "Drop me" }, HOME)
+  const choice = chooseAnchor(drop, [
+    { role: "button", name: undefined, text: "Keep me", box: HOME },
+  ])
+  expect(choice).toEqual({ kind: "lost", reason: "missing" })
+})
+
 test("with no exact match, two same role and name candidates equally near are ambiguous", () => {
-  const edited = { role: "button", name: undefined, text: "Saved" }
-  const choice = chooseAnchor(stored(SAVE, HOME), [
+  const edited = { role: "button", name: "Save draft", text: "Saved" }
+  const choice = chooseAnchor(stored(SAVE_NAMED, HOME), [
     { ...edited, box: at(120, 100) },
     { ...edited, box: at(80, 100) },
   ])
