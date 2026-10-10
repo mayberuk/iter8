@@ -367,7 +367,6 @@ function MoreMenu() {
 const STATE_WORD: Partial<Record<DockState, string>> = {
   unattached: "not attached",
   busy: "busy",
-  gone: "ended",
   delivered: "delivered",
 }
 
@@ -429,7 +428,7 @@ export function Dock() {
   const count = model.draftOrder.value.length
   const name = model.name.value
   const where = model.where.value
-  const word = STATE_WORD[state] ?? null
+  const word = pairing?.state.status === "gone" ? pairing.state.reason : (STATE_WORD[state] ?? null)
   const tip = sendTip(blocked, pairing?.state.status === "busy", pairing?.listener, name)
 
   const previousCount = useRef(count)

@@ -246,6 +246,8 @@ export function listenKeys(deps: {
     // A focused control of ours answers Enter and Space itself.
     if (
       ours &&
+      !event.ctrlKey &&
+      !event.metaKey &&
       (event.key === "Enter" || event.key === " ") &&
       target instanceof Element &&
       target.closest("button, input, [role=button], [role=menuitem]")

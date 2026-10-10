@@ -16,8 +16,9 @@ import tokensCss from "./ui/tokens.css" with { type: "text" }
 const UNREACHABLE_RETRY_MS = 2000
 
 export function mount(input: OverlayBoot): () => void {
-  const boot = OverlayBoot.parse(input)
-  if (document.querySelector("iter8-overlay")) return () => {}
+  const parsed = OverlayBoot.safeParse(input)
+  if (!parsed.success || document.querySelector("iter8-overlay")) return () => {}
+  const boot = parsed.data
 
   const host = document.createElement("iter8-overlay")
   host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none"

@@ -1,7 +1,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
+import { readdir } from "node:fs/promises"
 import {
   ASSET_PREFIX,
+  LIVE_PATH,
   OVERLAY_PREFIX,
+  OVERLAY_ROUTES,
   OVERLAY_SCRIPT_PATH,
   OverlayBoot,
   Pairing,
@@ -15,7 +18,7 @@ import { fixtureDir } from "../../rig/fixtures"
 import type { Scratch } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 import type { MockService } from "../../stubs/mock-service"
-import { buildOverlay, openOverlay } from "./support"
+import { buildOverlay, openOverlay, withSourceBundle } from "./support"
 
 const STATIC = fixtureDir("static")
 const LIVE = Pairing.parse(pairingJson)
@@ -44,11 +47,11 @@ async function until(label: string, check: () => Promise<boolean> | boolean, tim
   await waitFor(label, async () => ((await check()) ? true : null), { timeoutMs })
 }
 
-async function open() {
+async function open(mock: Parameters<typeof openOverlay>[0]["mock"] = { pairing: LIVE }) {
   const opened = await openOverlay({
     overlayDir: overlayBuild.path,
     folder: STATIC,
-    mock: { pairing: LIVE },
+    mock,
     browser,
   })
   cleanups.push(opened.close)
@@ -127,6 +130,8 @@ function pageShape(page: Page) {
     root: [...document.documentElement.children].map((el) => el.tagName),
     htmlClass: document.documentElement.className,
     htmlStyle: document.documentElement.getAttribute("style"),
+    body: document.body.innerHTML,
+    elements: document.querySelectorAll("*").length,
   }))
 }
 
@@ -142,6 +147,41 @@ describe("the host page is left as it was", () => {
     expect(withOverlay.root).toEqual(["HEAD", "BODY", "ITER8-OVERLAY"])
     expect(withOverlay.htmlClass).toBe(without.htmlClass)
     expect(withOverlay.htmlStyle).toBe(without.htmlStyle)
+    expect(withOverlay.body).toBe(without.body)
+    expect(withOverlay.elements).toBe(without.elements + 1)
+  }, 30_000)
+
+  test("with menus, a tooltip and a toast showing, the page body is still untouched and no sheet is added twice", async () => {
+    const { page, mock, overlay } = await open({
+      pairing: LIVE,
+      pageState: { drafts: [], rounds: [], agentNotes: [] },
+    })
+    const without = await pageShape(await openWithoutOverlay(mock))
+    const sheets = () =>
+      page.evaluate(
+        () => document.querySelector("iter8-overlay")?.shadowRoot?.adoptedStyleSheets.length,
+      )
+    const before = await sheets()
+    await overlay.getByRole("button", { name: "More options" }).click()
+    await overlay
+      .getByRole("radiogroup", { name: "Theme" })
+      .locator("label")
+      .filter({ hasText: "Dark" })
+      .click()
+    await overlay.getByRole("button", { name: /^Session larkspur/ }).click()
+    await overlay.getByRole("button", { name: "Pick element" }).hover()
+    await until("the tooltip", () => overlay.getByRole("tooltip").isVisible())
+    await until("the toast", () =>
+      overlay
+        .getByRole("status")
+        .filter({ hasText: /Theme Dark/ })
+        .isVisible(),
+    )
+    const shape = await pageShape(page)
+    expect(shape.body).toBe(without.body)
+    expect(shape.head).toEqual(without.head)
+    expect(shape.elements).toBe(without.elements + 1)
+    expect(await sheets()).toBe(before)
   }, 30_000)
 
   test("the dock lives in one open shadow root on the host element and adds no style element", async () => {
@@ -235,23 +275,22 @@ describe("the host page is left as it was", () => {
 })
 
 describe("teardown", () => {
-  test("removing the host leaves the window and document listeners the page started with", async () => {
-    const { page, mock } = await open()
-    await page.addInitScript(trackPageListeners)
-    await page.reload()
+  async function trackedOpen(mock?: Parameters<typeof open>[0]) {
+    const opened = await open(mock)
+    await opened.page.addInitScript(trackPageListeners)
+    await opened.page.reload()
     await until("the dock after reload", () =>
-      page.getByRole("button", { name: "Pick element" }).isVisible(),
+      opened.page.getByRole("button", { name: /Pick element/ }).isVisible(),
     )
     const baseline = await pageListeners(
-      await openWithoutOverlay(mock, async (bare) => {
+      await openWithoutOverlay(opened.mock, async (bare) => {
         await bare.addInitScript(trackPageListeners)
       }),
     )
+    return { ...opened, baseline }
+  }
 
-    const mounted = await pageListeners(page)
-    expect(mounted.length).toBeGreaterThan(baseline.length)
-    expect(mounted).toContain("window:keydown:capture")
-
+  async function removeHostAndExpectBaseline(page: Page, baseline: string[]) {
     await page.evaluate(() => document.querySelector("iter8-overlay")?.remove())
     await waitFor(
       "the listeners to be removed",
@@ -259,7 +298,174 @@ describe("teardown", () => {
         JSON.stringify(await pageListeners(page)) === JSON.stringify(baseline) ? true : null,
       { timeoutMs: 5000 },
     )
+  }
+
+  test("removing the host leaves the window and document listeners the page started with", async () => {
+    const { page, baseline } = await trackedOpen()
+    const mounted = await pageListeners(page)
+    expect(mounted.length).toBeGreaterThan(baseline.length)
+    expect(mounted).toContain("window:keydown:capture")
+    await removeHostAndExpectBaseline(page, baseline)
   }, 30_000)
+
+  test("removing the host with the More menu open also removes the menu's pointer listener", async () => {
+    const { page, overlay, baseline } = await trackedOpen()
+    const closed = await pageListeners(page)
+    await overlay.getByRole("button", { name: "More options" }).click()
+    await until("the menu's listener", async () =>
+      (await pageListeners(page)).includes("window:pointerdown:capture"),
+    )
+    expect(closed).not.toContain("window:pointerdown:capture")
+    await removeHostAndExpectBaseline(page, baseline)
+  }, 30_000)
+
+  test("removing the host with the session menu open removes the menu's pointer listener", async () => {
+    const { page, overlay, baseline } = await trackedOpen({ pairing: null })
+    await until("the attach menu", () =>
+      overlay.getByRole("dialog", { name: "Attach this page to a session" }).isVisible(),
+    )
+    expect(await pageListeners(page)).toContain("window:pointerdown:capture")
+    await removeHostAndExpectBaseline(page, baseline)
+  }, 30_000)
+
+  test("removing the host before the first hello finishes leaves nothing running afterwards", async () => {
+    const { page, mock, baseline } = await trackedOpen()
+    let release = () => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route(`**${OVERLAY_ROUTES.hello.path}`, async (route) => {
+      await released
+      await route.continue()
+    })
+    const requestsBefore = mock.requests().length
+    await page.reload()
+    await until("the connecting dock", () =>
+      page.locator("iter8-overlay").getByRole("toolbar").isVisible(),
+    )
+    await page.evaluate(() => document.querySelector("iter8-overlay")?.remove())
+    const answered = page.waitForResponse((response) =>
+      response.url().endsWith(OVERLAY_ROUTES.hello.path),
+    )
+    release()
+    await answered
+    await page.evaluate(
+      () => new Promise<void>((resolve) => setTimeout(() => setTimeout(resolve, 0), 0)),
+    )
+    expect(await page.locator("iter8-overlay").count()).toBe(0)
+    expect(JSON.stringify(await pageListeners(page))).toBe(JSON.stringify(baseline))
+    const opened = mock.requests().slice(requestsBefore)
+    expect(opened.filter((request) => request.path === LIVE_PATH)).toEqual([])
+  }, 30_000)
+})
+
+describe("a malformed boot", () => {
+  test("is refused: nothing mounts and nothing is thrown into the page", async () => {
+    const { page, mock, errors } = await open()
+    const good = OverlayBoot.parse({
+      protocolVersion: PROTOCOL_VERSION,
+      pageId: mock.pageId,
+      machineId: mock.machineId,
+      machineName: "mock-machine",
+      token: mock.token,
+      apiBase: OVERLAY_PREFIX,
+      sourceBundleUrl: SOURCE_BUNDLE_PATH,
+    })
+    await page.evaluate(() => document.querySelector("iter8-overlay")?.remove())
+    await until("the host to go", async () => (await page.locator("iter8-overlay").count()) === 0)
+    errors.length = 0
+    const malformed: unknown[] = [
+      null,
+      "boot",
+      {},
+      { ...good, token: 42 },
+      { ...good, protocolVersion: "one" },
+      { ...good, pageId: undefined },
+    ]
+    const outcome = await page.evaluate(
+      async ({ path, malformed }) => {
+        const { mount } = await import(path)
+        const results = malformed.map((boot) => {
+          try {
+            const teardown = mount(boot)
+            return {
+              threw: false,
+              teardown: typeof teardown,
+              hosts: document.querySelectorAll("iter8-overlay").length,
+            }
+          } catch {
+            return {
+              threw: true,
+              teardown: "none",
+              hosts: document.querySelectorAll("iter8-overlay").length,
+            }
+          }
+        })
+        return results
+      },
+      { path: OVERLAY_SCRIPT_PATH, malformed },
+    )
+    for (const result of outcome) {
+      expect(result).toEqual({ threw: false, teardown: "function", hosts: 0 })
+    }
+    expect(errors).toEqual([])
+    expect(
+      mock.requests().filter((request) => request.path === OVERLAY_ROUTES.hello.path).length,
+    ).toBe(1)
+
+    await page.evaluate(
+      async ({ path, good }) => {
+        const { mount } = await import(path)
+        mount(good)
+      },
+      { path: OVERLAY_SCRIPT_PATH, good },
+    )
+    await until("a good boot to mount", () =>
+      page.locator("iter8-overlay").getByRole("button", { name: "Pick element" }).isVisible(),
+    )
+  }, 30_000)
+})
+
+describe("the source bundle helper", () => {
+  test("none removes source.js, fake supplies one the page can load, and the original is untouched", async () => {
+    const original = await readdir(overlayBuild.path)
+    const none = await withSourceBundle(overlayBuild, "none")
+    cleanups.push(() => none.dispose())
+    const fake = await withSourceBundle(overlayBuild, "fake")
+    cleanups.push(() => fake.dispose())
+    expect(await readdir(none.path)).not.toContain("source.js")
+    expect(await readdir(none.path)).toContain("overlay.js")
+    expect(await readdir(fake.path)).toContain("source.js")
+    expect(await readdir(overlayBuild.path)).toEqual(original)
+
+    const served: Record<string, number> = {}
+    for (const [label, dir] of [
+      ["none", none.path],
+      ["fake", fake.path],
+    ] as const) {
+      const { page } = await openOverlay({
+        overlayDir: dir,
+        folder: STATIC,
+        mock: { pairing: LIVE },
+        browser,
+      }).then((opened) => {
+        cleanups.push(opened.close)
+        return opened
+      })
+      served[label] = await page.evaluate(
+        async (path) => (await fetch(path)).status,
+        SOURCE_BUNDLE_PATH,
+      )
+      if (label === "fake") {
+        const exported = await page.evaluate(
+          async (path) => Object.keys(await import(path)),
+          SOURCE_BUNDLE_PATH,
+        )
+        expect(exported).toEqual(["lookupSource"])
+      }
+    }
+    expect(served).toEqual({ none: 404, fake: 200 })
+  }, 60_000)
 })
 
 describe("styles and fonts", () => {

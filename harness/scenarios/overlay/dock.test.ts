@@ -17,6 +17,7 @@ import noteJson from "../../../packages/protocol/fixtures/Note.json"
 import goneJson from "../../../packages/protocol/fixtures/Pairing.gone.json"
 import pairingJson from "../../../packages/protocol/fixtures/Pairing.json"
 import orphanedJson from "../../../packages/protocol/fixtures/Round.orphaned.json"
+import queuedJson from "../../../packages/protocol/fixtures/Round.queued.json"
 import { launchChromium } from "../../rig/browser"
 import { fixtureDir } from "../../rig/fixtures"
 import type { Scratch } from "../../rig/scratch"
@@ -33,6 +34,12 @@ const ORPHANED = Round.parse({
   pageId: "mockpage",
   notes: orphanedJson.notes.map((note) => ({ ...note, pageId: "mockpage" })),
 })
+const QUEUED = Round.parse({
+  ...queuedJson,
+  pageId: "mockpage",
+  notes: queuedJson.notes.map((note) => ({ ...note, pageId: "mockpage" })),
+})
+const QUEUED_THEN_ORPHANED = Round.parse({ ...QUEUED, state: orphanedJson.state })
 const SEEDED = { drafts: [DRAFT], rounds: [], agentNotes: [] }
 const THREE_DRAFTS = {
   drafts: ["N21", "N22", "N23"].map((id) =>
@@ -146,7 +153,7 @@ describe("dock session states", () => {
     o.mock.setPairing(GONE)
     o.mock.push({ type: "pairing", pairing: GONE })
     await until("Send to be disabled", () => sendButton(o.overlay).isDisabled())
-    expect(await dock(o.overlay).locator(".stword").innerText()).toBe("ended")
+    expect(await dock(o.overlay).locator(".stword").innerText()).toBe("crashed")
     await until("the session-ended dialog", () =>
       o.overlay.getByRole("dialog", { name: "Session ended" }).isVisible(),
     )
@@ -179,7 +186,7 @@ describe("dock session states", () => {
       ],
       pageState: SEEDED,
     })
-    expect(await dock(overlay).locator(".stword").innerText()).toBe("ended")
+    expect(await dock(overlay).locator(".stword").innerText()).toBe("crashed")
     expect(await sendButton(overlay).isDisabled()).toBe(true)
     expect(mock.requests().some((request) => request.path === OVERLAY_ROUTES.send.path)).toBe(false)
 
@@ -261,7 +268,7 @@ describe("sending a round", () => {
       "the gone state",
       async () => (await dock(overlay).locator(".stword").count()) === 1,
     )
-    expect(await dock(overlay).locator(".stword").innerText()).toBe("ended")
+    expect(await dock(overlay).locator(".stword").innerText()).toBe("crashed")
     expect(await sendButton(overlay).isDisabled()).toBe(true)
     const why = overlay.getByRole("status").filter({ hasText: /ended/ })
     await until("the reason to be given", () => why.first().isVisible())
@@ -439,6 +446,26 @@ describe("connection notices", () => {
     await until("the restart notice to clear", async () => (await restarting.count()) === 0)
   }, 30_000)
 
+  test("after a draining reconnect the new socket carries a pairing update to the dock", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    await socketOpen(o)
+    const hellos = () =>
+      o.mock.requests().filter((request) => request.path === OVERLAY_ROUTES.hello.path).length
+    o.mock.push({ type: "draining" })
+    await until("a second hello", () => hellos() === 2, 5000)
+    const busy = { ...LIVE, state: { status: "busy" } } as const
+    o.mock.setPairing(busy)
+    await waitFor(
+      "the pairing update on the new socket",
+      async () => {
+        o.mock.push({ type: "pairing", pairing: busy })
+        return (await sendButton(o.overlay).innerText()) === "Queue" ? true : null
+      },
+      { timeoutMs: 8000, everyMs: 100 },
+    )
+    expect(await dock(o.overlay).locator(".stword").innerText()).toBe("busy")
+  }, 30_000)
+
   test("an upstream failure names the port that failed, until dismissed", async () => {
     const o = await open({ pairing: LIVE })
     await socketOpen(o)
@@ -596,6 +623,441 @@ describe("reload with unsaved draft writes", () => {
   }, 30_000)
 })
 
+describe("refused sends", () => {
+  const DRAFT_IDS = THREE_DRAFTS.drafts.map((note) => note.id)
+
+  test("a stale-generation refusal keeps every draft in order, says why, and the next send uses the new generation", async () => {
+    const { overlay, mock } = await open({ pairing: LIVE, pageState: THREE_DRAFTS })
+    const moved = { ...LIVE, generation: LIVE.generation + 1 }
+    mock.setPairing(moved)
+    mock.failNextSend({ outcome: "refused", reason: "stale-generation", pairing: moved })
+    await sendButton(overlay).click()
+    const why = overlay.getByRole("status").filter({ hasText: /attached to another session/ })
+    await until("the reason", () => why.isVisible())
+    expect(mock.rounds()).toEqual([])
+    expect(mock.draft().map((note) => note.id)).toEqual(DRAFT_IDS)
+    expect(mock.draft().map((note) => note.body)).toEqual(THREE_DRAFTS.drafts.map((n) => n.body))
+    expect(await draftCount(overlay)).toBe("3")
+    expect(await sendButton(overlay).isEnabled()).toBe(true)
+
+    await sendButton(overlay).click()
+    await until("the round", () => mock.rounds().length === 1)
+    const sends = mock.requests().filter((request) => request.path === OVERLAY_ROUTES.send.path)
+    expect(sends.at(-1)?.body).toMatchObject({ noteIds: DRAFT_IDS, generation: moved.generation })
+  }, 30_000)
+
+  test("a no-pairing refusal keeps every draft in order, says why, and asks for a session", async () => {
+    const { overlay, mock } = await open({
+      pairing: LIVE,
+      liveSessions: [OTHER],
+      pageState: THREE_DRAFTS,
+    })
+    mock.setPairing(null)
+    await sendButton(overlay).click()
+    const why = overlay.getByRole("status").filter({ hasText: /isn.t attached to a session/ })
+    await until("the reason", () => why.isVisible())
+    expect(await dock(overlay).locator(".stword").innerText()).toBe("not attached")
+    expect(await sendButton(overlay).isDisabled()).toBe(true)
+    await until("the attach dialog", () =>
+      overlay.getByRole("dialog", { name: "Attach this page to a session" }).isVisible(),
+    )
+    expect(mock.rounds()).toEqual([])
+    expect(mock.draft().map((note) => note.id)).toEqual(DRAFT_IDS)
+    expect(mock.draft().map((note) => note.body)).toEqual(THREE_DRAFTS.drafts.map((n) => n.body))
+    expect(await draftCount(overlay)).toBe("3")
+  }, 30_000)
+})
+
+describe("rounds that change after the page loaded", () => {
+  test("a queued round updated to orphaned in place becomes not delivered without a second round", async () => {
+    const o = await open({
+      pairing: LIVE,
+      liveSessions: [OTHER],
+      pageState: { drafts: [], rounds: [QUEUED], agentNotes: [] },
+    })
+    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 2")
+    const notice = o.overlay.getByRole("status").filter({ hasText: "Round 13 wasn't delivered" })
+    expect(await notice.count()).toBe(0)
+    await socketOpen(o)
+    o.mock.push({ type: "round", round: QUEUED_THEN_ORPHANED })
+    await until("the not-delivered notice", () => notice.isVisible())
+    await until("the not-delivered toast", () =>
+      o.overlay
+        .getByRole("status")
+        .filter({ hasText: /^Round 13 not delivered/ })
+        .isVisible(),
+    )
+    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 2")
+    expect(await notice.count()).toBe(1)
+  }, 30_000)
+})
+
+describe("the connecting and unreachable dock", () => {
+  const HELLO = new RegExp(`${OVERLAY_ROUTES.hello.path}$`)
+
+  test("a slow hello shows the connecting dock, then the full dock", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    let release = () => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await o.page.route(HELLO, async (route) => {
+      await released
+      await route.continue()
+    })
+    await o.page.reload()
+    await until("the connecting dock", () => dock(o.overlay).isVisible())
+    expect(await dock(o.overlay).innerText()).toContain(`mock-machine:${o.mock.port}`)
+    expect(await dock(o.overlay).getByRole("button", { name: "Pick element" }).count()).toBe(0)
+    expect(await sendButton(o.overlay).count()).toBe(0)
+    release()
+    await until("the full dock", () =>
+      dock(o.overlay).getByRole("button", { name: "Pick element" }).isVisible(),
+    )
+  }, 30_000)
+
+  test("an unreachable first hello says so and recovers on its own", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    let attempts = 0
+    await o.page.route(HELLO, async (route) => {
+      attempts += 1
+      if (attempts === 1) await route.abort()
+      else await route.continue()
+    })
+    await o.page.reload()
+    const notice = o.overlay
+      .getByRole("status")
+      .filter({ hasText: "Can't reach the iter8 service — retrying" })
+    await until("the unreachable notice", () => notice.isVisible())
+    await waitFor(
+      "the dock after the retry",
+      async () =>
+        (await dock(o.overlay).getByRole("button", { name: "Pick element" }).isVisible())
+          ? true
+          : null,
+      { timeoutMs: 10_000 },
+    )
+    expect(attempts).toBe(2)
+    expect(await notice.count()).toBe(0)
+  }, 30_000)
+})
+
+describe("a reload deferred behind an open note", () => {
+  async function openEditor(o: Awaited<ReturnType<typeof open>>) {
+    await socketOpen(o)
+    await o.page.keyboard.press("r")
+    await o.page.keyboard.press("j")
+    await o.page.keyboard.press("e")
+    await o.page.keyboard.press("2")
+    o.mock.push({ type: "reload" })
+    const notice = o.overlay.getByRole("status").filter({
+      hasText: "This page changed — it reloads when you save or cancel this note",
+    })
+    await until("the deferral notice", () => notice.isVisible())
+  }
+
+  test("cancelling the note reloads the page with the draft untouched", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    let loads = 0
+    o.page.on("load", () => {
+      loads += 1
+    })
+    await openEditor(o)
+    expect(loads).toBe(0)
+    const loaded = o.page.waitForEvent("load", { timeout: 5000 })
+    await o.page.keyboard.press("Escape")
+    await loaded
+    await until("the dock after reload", () =>
+      o.overlay.getByRole("button", { name: "Pick element" }).isVisible(),
+    )
+    expect(o.mock.draft().map((note) => note.intent)).toEqual([DRAFT.intent])
+    expect(await draftCount(o.overlay)).toBe("1")
+  }, 30_000)
+
+  test("saving the note reloads the page only after its write landed", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    await openEditor(o)
+    const loaded = o.page.waitForEvent("load", { timeout: 5000 })
+    await o.page.keyboard.press("Control+Enter")
+    await loaded
+    expect(o.mock.draft().map((note) => note.intent)).toEqual(["change"])
+    await until("the dock after reload", () =>
+      o.overlay.getByRole("button", { name: "Pick element" }).isVisible(),
+    )
+    expect(await draftCount(o.overlay)).toBe("1")
+  }, 30_000)
+})
+
+describe("session rows and state chips", () => {
+  test("rows show avatar, name and process label, disambiguate equal names, and attach the row clicked", async () => {
+    const second = {
+      ...OTHER,
+      owner: "own_second01",
+      process: { ...OTHER.process, pid: 51008, label: "second-process-label" },
+    }
+    const third = {
+      ...OTHER,
+      owner: "own_third001",
+      agent: "codex",
+      cwd: "/home/biruk/dev/ledger",
+      process: { ...OTHER.process, pid: 51009, label: "third-process-label" },
+    }
+    const { overlay, mock } = await open({
+      pairing: GONE,
+      liveSessions: [OTHER, second, third],
+      pageState: SEEDED,
+    })
+    const menu = overlay.getByRole("dialog", { name: "Session ended" })
+    const rows = menu.getByRole("button", { name: /^Attach to / })
+    await until("three rows", async () => (await rows.count()) === 3)
+    const names = await rows.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")))
+    expect(names).toEqual([
+      `Attach to larkspur · ${OTHER.process.label}`,
+      "Attach to larkspur · second-process-label",
+      "Attach to ledger",
+    ])
+    expect(await rows.nth(1).innerText()).toContain("second-process-label")
+    expect(await rows.nth(0).getByRole("img", { name: "Claude" }).count()).toBe(1)
+    expect(await rows.nth(2).getByRole("img", { name: "codex" }).count()).toBe(1)
+
+    await menu.getByRole("button", { name: "Attach to larkspur · second-process-label" }).click()
+    await until("Send to come back", () => sendButton(overlay).isEnabled())
+    const attaches = mock
+      .requests()
+      .filter((request) => request.method === "POST" && request.path === OVERLAY_ROUTES.attach.path)
+    expect(attaches.map((request) => request.body)).toEqual([{ owner: second.owner }])
+  }, 30_000)
+
+  for (const reason of ["ended", "exited", "crashed", "replaced"] as const) {
+    test(`a session that is gone because it ${reason} says ${reason}`, async () => {
+      const { overlay } = await open({
+        pairing: { ...GONE, state: { status: "gone", reason } },
+        pageState: SEEDED,
+      })
+      expect(await dock(overlay).locator(".stword .w").innerText()).toBe(reason)
+      expect(await sendButton(overlay).isDisabled()).toBe(true)
+    }, 30_000)
+  }
+})
+
+describe("send tooltips and queued rounds", () => {
+  async function tipFor(o: Awaited<ReturnType<typeof open>>) {
+    await sendButton(o.overlay).hover()
+    const tip = o.overlay.getByRole("tooltip")
+    await until("the tooltip", () => tip.isVisible())
+    return tip.innerText()
+  }
+
+  test("a live session with a listener says it wakes now", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    expect(await tipFor(o)).toBe("Wakes larkspur now")
+  }, 30_000)
+
+  test("an empty round disables Send and says there is nothing in it yet", async () => {
+    const o = await open({ pairing: LIVE })
+    expect(await sendButton(o.overlay).isDisabled()).toBe(true)
+    expect(await tipFor(o)).toBe("Nothing in this round yet")
+  }, 30_000)
+
+  test("a gone session's Send says to reattach", async () => {
+    const o = await open({ pairing: GONE, pageState: SEEDED })
+    expect(await tipFor(o)).toBe("Session ended — reattach first")
+  }, 30_000)
+
+  test("a page with no session's Send says to attach first", async () => {
+    const o = await open({ pairing: null, pageState: SEEDED })
+    expect(await tipFor(o)).toBe("Attach this page to a session first")
+  }, 30_000)
+
+  test("sending to a busy session queues the round and says when it delivers", async () => {
+    const o = await open({
+      pairing: { ...LIVE, state: { status: "busy" } },
+      pageState: SEEDED,
+    })
+    await sendButton(o.overlay).click()
+    await until("the round", () => o.mock.rounds().length === 1)
+    const toast = o.overlay
+      .getByRole("status")
+      .filter({ hasText: /^Round 1 queued.*delivers when larkspur’s turn ends/ })
+    await until("the queued toast", () => toast.isVisible())
+    expect(await draftCount(o.overlay)).toBe("0")
+  }, 30_000)
+
+  test("sending to a session with no listener says it waits for the next prompt", async () => {
+    const o = await open({ pairing: { ...LIVE, listener: "none" }, pageState: SEEDED })
+    await sendButton(o.overlay).click()
+    const toast = o.overlay
+      .getByRole("status")
+      .filter({ hasText: /^Round 1 queued.*until your next prompt in larkspur/ })
+    await until("the queued toast", () => toast.isVisible())
+  }, 30_000)
+
+  test("sending again after the drafts changed uses a new idempotency key", async () => {
+    const o = await open({ pairing: LIVE, pageState: THREE_DRAFTS })
+    const keys: string[] = []
+    await o.page.route(`**${OVERLAY_ROUTES.send.path}`, async (route) => {
+      keys.push(route.request().postDataJSON().idempotencyKey)
+      if (keys.length < 3) await route.abort()
+      else await route.continue()
+    })
+    const failed = o.overlay.getByRole("status").filter({ hasText: /Couldn.t reach iter8/ })
+    await sendButton(o.overlay).click()
+    await until("the first failure", () => failed.first().isVisible())
+    await sendButton(o.overlay).click()
+    await until("the second request", () => keys.length === 2)
+    expect(keys[1]).toBe(keys[0])
+    await o.page.keyboard.press("r")
+    await o.page.keyboard.press("j")
+    await o.page.keyboard.press("e")
+    await o.page.keyboard.press("2")
+    await o.page.keyboard.press("Control+Enter")
+    await until("the edit to be saved", () => o.mock.draft()[0]?.intent === "change")
+    await o.page.keyboard.press("r")
+    await sendButton(o.overlay).click()
+    await until("the round", () => o.mock.rounds().length === 1)
+    expect(keys.length).toBe(3)
+    expect(keys[2]).not.toBe(keys[0])
+  }, 30_000)
+})
+
+describe("the more menu, collapsing and moving the dock", () => {
+  const more = (overlay: Locator) => dock(overlay).getByRole("button", { name: "More options" })
+
+  test("choosing Light then Auto applies each theme and saves it", async () => {
+    const { overlay, mock } = await open({ pairing: LIVE })
+    await more(overlay).click()
+    for (const [name, saved] of [
+      ["Light", "light"],
+      ["Auto", "auto"],
+    ] as const) {
+      await overlay
+        .getByRole("radiogroup", { name: "Theme" })
+        .locator("label")
+        .filter({ hasText: name })
+        .click()
+      await until(`the ${saved} theme`, async () => {
+        return (
+          (await overlay.locator(".root").getAttribute("data-theme")) === saved &&
+          mock.prefs().theme === saved
+        )
+      })
+    }
+  }, 30_000)
+
+  test("the menu hides and shows the pins and saves the choice", async () => {
+    const { overlay, mock } = await open({ pairing: LIVE })
+    await more(overlay).click()
+    await overlay.getByRole("menuitem", { name: /Hide pins/ }).click()
+    await until("pins hidden", () => mock.prefs().pinsVisible === false)
+    await more(overlay).click()
+    await overlay.getByRole("menuitem", { name: /Show pins/ }).click()
+    await until("pins shown", () => mock.prefs().pinsVisible === true)
+  }, 30_000)
+
+  test("collapsing leaves a button with the draft count, and expanding restores the dock", async () => {
+    const { overlay, mock } = await open({ pairing: LIVE, pageState: THREE_DRAFTS })
+    await dock(overlay).getByRole("button", { name: "Collapse dock" }).click()
+    await until("the collapsed preference", () => mock.prefs().collapsed === true)
+    const expand = overlay.getByRole("button", { name: "Expand iter8 dock" })
+    await until("the expand button", () => expand.isVisible())
+    expect(await expand.innerText()).toContain("3")
+    expect(await dock(overlay).evaluate((el) => (el as HTMLElement).inert)).toBe(true)
+    await expand.click()
+    await until("the dock", () => dock(overlay).isVisible())
+    await until("the expanded preference", () => mock.prefs().collapsed === false)
+  }, 30_000)
+
+  async function dragDockBy(
+    o: Awaited<ReturnType<typeof open>>,
+    to: (
+      box: { x: number; y: number; width: number; height: number },
+      vw: number,
+      vh: number,
+    ) => [number, number],
+  ) {
+    const grip = dock(o.overlay).getByRole("button", { name: /^Session larkspur/ })
+    const box = await dock(o.overlay).boundingBox()
+    const viewport = o.page.viewportSize()
+    if (!box || !viewport) throw new Error("no dock box")
+    const [x, y] = to(box, viewport.width, viewport.height)
+    const from = await grip.boundingBox()
+    if (!from) throw new Error("no grip box")
+    const startX = from.x + from.width / 2
+    const startY = from.y + from.height / 2
+    await o.page.mouse.move(startX, startY)
+    await o.page.mouse.down()
+    await o.page.mouse.move(startX + (x - box.x), startY + (y - box.y), { steps: 12 })
+    await o.page.mouse.up()
+    return { x, y, box }
+  }
+
+  for (const [anchor, place] of [
+    ["tl", (_b: { width: number; height: number }, _w: number, _h: number) => [16, 16]],
+    ["tc", (b: { width: number; height: number }, w: number) => [(w - b.width) / 2, 16]],
+    [
+      "bl",
+      (b: { width: number; height: number }, _w: number, h: number) => [16, h - b.height - 16],
+    ],
+    [
+      "ml",
+      (b: { width: number; height: number }, _w: number, h: number) => [16, (h - b.height) / 2],
+    ],
+    [
+      "mr",
+      (b: { width: number; height: number }, w: number, h: number) => [
+        w - b.width - 16,
+        (h - b.height) / 2,
+      ],
+    ],
+  ] as const) {
+    test(`dragging the dock onto the ${anchor} anchor saves it and settles there`, async () => {
+      const o = await open({ pairing: LIVE })
+      const { x, y, box } = await dragDockBy(o, (b, w, h) => {
+        const [px, py] = place(b, w, h)
+        return [px ?? 0, py ?? 0]
+      })
+      await until("the saved anchor", () => o.mock.prefs().dock === anchor)
+      await waitFor(
+        "the dock to settle",
+        async () => {
+          const at = await dock(o.overlay).boundingBox()
+          return at && Math.abs(at.x - x) < 2 && Math.abs(at.y - y) < 2 ? true : null
+        },
+        { timeoutMs: 5000 },
+      )
+      expect((await dock(o.overlay).boundingBox())?.width).toBeCloseTo(box.width, 0)
+    }, 30_000)
+  }
+
+  test("a press that moves under the threshold is a click that opens the session menu", async () => {
+    const { overlay, mock, page } = await open({ pairing: LIVE })
+    const grip = dock(overlay).getByRole("button", { name: /^Session larkspur/ })
+    const box = await grip.boundingBox()
+    if (!box) throw new Error("no grip box")
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 3, box.y + box.height / 2, { steps: 3 })
+    await page.mouse.up()
+    await until("the session menu", () =>
+      overlay.getByRole("dialog", { name: "Send rounds to" }).isVisible(),
+    )
+    expect(mock.prefs().dock).toBe("br")
+  }, 30_000)
+
+  test("a short drag past the threshold moves nothing and does not open the menu", async () => {
+    const { overlay, mock, page } = await open({ pairing: LIVE })
+    const grip = dock(overlay).getByRole("button", { name: /^Session larkspur/ })
+    const box = await grip.boundingBox()
+    if (!box) throw new Error("no grip box")
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 - 20, box.y + box.height / 2 - 20, { steps: 6 })
+    await page.mouse.up()
+    await until("the anchor to be saved", () => mock.prefs().dock === "br")
+    expect(await overlay.getByRole("dialog", { name: "Send rounds to" }).count()).toBe(0)
+  }, 30_000)
+})
+
 describe("keyboard shortcuts", () => {
   const pickPressed = (overlay: Locator) =>
     dock(overlay).getByRole("button", { name: "Pick element" }).getAttribute("aria-pressed")
@@ -620,6 +1082,81 @@ describe("keyboard shortcuts", () => {
     await until("the pins preference", () => mock.prefs().pinsVisible === false)
     const toast = overlay.getByRole("status").filter({ hasText: "Pins hidden" })
     await until("the pins toast", () => toast.isVisible())
+  }, 30_000)
+
+  test("S toggles the screenshot tool", async () => {
+    const { overlay, page } = await open({ pairing: LIVE })
+    const shot = dock(overlay).getByRole("button", { name: "Screenshot" })
+    await page.keyboard.press("s")
+    await until(
+      "screenshot to be on",
+      async () => (await shot.getAttribute("aria-pressed")) === "true",
+    )
+    await page.keyboard.press("s")
+    await until(
+      "screenshot to be off",
+      async () => (await shot.getAttribute("aria-pressed")) === "false",
+    )
+  }, 30_000)
+
+  test("holding Space peeks and releasing it, or leaving the window, ends the peek", async () => {
+    const { overlay, page } = await open({ pairing: LIVE })
+    const root = overlay.locator(".root")
+    expect((await root.getAttribute("class"))?.split(" ")).not.toContain("peek")
+    await page.keyboard.down(" ")
+    await until("the peek", async () => ((await root.getAttribute("class")) ?? "").includes("peek"))
+    await page.keyboard.up(" ")
+    await until(
+      "the peek to end",
+      async () => !((await root.getAttribute("class")) ?? "").includes("peek"),
+    )
+    await page.keyboard.down(" ")
+    await until("the second peek", async () =>
+      ((await root.getAttribute("class")) ?? "").includes("peek"),
+    )
+    await page.evaluate(() => window.dispatchEvent(new Event("blur")))
+    await until(
+      "the peek to end on blur",
+      async () => !((await root.getAttribute("class")) ?? "").includes("peek"),
+    )
+  }, 30_000)
+
+  test("keys the overlay does not act on reach the page untouched", async () => {
+    const { page } = await open({ pairing: LIVE })
+    await page.evaluate(() => {
+      window.addEventListener("keydown", (event) => {
+        const seen = JSON.parse(document.body.dataset.seen ?? "[]")
+        seen.push({ key: event.key, ctrl: event.ctrlKey, prevented: event.defaultPrevented })
+        document.body.dataset.seen = JSON.stringify(seen)
+      })
+    })
+    await page.keyboard.press("Control+c")
+    await page.keyboard.press("x")
+    const seen = (await page.evaluate(() => JSON.parse(document.body.dataset.seen ?? "[]"))) as {
+      key: string
+      ctrl: boolean
+      prevented: boolean
+    }[]
+    const letters = seen.filter((entry) => entry.key.length === 1)
+    expect(letters).toEqual([
+      { key: "c", ctrl: true, prevented: false },
+      { key: "x", ctrl: false, prevented: false },
+    ])
+  }, 30_000)
+
+  test("keys typed into a page textarea are left to the page", async () => {
+    const { overlay, page } = await open({ pairing: LIVE })
+    await page.locator("#notes").focus()
+    await page.keyboard.type("sc")
+    expect(await page.locator("#notes").inputValue()).toBe("sc")
+    expect(
+      await dock(overlay).getByRole("button", { name: "Screenshot" }).getAttribute("aria-pressed"),
+    ).toBe("false")
+    expect(
+      await dock(overlay)
+        .getByRole("button", { name: "Pick element" })
+        .getAttribute("aria-pressed"),
+    ).toBe("false")
   }, 30_000)
 
   test("keys typed into a page field are left to the page", async () => {
