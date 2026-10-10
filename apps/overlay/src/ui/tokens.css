@@ -359,6 +359,11 @@ kbd {
   inset: 0;
   pointer-events: none;
 }
+/* Stacking: the typing surface sits above every non-modal surface, the modal palette and shortcut
+   sheet above it, and a tooltip above all because it describes the control under the pointer. */
+.layer.typing {
+  z-index: 1;
+}
 .root.peek .chrome {
   opacity: 0 !important;
   transition: opacity 0.14s ease-out !important;
@@ -561,6 +566,7 @@ kbd {
 }
 .tip {
   position: fixed;
+  z-index: 3;
   left: 0;
   top: 0;
   padding: 6px 8px;

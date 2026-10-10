@@ -3,7 +3,7 @@ import { effect } from "@preact/signals"
 import type { JSX } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { type AnchorResolution, type OverlayModel, toDraftBody } from "../model"
-import { resolveAnchor } from "../pick/anchor"
+import { parentAcrossShadow, resolveAnchor } from "../pick/anchor"
 import { useOverlay, useSheet } from "./context"
 import { Avatar, Icon, IntentGlyph } from "./glyphs"
 import pinsCss from "./pins.css" with { type: "text" }
@@ -22,6 +22,10 @@ const YIELD_EVERY = 20
 const CARD_WIDTH = 284
 const CARD_EDGE = 12
 const CARD_GAP = 10
+/** A pin's 12 px half-size plus the sent badge's 5 px overhang, at the 1.15 hover scale. */
+const PIN_REACH = 20
+/** An agent pin's box centre relative to its placed point, from its margins in pins.css. */
+const AGENT_CENTRE = { x: 10, y: -16 }
 const TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 
 type Source = {
@@ -39,6 +43,55 @@ type PinView = {
 }
 
 type Hover = { key: string; left: number; right: number; top: number }
+
+/**
+ * Where a pin is laid out: `document` and `viewport` pins move with the page on the compositor;
+ * a `tracked` pin's element moves inside a scroller or sticks, so a scroll re-places it.
+ */
+type Frame = "document" | "viewport" | "tracked"
+
+type Point = { x: number; y: number }
+
+function scrolls(overflow: string): boolean {
+  return overflow !== "visible" && overflow !== "clip"
+}
+
+function frameOf(el: Element): Frame {
+  for (let at: Element | null = el; at !== null; at = parentAcrossShadow(at)) {
+    if (at === document.documentElement || at === document.body) break
+    const style = getComputedStyle(at)
+    if (style.position === "sticky") return "tracked"
+    if (at !== el && (scrolls(style.overflowX) || scrolls(style.overflowY))) return "tracked"
+    if (style.position === "fixed") return "viewport"
+  }
+  return "document"
+}
+
+function viewFrame(view: PinView, frames: ReadonlyMap<string, Frame>): Frame {
+  return view.region ? "document" : (frames.get(view.key) ?? "document")
+}
+
+function headKey(view: PinView): string {
+  return `${view.source.kind}:${view.source.note.id}:0`
+}
+
+function isLinked(view: PinView): boolean {
+  return view.index > 0 && view.source.kind !== "agent"
+}
+
+function sameFrames(a: ReadonlyMap<string, Frame>, b: ReadonlyMap<string, Frame>): boolean {
+  return a.size === b.size && [...b].every(([key, frame]) => a.get(key) === frame)
+}
+
+function clampToPage(view: PinView, at: Point, extent: Point): Point {
+  const offset = view.source.kind === "agent" ? AGENT_CENTRE : { x: 0, y: 0 }
+  const clamp = (value: number, max: number) =>
+    Math.min(Math.max(value, PIN_REACH), max - PIN_REACH)
+  return {
+    x: clamp(at.x + offset.x, extent.x) - offset.x,
+    y: clamp(at.y + offset.y, extent.y) - offset.y,
+  }
+}
 
 function sourcesOf(model: OverlayModel): Source[] {
   const sentIds = new Set(model.lastSentNoteIds.value)
@@ -111,6 +164,8 @@ export function Pins(): JSX.Element | null {
   const { model, connection } = useOverlay()
   const nodes = useRef(new Map<string, HTMLElement | SVGElement>())
   const elements = useRef(new Map<string, WeakRef<Element>>())
+  const frames = useRef<ReadonlyMap<string, Frame>>(new Map())
+  const [, rerender] = useState(0)
   const views = useRef<PinView[]>([])
   const place = useRef<() => void>(() => {})
   const repick = useRef<NoteId | null>(null)
@@ -126,47 +181,84 @@ export function Pins(): JSX.Element | null {
     let frame = 0
     let lastStart = Number.NEGATIVE_INFINITY
 
-    function placeAll() {
-      frame = 0
+    let full = false
+
+    function placeAll(trackedOnly: boolean) {
       if (disposed || !model.prefs.peek().pinsVisible) return
-      const reads: { view: PinView; rect: { left: number; top: number; right: number } | null }[] =
-        []
-      for (const view of views.current) {
+      const all = views.current
+      const byKey = new Map(all.map((view) => [view.key, view]))
+      const moves = (key: string) => {
+        const view = byKey.get(key)
+        return view !== undefined && viewFrame(view, frames.current) !== "document"
+      }
+      const placing = trackedOnly
+        ? all.filter((view) => viewFrame(view, frames.current) === "tracked")
+        : all
+      const links = all.filter(
+        (view) => isLinked(view) && (!trackedOnly || moves(view.key) || moves(headKey(view))),
+      )
+      if (placing.length === 0 && links.length === 0) return
+
+      const reading = new Map(placing.map((view) => [view.key, view]))
+      for (const link of links) {
+        reading.set(link.key, link)
+        const head = byKey.get(headKey(link))
+        if (head) reading.set(head.key, head)
+      }
+      const rects = new Map<string, { left: number; top: number; right: number } | null>()
+      for (const view of reading.values()) {
         if (view.region) {
-          const left = view.region.x - window.scrollX
-          const top = view.region.y - window.scrollY
-          reads.push({ view, rect: { left, top, right: left + view.region.width } })
+          const { x, y, width } = view.region
+          rects.set(view.key, { left: x, top: y, right: x + width })
           continue
         }
         const el = elements.current.get(view.key)?.deref()
         const rect = el?.isConnected ? el.getBoundingClientRect() : null
-        reads.push({
-          view,
-          rect: rect && (rect.width > 0 || rect.height > 0) ? rect : null,
-        })
+        rects.set(view.key, rect && (rect.width > 0 || rect.height > 0) ? rect : null)
       }
-      const positions = new Map<string, { x: number; y: number }>()
-      for (const { view, rect } of reads) {
+      const scroll = { x: window.scrollX, y: window.scrollY }
+      const extent = {
+        x: document.documentElement.scrollWidth,
+        y: document.documentElement.scrollHeight,
+      }
+
+      const placed = new Map<string, Point | null>()
+      for (const view of reading.values()) {
+        const rect = rects.get(view.key)
+        if (!rect) {
+          placed.set(view.key, null)
+          continue
+        }
+        const offset = view.region ? { x: 0, y: 0 } : scroll
+        const agent = view.source.kind === "agent"
+        const sub = view.index > 0
+        const at = {
+          x: offset.x + (agent ? rect.right - 8 : rect.left + (sub ? 0 : 2)),
+          y: offset.y + (agent ? rect.top + 6 : rect.top + (sub ? 0 : 2)),
+        }
+        const viewport = viewFrame(view, frames.current) === "viewport"
+        placed.set(view.key, viewport ? at : clampToPage(view, at, extent))
+      }
+
+      for (const view of placing) {
         const node = nodes.current.get(view.key)
         if (!node) continue
-        if (!rect) {
+        const at = placed.get(view.key)
+        if (!at) {
           node.removeAttribute("data-placed")
           continue
         }
         node.setAttribute("data-placed", "")
-        const agent = view.source.kind === "agent"
-        const sub = view.index > 0
-        const x = agent ? rect.right - 8 : rect.left + (sub ? 0 : 2)
-        const y = agent ? rect.top + 6 : rect.top + (sub ? 0 : 2)
-        positions.set(view.key, { x, y })
+        const viewport = viewFrame(view, frames.current) === "viewport"
+        const x = viewport ? at.x - scroll.x : at.x
+        const y = viewport ? at.y - scroll.y : at.y
         node.style.translate = `${x}px ${y}px`
       }
-      for (const view of views.current) {
-        if (view.index === 0 || view.source.kind === "agent") continue
+      for (const view of links) {
         const path = nodes.current.get(`link:${view.key}`)
-        const from = positions.get(`${view.source.kind}:${view.source.note.id}:0`)
-        const to = positions.get(view.key)
         if (!path) continue
+        const from = placed.get(headKey(view))
+        const to = placed.get(view.key)
         if (!from || !to) {
           path.setAttribute("d", "")
           continue
@@ -177,8 +269,20 @@ export function Pins(): JSX.Element | null {
       }
     }
 
+    function onFrame() {
+      frame = 0
+      const trackedOnly = !full
+      full = false
+      placeAll(trackedOnly)
+    }
+
     function requestPlace() {
-      if (frame === 0 && !disposed) frame = requestAnimationFrame(placeAll)
+      full = true
+      if (frame === 0 && !disposed) frame = requestAnimationFrame(onFrame)
+    }
+
+    function requestPlaceTracked() {
+      if (frame === 0 && !disposed) frame = requestAnimationFrame(onFrame)
     }
     place.current = requestPlace
 
@@ -188,6 +292,7 @@ export function Pins(): JSX.Element | null {
       const sources = sourcesOf(model)
       const nextElements = new Map<string, WeakRef<Element>>()
       const nextAnchors = new Map<NoteId, AnchorResolution>()
+      const nextFrames = new Map<string, Frame>()
       let handled = 0
       for (const source of sources) {
         const anchors = anchorsOf(source.note)
@@ -201,8 +306,10 @@ export function Pins(): JSX.Element | null {
           })
         } else {
           results.forEach((result, i) => {
-            if (result.kind === "anchored")
-              nextElements.set(`${source.kind}:${source.note.id}:${i}`, new WeakRef(result.el))
+            if (result.kind !== "anchored") return
+            const key = `${source.kind}:${source.note.id}:${i}`
+            nextElements.set(key, new WeakRef(result.el))
+            nextFrames.set(key, frameOf(result.el))
           })
           const first = results[0]
           if (first?.kind === "anchored")
@@ -216,6 +323,10 @@ export function Pins(): JSX.Element | null {
       }
       running = false
       elements.current = nextElements
+      if (!sameFrames(frames.current, nextFrames)) {
+        frames.current = nextFrames
+        rerender((n) => n + 1)
+      }
       const held = model.anchors.peek()
       const same =
         held.size === nextAnchors.size &&
@@ -282,9 +393,10 @@ export function Pins(): JSX.Element | null {
       subtree: true,
       characterData: true,
     })
-    const onMove = () => requestPlace()
-    window.addEventListener("scroll", onMove, { capture: true, passive: true })
-    window.addEventListener("resize", onMove, { passive: true })
+    const onScroll = () => requestPlaceTracked()
+    const onResize = () => requestPlace()
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true })
+    window.addEventListener("resize", onResize, { passive: true })
 
     const stopNotes = effect(() => {
       model.drafts.value
@@ -330,8 +442,8 @@ export function Pins(): JSX.Element | null {
     return () => {
       disposed = true
       observer.disconnect()
-      window.removeEventListener("scroll", onMove, { capture: true })
-      window.removeEventListener("resize", onMove)
+      window.removeEventListener("scroll", onScroll, { capture: true })
+      window.removeEventListener("resize", onResize)
       stopNotes()
       stopVisible()
       stopRepick()
@@ -397,9 +509,16 @@ export function Pins(): JSX.Element | null {
   }, [hover])
 
   function bind(key: string) {
+    let bound: HTMLElement | SVGElement | null = null
     return (node: HTMLElement | SVGElement | null) => {
-      if (node) nodes.current.set(key, node)
-      else nodes.current.delete(key)
+      if (node) {
+        bound = node
+        nodes.current.set(key, node)
+        return
+      }
+      // A pin that changes frame remounts in the other container, and the new node can bind
+      // before the old one unbinds.
+      if (nodes.current.get(key) === bound) nodes.current.delete(key)
     }
   }
 
@@ -433,66 +552,71 @@ export function Pins(): JSX.Element | null {
 
   if (pins.length === 0 && lost.length === 0) return null
 
+  function pinButton(pin: PinView) {
+    const { source } = pin
+    const { note } = source
+    if (source.kind === "agent" && note.author.kind === "agent")
+      return (
+        <button
+          key={pin.key}
+          ref={bind(pin.key)}
+          type="button"
+          class={note.author.agent === "claude" ? "apin claude" : "apin"}
+          aria-label={`${note.author.name} note`}
+          onPointerEnter={(event) => showCard(pin.key, event)}
+          onPointerLeave={() => setHover(null)}
+          onFocus={(event) => showCard(pin.key, event)}
+          onBlur={() => setHover(null)}
+        >
+          <Avatar agent={note.author.agent} size={26} />
+        </button>
+      )
+    const classes = [
+      "pin",
+      note.intent,
+      source.kind === "sent" ? "sent" : "",
+      pin.index > 0 ? "sub" : "",
+      source.kind === "draft" && note.id === focusedId ? "focus" : "",
+    ]
+    return (
+      <button
+        key={pin.key}
+        ref={bind(pin.key)}
+        type="button"
+        class={classes.filter(Boolean).join(" ")}
+        aria-label={`Note ${source.number}, ${INTENT_LABEL[note.intent]}`}
+        aria-hidden={pin.index > 0 ? "true" : undefined}
+        tabIndex={pin.index > 0 ? -1 : undefined}
+        onPointerEnter={(event) => showCard(pin.key, event)}
+        onPointerLeave={() => setHover(null)}
+        onFocus={(event) => showCard(pin.key, event)}
+        onBlur={() => setHover(null)}
+        onClick={() => openPin(source)}
+      >
+        {source.number}
+      </button>
+    )
+  }
+
+  const inViewport = (pin: PinView) => viewFrame(pin, frames.current) === "viewport"
+
   return (
     <div class={pinsVisible ? "layer chrome pinlayer" : "layer chrome pinlayer off"}>
-      <svg class="links" aria-hidden="true">
-        {pins.map((pin) =>
-          pin.index === 0 || pin.source.kind === "agent" ? null : (
-            <path
-              key={pin.key}
-              ref={bind(`link:${pin.key}`)}
-              class={`${pin.source.note.intent} ${pin.source.kind === "sent" ? "sent" : ""}`}
-            />
-          ),
-        )}
-      </svg>
-      <div>
-        {pins.map((pin) => {
-          const { source } = pin
-          const { note } = source
-          if (source.kind === "agent" && note.author.kind === "agent")
-            return (
-              <button
+      <div class="docframe">
+        <svg class="links" aria-hidden="true">
+          {pins.map((pin) =>
+            isLinked(pin) ? (
+              <path
                 key={pin.key}
-                ref={bind(pin.key)}
-                type="button"
-                class={note.author.agent === "claude" ? "apin claude" : "apin"}
-                aria-label={`${note.author.name} note`}
-                onPointerEnter={(event) => showCard(pin.key, event)}
-                onPointerLeave={() => setHover(null)}
-                onFocus={(event) => showCard(pin.key, event)}
-                onBlur={() => setHover(null)}
-              >
-                <Avatar agent={note.author.agent} size={26} />
-              </button>
-            )
-          const classes = [
-            "pin",
-            note.intent,
-            source.kind === "sent" ? "sent" : "",
-            pin.index > 0 ? "sub" : "",
-            source.kind === "draft" && note.id === focusedId ? "focus" : "",
-          ]
-          return (
-            <button
-              key={pin.key}
-              ref={bind(pin.key)}
-              type="button"
-              class={classes.filter(Boolean).join(" ")}
-              aria-label={`Note ${source.number}, ${INTENT_LABEL[note.intent]}`}
-              aria-hidden={pin.index > 0 ? "true" : undefined}
-              tabIndex={pin.index > 0 ? -1 : undefined}
-              onPointerEnter={(event) => showCard(pin.key, event)}
-              onPointerLeave={() => setHover(null)}
-              onFocus={(event) => showCard(pin.key, event)}
-              onBlur={() => setHover(null)}
-              onClick={() => openPin(source)}
-            >
-              {source.number}
-            </button>
-          )
-        })}
+                ref={bind(`link:${pin.key}`)}
+                class={`${pin.source.note.intent} ${pin.source.kind === "sent" ? "sent" : ""}`}
+              />
+            ) : null,
+          )}
+        </svg>
+        {pins.filter((pin) => !inViewport(pin)).map(pinButton)}
       </div>
+      <div class="viewframe">{pins.filter(inViewport).map(pinButton)}</div>
       <div
         ref={cardRef}
         class={`pop pcard${hovered ? " on" : ""}${author?.kind === "agent" ? " agent" : ""}`}
