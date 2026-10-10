@@ -110,6 +110,6 @@ test("an agent's note is pinned on its element with the agent's avatar and body,
     expect(await unanchored.getByText(pinnedBody).count()).toBe(0)
     expect(await unanchored.getByText("Unanchored", { exact: true }).count()).toBe(1)
   } finally {
-    await teardown([() => service?.stop(), ...disposers.reverse()])
+    await teardown([...disposers.reverse(), () => service?.stop()])
   }
 }, 60_000)

@@ -96,9 +96,9 @@ test("typing a note on the heavy page stays under the long-task budget while enr
     await teardown([
       () => closePage?.(),
       () => browser?.close(),
-      () => service?.stop(),
       () => session?.exit(),
       () => fixture?.stop(),
+      () => service?.stop(),
     ])
   }
 }, 90_000)

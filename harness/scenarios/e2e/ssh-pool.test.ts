@@ -370,9 +370,9 @@ test.skipIf(unbindable !== null)(
       await expect(page.goto(open.url)).rejects.toThrow(/ERR_CONNECTION_REFUSED/)
     } finally {
       await teardown([
-        ...services.map((service) => () => service.stop()),
         ...sessions.map((session) => () => session.exit()),
         ...disposers.reverse(),
+        ...services.map((service) => () => service.stop()),
       ])
     }
   },
@@ -424,9 +424,9 @@ test.skipIf(unbindable !== null)(
       expect(await dock(page).count()).toBe(0)
     } finally {
       await teardown([
-        ...services.map((service) => () => service.stop()),
         ...sessions.map((session) => () => session.exit()),
         ...disposers.reverse(),
+        ...services.map((service) => () => service.stop()),
       ])
     }
   },

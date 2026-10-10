@@ -124,6 +124,6 @@ test("an edited mock reloads the open page, keeps both drafts and marks the one 
     expect(await drafts.getByText(keptBody).count()).toBe(1)
     expect(await drafts.getByText(droppedBody).count()).toBe(1)
   } finally {
-    await teardown([() => service?.stop(), ...disposers.reverse()])
+    await teardown([...disposers.reverse(), () => service?.stop()])
   }
 }, 60_000)
