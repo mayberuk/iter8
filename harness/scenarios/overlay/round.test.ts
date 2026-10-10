@@ -736,27 +736,30 @@ describe("round sheet: header, summary and rows", () => {
     const o = await open({ pairing: LIVE, pageState: two })
     const sheet = await openSheet(o)
     const rows = sheet.getByRole("listitem")
-    const facts = await rows.evaluateAll((els) =>
-      els.map((el) => {
-        const frame = el.querySelector(".frame") as HTMLElement
-        const edge = el.querySelector(".frame .edge") as HTMLElement
-        const probe = document.createElement("i")
-        probe.style.background = `var(--${el.classList.contains("change") ? "change" : "fix"})`
-        frame.append(probe)
-        const colour = getComputedStyle(probe).backgroundColor
-        probe.remove()
-        return {
-          width: frame.offsetWidth,
-          height: frame.offsetHeight,
-          number: el.querySelector(".fn")?.textContent,
-          multi: el.querySelector(".multi")?.textContent ?? null,
-          intent: el.querySelector(".it")?.textContent,
-          text: el.querySelector(".txt")?.textContent,
-          target: el.querySelector(".tgt")?.textContent,
-          edgeIsIntentColour: getComputedStyle(edge).backgroundColor === colour,
-          colour,
-        }
-      }),
+    const seededIntents = two.drafts.map((note) => note.intent)
+    const facts = await rows.evaluateAll(
+      (els, intents) =>
+        els.map((el, i) => {
+          const frame = el.querySelector(".frame") as HTMLElement
+          const edge = el.querySelector(".frame .edge") as HTMLElement
+          const probe = document.createElement("i")
+          probe.style.background = `var(--${intents[i]})`
+          frame.append(probe)
+          const colour = getComputedStyle(probe).backgroundColor
+          probe.remove()
+          return {
+            width: frame.offsetWidth,
+            height: frame.offsetHeight,
+            number: el.querySelector(".fn")?.textContent,
+            multi: el.querySelector(".multi")?.textContent ?? null,
+            intent: el.querySelector(".it")?.textContent,
+            text: el.querySelector(".txt")?.textContent,
+            target: el.querySelector(".tgt")?.textContent,
+            edgeIsIntentColour: getComputedStyle(edge).backgroundColor === colour,
+            colour,
+          }
+        }),
+      seededIntents,
     )
     expect(facts.map(({ colour: _colour, ...rest }) => rest)).toEqual([
       {
