@@ -1,11 +1,5 @@
 import { expect, test } from "bun:test"
-import {
-  MARKUP_TEXT_LENGTH,
-  MAX_MARKUP_STEPS,
-  MarkupPath,
-  ResolvedSourceLead,
-  SourceLead,
-} from "@iter8/protocol"
+import { MarkupPath, ResolvedSourceLead, SourceLead } from "@iter8/protocol"
 import fc from "fast-check"
 import { locateInMarkup } from "./markup"
 
@@ -33,8 +27,8 @@ test("a none lead's markup survives JSON and refuses identities outside the prot
   const lead: SourceLead = { confidence: "none", markup: path }
   expect(SourceLead.parse(JSON.parse(JSON.stringify(lead)))).toEqual(lead)
   for (const invalid of [
-    { ...path, steps: Array(MAX_MARKUP_STEPS + 1).fill({ tag: "div", index: 0 }) },
-    { ...path, text: "x".repeat(MARKUP_TEXT_LENGTH + 1) },
+    { ...path, steps: Array(257).fill({ tag: "div", index: 0 }) },
+    { ...path, text: "x".repeat(65) },
     { ...path, steps: [{ tag: "div", index: -1 }] },
   ]) {
     expect(SourceLead.safeParse({ confidence: "none", markup: invalid }).success).toBe(false)
@@ -62,8 +56,8 @@ test("a none lead's markup survives JSON and refuses identities outside the prot
   expect(
     MarkupPath.safeParse({
       ...path,
-      steps: Array(MAX_MARKUP_STEPS).fill({ tag: "div", index: 0 }),
-      text: "x".repeat(MARKUP_TEXT_LENGTH),
+      steps: Array(256).fill({ tag: "div", index: 0 }),
+      text: "x".repeat(64),
     }).success,
   ).toBe(true)
 })
@@ -161,11 +155,9 @@ test("text identity collapses descendant text, includes script text, and exclude
 })
 
 test("text identity takes exactly the collapsed prefix", () => {
-  const text = "a".repeat(MARKUP_TEXT_LENGTH + 10)
+  const text = "a".repeat(650)
   const html = `<body><div>   ${text}</div></body>`
-  expect(
-    locateInMarkup(html, markup(["div"], { text: text.slice(0, MARKUP_TEXT_LENGTH) })),
-  ).toEqual({
+  expect(locateInMarkup(html, markup(["div"], { text: text.slice(0, 64) }))).toEqual({
     ...position(html, "<div>"),
     exact: true,
   })
@@ -260,7 +252,7 @@ test("a markup path built from a generated document resolves to the start tag th
             steps: target.steps,
             id: target.id,
             className: target.className,
-            text: textContent(target).replace(/\s+/g, " ").trimStart().slice(0, MARKUP_TEXT_LENGTH),
+            text: textContent(target).replace(/\s+/g, " ").trimStart().slice(0, 64),
           }),
         ),
       ).toEqual({ line: target.line, column: target.column, exact: true })
