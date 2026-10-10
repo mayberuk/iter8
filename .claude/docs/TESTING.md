@@ -12,7 +12,7 @@ the harness inventory and the policy dp reads.
 ## Test Commands
 - Precheck: `bun run typecheck && bun run lint`
 - Unit: `bun run knip && bun run depcruise && bun test packages scripts`
-- Gate: `bun run check`
+- Gate: `bun run build && bun run check` — the e2e scenarios launch `dist/iter8`, so the gate rebuilds it first
 - Scoped: `bun test <path>` — always name the paths; a bare `bun test` is not the gate.
 
 ## Harness Inventory
