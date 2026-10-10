@@ -19,7 +19,10 @@ the harness inventory and the policy dp reads.
 Import each module by path; there are no barrels.
 - `harness/rig/ports.ts` — `WORKER`, `portBlock(worker)`: each `bun test` worker owns 100 ports from
   `21000 + 100 × (worker − 1)`. `nextPort()` and `poolRange(size)` wrap inside the block and skip
-  bound ports; they throw only when the whole block is busy.
+  bound ports; they throw only when the whole block is busy. Each port is also claimed across
+  processes with an exclusive file under `$TMPDIR/iter8-port-claims/` (dead owners' claims are
+  reclaimed), so concurrent `bun test` runs do not collide. Rig and test cleanup uses `try`/`finally`,
+  never `using`, which dependency-cruiser's parser rejects.
 - `harness/rig/wait.ts` — `waitFor(label, read, { timeoutMs, everyMs })`; the only way to wait.
 - `harness/rig/scratch.ts` — `scratchDir(prefix)` returns `{ path, dispose }`; every temp dir a test
   makes comes from here and is disposed by its creator.

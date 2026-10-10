@@ -5,6 +5,7 @@ import { chromium } from "playwright"
 import { launchChromium, newPage } from "../../rig/browser"
 import { throwawayHome } from "../../rig/home"
 import { nextPort, portBlock, WORKER } from "../../rig/ports"
+import { scratchDir } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 
 const exists = (path: string) =>
@@ -20,27 +21,33 @@ async function runAllocator(code: string, worker: string | null = String(WORKER)
   const env = { ...process.env }
   if (worker === null) delete env.BUN_TEST_WORKER_ID
   else env.BUN_TEST_WORKER_ID = worker
-  const child = Bun.spawn(
-    [
-      process.execPath,
-      "--eval",
-      `
+  const claims = await scratchDir(`/tmp/iter8-w${WORKER}-claims-`)
+  env.ITER8_PORT_CLAIMS_DIR = claims.path
+  try {
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "--eval",
+        `
     const { nextPort, poolRange, WORKER } = await import(${JSON.stringify(portsModule)});
     ${code}
   `,
-    ],
-    {
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  )
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
-  return { stdout, stderr, exitCode }
+      ],
+      {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { stdout, stderr, exitCode }
+  } finally {
+    await claims.dispose()
+  }
 }
 
 test("distinct workers have disjoint 100-port blocks below the ephemeral range and outside service pools", () => {
