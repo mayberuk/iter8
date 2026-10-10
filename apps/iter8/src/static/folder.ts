@@ -6,26 +6,36 @@ function insideRoot(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
 }
 
-export async function serveFolder(req: Request, root: string): Promise<Response> {
+export async function folderFile(root: string, url: string): Promise<string | null> {
   try {
     // URL parsing would normalize dot segments before containment can reject them.
     const pathname = decodeURIComponent(
-      req.url.replace(/^[^:]+:\/\/[^/?#]+/, "").split(/[?#]/, 1)[0] || "/",
+      url.replace(/^[^:]+:\/\/[^/?#]+/, "").split(/[?#]/, 1)[0] || "/",
     )
-    if (pathname.includes("\0")) return new Response(null, { status: 404 })
+    if (pathname.includes("\0")) return null
 
     const realRoot = await realpath(root)
     const resolved = resolve(realRoot, `.${pathname}`)
-    if (!insideRoot(resolved, realRoot)) return new Response(null, { status: 404 })
+    if (!insideRoot(resolved, realRoot)) return null
 
     let path = await realpath(resolved)
-    if (!insideRoot(path, realRoot)) return new Response(null, { status: 404 })
+    if (!insideRoot(path, realRoot)) return null
     if ((await stat(path)).isDirectory()) {
       path = await realpath(join(path, "index.html"))
-      if (!insideRoot(path, realRoot)) return new Response(null, { status: 404 })
+      if (!insideRoot(path, realRoot)) return null
     }
-    if (!(await stat(path)).isFile()) return new Response(null, { status: 404 })
+    if (!(await stat(path)).isFile()) return null
 
+    return path
+  } catch {
+    return null
+  }
+}
+
+export async function serveFolder(req: Request, root: string): Promise<Response> {
+  const path = await folderFile(root, req.url)
+  if (path === null) return new Response(null, { status: 404 })
+  try {
     const file = Bun.file(path)
     return new Response(file, {
       headers: { "content-type": file.type, "cache-control": "no-store" },
