@@ -57,3 +57,51 @@ test("a page with no bundler markers is unknown", () => {
     }),
   ).toBe("unknown")
 })
+
+const vite = [`${origin}/@vite/client`]
+
+test.each([
+  [
+    "turbopack, webpack and vite markers",
+    { TURBOPACK: [], webpackChunk_N_E: [] },
+    "next-turbopack",
+  ],
+  ["turbopack and webpack markers", { TURBOPACK: {}, webpackChunk_N_E: [] }, "next-turbopack"],
+  ["a turbopack marker and a vite client", { TURBOPACK: [] }, "next-turbopack"],
+  ["a webpack marker and a vite client", { webpackChunk_N_E: [] }, "next-webpack"],
+] as const)("%s resolve in the order turbopack, webpack, vite", (_, globals, expected) => {
+  expect(detectBuild({ globals, scriptSources: vite })).toBe(expected)
+})
+
+test.each([
+  ["null", null],
+  ["zero", 0],
+  ["false", false],
+  ["an empty string", ""],
+])("a turbopack marker that is %s is still present", (_, value) => {
+  expect(detectBuild({ globals: { TURBOPACK: value }, scriptSources: vite })).toBe("next-turbopack")
+})
+
+test.each([
+  ["null", null],
+  ["zero", 0],
+  ["false", false],
+  ["an empty string", ""],
+])("a webpack marker that is %s is still present", (_, value) => {
+  expect(detectBuild({ globals: { webpackChunk_N_E: value }, scriptSources: vite })).toBe(
+    "next-webpack",
+  )
+})
+
+test("a marker whose global is undefined is absent", () => {
+  expect(
+    detectBuild({
+      globals: { TURBOPACK: undefined, webpackChunk_N_E: undefined },
+      scriptSources: vite,
+    }),
+  ).toBe("vite")
+})
+
+test("no globals and no scripts is unknown", () => {
+  expect(detectBuild({ globals: {}, scriptSources: [] })).toBe("unknown")
+})

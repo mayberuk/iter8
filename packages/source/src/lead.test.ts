@@ -92,28 +92,45 @@ test("evidence with no frames gives none", () => {
   expect(toLead(evidence({ frames: [] }), "vite")).toEqual({ confidence: "none" })
 })
 
-test("twelve frames keep the first eight in their original order", () => {
-  const twelve: SourceFrame[] = Array.from({ length: 12 }, (_, index) => ({
+const framesOf = (count: number): SourceFrame[] =>
+  Array.from({ length: count }, (_, index) => ({
     kind: "generated",
     file: `http://larkspur.localhost:3990/src/Frame${index}.jsx`,
     line: index + 1,
   }))
-  const lead = toLead(evidence({ frames: twelve }), "vite")
-  expect(lead.confidence === "none" ? [] : lead.frames).toEqual(twelve.slice(0, 8))
+
+test.each([
+  [8, 8],
+  [9, 8],
+  [12, 8],
+  [1, 1],
+])("%i frames keep the first %i in their original order", (count, kept) => {
+  const stack = framesOf(count)
+  const lead = toLead(evidence({ frames: stack }), "vite")
+  expect(lead.confidence === "none" ? [] : lead.frames).toEqual(stack.slice(0, kept))
 })
 
 test.each([
   ["react", 19, "vite", "exact"],
   ["react", 19, "next-turbopack", "exact"],
   ["react", 19, "next-webpack", "approximate"],
-  ["react", 18, "unknown", "approximate"],
+  ["react", 19, "unknown", "approximate"],
   ["svelte", 5, "vite", "exact"],
+  ["svelte", 5, "next-turbopack", "approximate"],
+  ["svelte", 5, "next-webpack", "approximate"],
   ["svelte", 5, "unknown", "approximate"],
   ["svelte", 4, "vite", "approximate"],
+  ["svelte", 4, "next-turbopack", "approximate"],
+  ["svelte", 4, "next-webpack", "approximate"],
+  ["svelte", 4, "unknown", "approximate"],
   ["svelte", null, "vite", "approximate"],
   ["vue", 3, "vite", "file-only"],
+  ["vue", 3, "next-turbopack", "file-only"],
+  ["vue", 3, "next-webpack", "file-only"],
   ["vue", 3, "unknown", "file-only"],
   ["astro", null, "vite", "exact"],
+  ["astro", null, "next-turbopack", "approximate"],
+  ["astro", null, "next-webpack", "approximate"],
   ["astro", null, "unknown", "approximate"],
 ] as const)("%s %p on %s is %s", (framework, major, build, confidence) => {
   expect(toLead(evidence({ framework, major }), build)).toEqual({

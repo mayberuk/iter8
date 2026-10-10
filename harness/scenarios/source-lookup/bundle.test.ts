@@ -85,9 +85,15 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await rig?.stop()
+    try {
+      await rig?.stop()
+    } finally {
+      await fixture?.stop()
+    }
+    expectReleased(shared.made)
+    await expect(fetch(fixture.url())).rejects.toThrow()
   } finally {
-    await fixture?.stop()
+    await releaseAnyway(shared.made)
   }
 })
 
@@ -324,7 +330,13 @@ const walkWithFakeAdapter = (page: Page, mode: AbortMode) =>
       })
       try {
         const lead = await bundle.lookupSource(element, controller.signal, [adapter])
-        return { settled: "resolved" as const, confidence: lead.confidence, calls, timerFired }
+        return {
+          settled: "resolved" as const,
+          confidence: lead.confidence,
+          build: "build" in lead ? lead.build : null,
+          calls,
+          timerFired,
+        }
       } catch (error) {
         return { settled: "rejected" as const, sameReason: error === reason, calls, timerFired }
       }
@@ -339,6 +351,65 @@ test("a walk nothing aborts reaches the ancestor whose adapter finds evidence", 
     expect(run.settled).toBe("resolved")
     expect(run.calls).toEqual([0, 1])
     if (run.settled === "resolved") expect(run.confidence).not.toBe("none")
+  } finally {
+    await view.close()
+  }
+})
+
+test.each([
+  ["a page with no build marker", async (_page: Page) => {}, "unknown"],
+  [
+    "a TURBOPACK global",
+    (page: Page) => page.evaluate(() => Reflect.set(window, "TURBOPACK", [])),
+    "next-turbopack",
+  ],
+  [
+    "a webpackChunk_N_E global",
+    (page: Page) => page.evaluate(() => Reflect.set(window, "webpackChunk_N_E", [])),
+    "next-webpack",
+  ],
+  [
+    "a script element whose src holds /@vite/client",
+    (page: Page) =>
+      page.evaluate(() => {
+        const script = document.createElement("script")
+        script.src = "data:text/javascript,//@vite/client"
+        document.head.append(script)
+      }),
+    "vite",
+  ],
+  [
+    "a module imported from /@vite/client, which leaves no script element",
+    async (page: Page) => {
+      await page.route("**/@vite/client", (route) =>
+        route.fulfill({ contentType: "text/javascript", body: "export {}" }),
+      )
+      await page.evaluate(() => import(new URL("/@vite/client", location.origin).href))
+    },
+    "vite",
+  ],
+])("the lookup detects the build from %s", async (_, markPage, expected) => {
+  const view = await rig.open(fixture)
+  try {
+    await markPage(view.page)
+    const run = await walkWithFakeAdapter(view.page, "never")
+    expect(run).toMatchObject({ settled: "resolved", build: expected })
+  } finally {
+    await view.close()
+  }
+})
+
+test("a lookup leaves the page's own Error.prepareStackTrace function in place", async () => {
+  const view = await rig.open(fixture)
+  try {
+    await view.page.evaluate(() => {
+      Reflect.set(window, "ownHandler", (_error: Error, frames: unknown[]) => frames.length)
+      Error.prepareStackTrace = Reflect.get(window, "ownHandler")
+    })
+    expect(await lookupInPage(view, CARD)).toEqual({ confidence: "none" })
+    expect(
+      await view.page.evaluate(() => Error.prepareStackTrace === Reflect.get(window, "ownHandler")),
+    ).toBe(true)
   } finally {
     await view.close()
   }
