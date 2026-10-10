@@ -2,7 +2,7 @@ import { realpath } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { ResolvedSourceLead, type SourceFrame, type SourceLead } from "@iter8/protocol"
-import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping"
+import { FlattenMap, originalPositionFor, type TraceMap } from "@jridgewell/trace-mapping"
 
 export type SymbolicateScope = {
   projectRoot: string
@@ -14,6 +14,9 @@ export type SymbolicateScope = {
 export type Symbolicator = {
   resolve(lead: SourceLead, scope: SymbolicateScope): Promise<ResolvedSourceLead>
 }
+
+const reactServerPrefix =
+  /^(?:rsc|about):\/\/React\/Server\/(?=file:\/\/\/|webpack-internal:\/\/\/)/
 
 const excluded = new Set([
   "node_modules",
@@ -88,7 +91,7 @@ export function createSymbolicator(deps: {
     if (reference.startsWith("data:")) {
       const match = /^data:application\/json(?:;[^,]*)?;base64,(.*)$/s.exec(reference)
       if (!match?.[1]) return null
-      return new TraceMap(Buffer.from(match[1], "base64").toString("utf8"), scriptUrl.href)
+      return new FlattenMap(Buffer.from(match[1], "base64").toString("utf8"), scriptUrl.href)
     }
     const mapUrl = new URL(reference, scriptUrl)
     let text: string | null
@@ -99,7 +102,7 @@ export function createSymbolicator(deps: {
       if (!response.ok) return null
       text = await response.text()
     }
-    return text === null ? null : new TraceMap(text, mapUrl.href)
+    return text === null ? null : new FlattenMap(text, mapUrl.href)
   }
 
   function cachedMap(scriptUrl: URL): Promise<TraceMap | null> {
@@ -122,16 +125,18 @@ export function createSymbolicator(deps: {
 
   async function frameSource(frame: SourceFrame, scope: SymbolicateScope) {
     if (frame.kind === "source") return frame
-    if (frame.file.startsWith("webpack-internal:///")) {
+    const reactServer = reactServerPrefix.exec(frame.file)
+    const location = reactServer ? frame.file.slice(reactServer[0].length) : frame.file
+    if (location.startsWith("webpack-internal:///")) {
       return {
         ...frame,
-        file: frame.file.replace(/^webpack-internal:\/\/\/(?:\([^/]*\)\/)?/, ""),
+        file: location.replace(/^webpack-internal:\/\/\/(?:\([^/]*\)\/)?/, "").replace(/\?.*$/, ""),
       }
     }
 
     let scriptUrl: URL
-    if (frame.file.startsWith("rsc://React/Server/file:///")) {
-      scriptUrl = new URL(frame.file.slice("rsc://React/Server/".length))
+    if (reactServer) {
+      scriptUrl = new URL(location)
       scriptUrl.search = ""
       scriptUrl.hash = ""
     } else {

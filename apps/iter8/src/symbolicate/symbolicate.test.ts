@@ -250,40 +250,151 @@ describe("symbolication", () => {
     })
   })
 
-  test.each(["comment", "sibling"] as const)(
-    "maps an rsc disk chunk using its %s map",
-    async (reference) => {
-      const built = await build("external")
-      if (reference === "comment") {
-        await writeFile(
-          built.file,
-          `${built.script}\n//# sourceMappingURL=${basename(built.file)}.map\n`,
-        )
-      }
+  test.each(
+    ["rsc", "about"].flatMap((scheme) =>
+      (["comment", "sibling"] as const).map((reference) => [scheme, reference] as const),
+    ),
+  )("maps a %s://React/Server disk chunk using its %s map", async (scheme, reference) => {
+    const built = await build("external")
+    if (reference === "comment") {
+      await writeFile(
+        built.file,
+        `${built.script}\n//# sourceMappingURL=${basename(built.file)}.map\n`,
+      )
+    }
+    const symbolicator = createSymbolicator({
+      fetch: fakeFetch(() => {
+        throw new Error("Disk chunks must not use fetch")
+      }),
+      readFile: readText,
+    })
+    expect(
+      await symbolicator.resolve(
+        lead([
+          {
+            kind: "generated",
+            file: `${scheme}://React/Server/${pathToFileURL(built.file).href}?17`,
+            ...position(built.script),
+          },
+        ]),
+        scope,
+      ),
+    ).toEqual({
+      confidence: "exact",
+      framework: "react",
+      component: "Card",
+      file: "src/Card.ts",
+      ...position(cardSource),
+    })
+  })
+
+  test.each([
+    "about:blank",
+    "about://Other/Server/CHUNK",
+    "rsc://Other/Server/CHUNK",
+    "about://React/Client/CHUNK",
+    "about://React/Server/http://cardinal.localhost:3990/chunk.js",
+    "about://React/Server/https://evil.example/chunk.js",
+  ])("rejects the foreign frame %s without reading or fetching", async (template) => {
+    const built = await build("external")
+    await writeFile(
+      built.file,
+      `${built.script}\n//# sourceMappingURL=${basename(built.file)}.map\n`,
+    )
+    const reads: string[] = []
+    const fetched: string[] = []
+    const symbolicator = createSymbolicator({
+      fetch: fakeFetch((requested) => {
+        fetched.push(requested)
+        return new Response(null, { status: 404 })
+      }),
+      readFile: async (file) => {
+        reads.push(file)
+        return readText(file)
+      },
+    })
+    const file = template.replace("CHUNK", `file://${built.file}`)
+    expect(
+      await symbolicator.resolve(
+        lead([{ kind: "generated", file, ...position(built.script) }]),
+        scope,
+      ),
+    ).toEqual({ confidence: "none", reason: "no-frames-resolved" })
+    expect(reads).toEqual([])
+    expect(fetched).toEqual([])
+  })
+
+  test("maps an about://React/Server webpack-internal frame by its module path", async () => {
+    const symbolicator = createSymbolicator({ fetch, readFile: readText })
+    expect(
+      await symbolicator.resolve(
+        lead(
+          [
+            {
+              kind: "generated",
+              file: "about://React/Server/webpack-internal:///(rsc)/./src/Card.ts?11",
+              line: 8,
+              column: 87,
+            },
+          ],
+          "approximate",
+        ),
+        scope,
+      ),
+    ).toEqual({
+      confidence: "approximate",
+      framework: "react",
+      component: "Card",
+      file: "src/Card.ts",
+      line: 8,
+      column: 87,
+    })
+  })
+
+  const sectionedMap = JSON.stringify({
+    version: 3,
+    sections: [
+      {
+        offset: { line: 0, column: 0 },
+        map: { version: 3, sources: ["/src/Other.ts"], names: [], mappings: "KAGE" },
+      },
+      {
+        offset: { line: 2, column: 10 },
+        map: { version: 3, sources: ["/src/Card.ts"], names: [], mappings: "KAGE" },
+      },
+    ],
+  })
+
+  test.each(["inline", "separate"] as const)(
+    "maps through a sectioned index map served %s",
+    async (placement) => {
+      const requested: string[] = []
       const symbolicator = createSymbolicator({
-        fetch: fakeFetch(() => {
-          throw new Error("Disk chunks must not use fetch")
+        fetch: fakeFetch((url) => {
+          requested.push(url)
+          if (url.endsWith("/chunk.js.map")) return new Response(sectionedMap)
+          if (placement === "inline") {
+            const encoded = Buffer.from(sectionedMap).toString("base64")
+            return new Response(`//# sourceMappingURL=data:application/json;base64,${encoded}\n`)
+          }
+          return new Response("", { headers: { SourceMap: "chunk.js.map" } })
         }),
         readFile: readText,
       })
-      expect(
+      expect<unknown>(
         await symbolicator.resolve(
           lead([
             {
               kind: "generated",
-              file: `rsc://React/Server/${pathToFileURL(built.file).href}?17`,
-              ...position(built.script),
+              file: `${pageOrigin}/chunk.js`,
+              line: 3,
+              column: 16,
             },
           ]),
           scope,
         ),
-      ).toEqual({
-        confidence: "exact",
-        framework: "react",
-        component: "Card",
-        file: "src/Card.ts",
-        ...position(cardSource),
-      })
+      ).toEqual(resolvedCard)
+      expect(requested.some((url) => url.endsWith("/chunk.js.map"))).toBe(placement === "separate")
     },
   )
 

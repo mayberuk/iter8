@@ -1,10 +1,14 @@
 import type { SourceLead } from "@iter8/protocol"
+import { astroEvidence } from "./astro"
 import { type Adapter, type Evidence, toLead } from "./lead"
 import { detectBuild } from "./page-build"
+import { reactEvidence } from "./react"
+import { svelteEvidence } from "./svelte"
+import { vueEvidence } from "./vue"
 
 const MAX_ANCESTORS = 25
 
-const adapters: Adapter[] = []
+const adapters: Adapter[] = [reactEvidence, svelteEvidence, vueEvidence, astroEvidence]
 
 function readPage() {
   return {
