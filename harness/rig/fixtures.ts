@@ -3,6 +3,7 @@ import { extname, join, resolve, sep } from "node:path"
 import { SourceConfidence } from "@iter8/protocol"
 import { z } from "zod"
 import { nextPort } from "./ports"
+import { reapWithParent } from "./reap"
 import { SCRATCH_ROOT, type Scratch, scratchDir } from "./scratch"
 import { waitFor } from "./wait"
 
@@ -128,6 +129,7 @@ export async function startFixture(
       stderr: Bun.file(log.err),
     },
   )
+  reapWithParent(child, { group: true })
   const stop = async () => {
     try {
       await stopGroup(child)

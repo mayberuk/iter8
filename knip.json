@@ -23,7 +23,8 @@
         "modern-screenshot",
         "bippy",
         "@jridgewell/trace-mapping",
-        "@iter8/protocol"
+        "@iter8/protocol",
+        "parse5"
       ]
     },
     "packages/protocol": {

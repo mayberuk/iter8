@@ -9,8 +9,12 @@ The overlay runs inside someone else's page. It must never cost that page a fram
 keystroke, and the page must never be able to break it.
 
 ## Always
-- Render everything into one shadow root; take styles from the one token set the approved sketch
-  (`docs/design/sketches/overlay-reference.html`) defines, for light and dark.
+- Render everything into one shadow root, light and dark. The approved sketch
+  (`docs/design/sketches/overlay-reference.html`) is the structure, layout and interaction
+  reference only; colour, type and icons follow the look decisions recorded in
+  `docs/design/brainstorm.md`: a neutral grey palette, Reddit Sans for prose, JetBrains Mono only
+  for file paths, line numbers and keys, MingCute icons (Fluent for the region, screenshot and
+  auto-theme icons) and the hand-drawn pick pointer.
 - At pick time, take only the synchronous identity snapshot (selector, role/name/text, box,
   render generation). Everything else — screenshot, styles, surrounding text, source lead — runs
   after the composer paints, in chunks that yield to input, bounded, cancellable, and omitted

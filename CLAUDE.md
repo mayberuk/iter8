@@ -36,6 +36,6 @@ Comments, verification, communication and MR conventions are governed by the glo
 ## Constraints that are dealbreakers, not preferences
 - A round never silently reports to nothing: a page whose session is gone says so before Send.
 - Annotating never lags the page or delays a keystroke.
-- Claude Code is reached only through stable surfaces: hooks, skills, commands.
-- Hooks never inject note content into a session — only a neutral pointer to the round.
+- Claude Code is reached only through stable surfaces: hooks, skills, commands and mods (on by default since Claude Code 2.1.287; iter8's mod needs 2.1.296+).
+- Hooks never inject note content into a session, only a neutral pointer to the round; a page-chat message reaches the session only through the mod, inside the fenced, page-labelled `<page-message>` block.
 - Service and proxies bind loopback; every overlay call carries the page's capability token.
