@@ -5,7 +5,7 @@ import { chromium } from "playwright"
 import { launchChromium, newPage } from "../../rig/browser"
 import { throwawayHome } from "../../rig/home"
 import { nextPort, portBlock, WORKER } from "../../rig/ports"
-import { scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, scratchDir } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 
 const exists = (path: string) =>
@@ -21,7 +21,7 @@ async function runAllocator(code: string, worker: string | null = String(WORKER)
   const env = { ...process.env }
   if (worker === null) delete env.BUN_TEST_WORKER_ID
   else env.BUN_TEST_WORKER_ID = worker
-  const claims = await scratchDir(`/tmp/iter8-w${WORKER}-claims-`)
+  const claims = await scratchDir(`${SCRATCH_ROOT}claims-`)
   env.ITER8_PORT_CLAIMS_DIR = claims.path
   try {
     const child = Bun.spawn(
@@ -396,7 +396,7 @@ test("throwaway homes are distinct empty directories with short control socket p
   try {
     expect(new Set(homes.map((home) => home.path)).size).toBe(2)
     for (const { path } of homes) {
-      expect(path).toMatch(new RegExp(`^/tmp/iter8-w${WORKER}-[a-zA-Z0-9]{6}$`))
+      expect(path).toMatch(new RegExp(`^${SCRATCH_ROOT}[a-zA-Z0-9]{6}$`))
       expect(await readdir(path)).toEqual([])
       expect(Buffer.byteLength(`${path}/control.sock`)).toBeLessThan(100)
     }

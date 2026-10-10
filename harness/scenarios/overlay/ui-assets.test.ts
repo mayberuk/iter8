@@ -5,8 +5,7 @@ import type { Browser, Page, Route } from "playwright"
 import type { IconName } from "../../../apps/overlay/src/ui/glyphs"
 import { ASSET_PREFIX } from "../../../scripts/build"
 import { launchChromium, newPage } from "../../rig/browser"
-import { WORKER } from "../../rig/ports"
-import { type Scratch, scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 import type { Item, UiHarness } from "./ui-assets.entry"
 
@@ -71,7 +70,7 @@ let assetFiles: string[]
 const openPages: (() => Promise<void>)[] = []
 
 beforeAll(async () => {
-  bundle = await scratchDir(`/tmp/iter8-w${WORKER}-ui-assets-`)
+  bundle = await scratchDir(`${SCRATCH_ROOT}ui-assets-`)
   const result = await Bun.build({
     entrypoints: [Bun.fileURLToPath(new URL("./ui-assets.entry.tsx", import.meta.url))],
     outdir: bundle.path,

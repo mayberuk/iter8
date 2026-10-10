@@ -21,5 +21,6 @@ playwright-report/
 .livecheck/tmp/
 .livecheck/runs/
 .next/
+.next-*/
 .svelte-kit/
 .astro/

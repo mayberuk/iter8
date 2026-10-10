@@ -7,8 +7,7 @@ import { type AgentSession, startAgentSession } from "../../rig/agent"
 import { launchChromium, newPage } from "../../rig/browser"
 import { buildBrowserBundle } from "../../rig/bundle"
 import { fixtureDir } from "../../rig/fixtures"
-import { WORKER } from "../../rig/ports"
-import { type Scratch, scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import { openThroughProxy, type RunningService, startService } from "../../rig/service"
 import { waitFor } from "../../rig/wait"
 import { type Iter8Probe, PROBE_GLOBAL } from "../../stubs/probe-overlay"
@@ -58,7 +57,7 @@ const putDraft = (page: Page, body: DraftBody) =>
   ] as const)
 
 test("an edit to an opened folder reloads the open page and its drafts survive the reload", async () => {
-  const folder = await scratchDir(`/tmp/iter8-w${WORKER}-folder-`)
+  const folder = await scratchDir(`${SCRATCH_ROOT}folder-`)
   const { page, errors, close } = await newPage(browser)
   try {
     await cp(fixtureDir("static"), folder.path, { recursive: true })
@@ -102,7 +101,7 @@ test("an edit to an opened folder reloads the open page and its drafts survive t
 }, 60_000)
 
 test("a request that climbs out of the folder is a 404", async () => {
-  const folder = await scratchDir(`/tmp/iter8-w${WORKER}-folder-`)
+  const folder = await scratchDir(`${SCRATCH_ROOT}folder-`)
   const { page, close } = await newPage(browser)
   try {
     await cp(fixtureDir("static"), folder.path, { recursive: true })

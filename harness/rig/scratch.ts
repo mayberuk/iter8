@@ -1,4 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises"
+import { WORKER } from "./ports"
+
+// The pid keeps concurrent `bun test` processes apart: each numbers its workers from 1.
+export const SCRATCH_ROOT = `/tmp/iter8-w${WORKER}-p${process.pid}-`
 
 export type Scratch = {
   path: string

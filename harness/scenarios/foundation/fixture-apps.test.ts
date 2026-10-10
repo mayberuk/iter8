@@ -4,10 +4,10 @@ import { extname, join, relative } from "node:path"
 import type { Browser } from "playwright"
 import { launchChromium, newPage } from "../../rig/browser"
 import { type Fixture, fixtureDir, MANIFEST, startFixture } from "../../rig/fixtures"
-import { WORKER } from "../../rig/ports"
-import { type Scratch, scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 
-const SKIPPED_DIRS = new Set(["node_modules", ".next", ".svelte-kit", ".astro", "dist"])
+const SKIPPED_DIRS = new Set(["node_modules", ".svelte-kit", ".astro", "dist"])
+const skipped = (name: string) => SKIPPED_DIRS.has(name) || name.startsWith(".next")
 const SOURCE_EXTENSIONS = new Set([
   ".html",
   ".js",
@@ -28,7 +28,7 @@ async function sourceLines(dir: string): Promise<SourceLine[]> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (!SKIPPED_DIRS.has(entry.name)) lines.push(...(await sourceLines(path)))
+      if (!skipped(entry.name)) lines.push(...(await sourceLines(path)))
     } else if (SOURCE_EXTENSIONS.has(extname(entry.name))) {
       const text = await Bun.file(path).text()
       text.split("\n").forEach((line, index) => {
@@ -190,7 +190,7 @@ afterAll(async () => {
 })
 
 async function throwawayFixture(config: Throwaway): Promise<string> {
-  const entry = await scratchDir(`/tmp/iter8-w${WORKER}-throwaway-`)
+  const entry = await scratchDir(`${SCRATCH_ROOT}throwaway-`)
   throwaways.push(entry)
   await writeFile(
     join(entry.path, "package.json"),
@@ -215,7 +215,9 @@ async function recorded(dir: string, file: "pid" | "port"): Promise<number> {
 }
 
 async function logDirs(): Promise<string[]> {
-  return (await readdir("/tmp")).filter((name) => name.startsWith(`iter8-w${WORKER}-vite-react-`))
+  return (await readdir("/tmp")).filter((name) =>
+    `/tmp/${name}`.startsWith(`${SCRATCH_ROOT}vite-react-`),
+  )
 }
 
 async function expectNothingLeft(dir: string, logsBefore: string[]) {

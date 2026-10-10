@@ -6,7 +6,7 @@ import { startAgentSession } from "../../rig/agent"
 import { launchChromium, newPage } from "../../rig/browser"
 import { cliCommand } from "../../rig/cli"
 import { nextPort, portBlock, WORKER } from "../../rig/ports"
-import { type Scratch, scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import { openThroughProxy, startService } from "../../rig/service"
 import { waitFor } from "../../rig/wait"
 import { FAKE_CLI_ENTRY, FAKE_CLI_TOKEN, readFakeCliCalls } from "../../stubs/fake-cli"
@@ -30,7 +30,7 @@ const exists = (path: string) =>
   )
 
 async function ownHomes(): Promise<string[]> {
-  return (await readdir("/tmp")).filter((name) => name.startsWith(`iter8-w${WORKER}-`)).sort()
+  return (await readdir("/tmp")).filter((name) => `/tmp/${name}`.startsWith(SCRATCH_ROOT)).sort()
 }
 
 function alive(pid: number): boolean {
@@ -77,7 +77,7 @@ test("startService waits for the serve process to report ready and exposes its s
     expect(service.status.home).toBe(service.home)
 
     expect(serve.env.ITER8_HOME).toBe(service.home)
-    expect(service.home).toMatch(new RegExp(`^/tmp/iter8-w${WORKER}-[A-Za-z0-9]{6}$`))
+    expect(service.home).toMatch(new RegExp(`^${SCRATCH_ROOT}[A-Za-z0-9]{6}$`))
     expect(before.has(service.home.slice("/tmp/".length))).toBe(false)
 
     const block = portBlock(WORKER)

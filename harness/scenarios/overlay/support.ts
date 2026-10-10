@@ -4,8 +4,7 @@ import type { Browser, Locator, Page } from "playwright"
 import { buildOverlayBundles } from "../../../scripts/build"
 import { newPage } from "../../rig/browser"
 import { buildBrowserBundle } from "../../rig/bundle"
-import { WORKER } from "../../rig/ports"
-import { type Scratch, scratchDir } from "../../rig/scratch"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
 import {
   type MockService,
@@ -15,7 +14,7 @@ import {
 
 /** Builds the real overlay bundle, fonts included, into a fresh directory. */
 export async function buildOverlay(): Promise<Scratch> {
-  const scratch = await scratchDir(`/tmp/iter8-w${WORKER}-overlay-`)
+  const scratch = await scratchDir(`${SCRATCH_ROOT}overlay-`)
   try {
     await buildOverlayBundles({ outDir: scratch.path })
   } catch (error) {
@@ -30,7 +29,7 @@ export async function withSourceBundle(
   overlay: Scratch,
   bundle: "none" | "fake",
 ): Promise<Scratch> {
-  const scratch = await scratchDir(`/tmp/iter8-w${WORKER}-overlay-source-`)
+  const scratch = await scratchDir(`${SCRATCH_ROOT}overlay-source-`)
   try {
     await cp(overlay.path, scratch.path, { recursive: true })
     const source = join(scratch.path, "source.js")

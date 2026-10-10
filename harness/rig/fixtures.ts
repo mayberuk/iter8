@@ -1,9 +1,9 @@
-import { cp } from "node:fs/promises"
+import { cp, rm } from "node:fs/promises"
 import { extname, join, resolve, sep } from "node:path"
 import { SourceConfidence } from "@iter8/protocol"
 import { z } from "zod"
-import { nextPort, WORKER } from "./ports"
-import { type Scratch, scratchDir } from "./scratch"
+import { nextPort } from "./ports"
+import { SCRATCH_ROOT, type Scratch, scratchDir } from "./scratch"
 import { waitFor } from "./wait"
 
 const REPO = Bun.fileURLToPath(new URL("../../", import.meta.url))
@@ -62,6 +62,10 @@ const STOP_TIMEOUT_MS = 10_000
 // both off, so the server stays in the rig's process group and parallel workers can each run one.
 const EXTRA_DEV_ARGS: Partial<Record<FixtureName, string[]>> = { astro: ["--ignore-lock"] }
 
+// Next takes a lock inside distDir and refuses a second `next dev` in the same directory, so each
+// start gets its own distDir, which fixtures/next-*/next.config.mjs reads from this variable.
+const NEXT_DIST_DIR_ENV = "ITER8_NEXT_DIST_DIR"
+
 export type RunningFixture = {
   name: FixtureName
   dir: string
@@ -77,7 +81,7 @@ export type StartFixtureOptions = {
   readyTimeoutMs?: number
 }
 
-/** Resolves once `readyPath` has answered 200; `stop` also removes the fixture's log directory. */
+/** Resolves once `readyPath` has answered 200; `stop` also removes the fixture's log directory and, for Next, its distDir. */
 export async function startFixture(
   name: FixtureName,
   options: StartFixtureOptions = {},
@@ -93,7 +97,15 @@ export async function startFixture(
     return { name, dir, origin, port, url, stop: () => server.stop(true) }
   }
 
-  const logs = await scratchDir(`/tmp/iter8-w${WORKER}-${name}-`)
+  const logs = await scratchDir(`${SCRATCH_ROOT}${name}-`)
+  const distDir = name.startsWith("next-") ? `.next-p${process.pid}-${port}` : null
+  const dispose = async () => {
+    try {
+      await logs.dispose()
+    } finally {
+      if (distDir !== null) await rm(join(dir, distDir), { recursive: true, force: true })
+    }
+  }
   const log = { out: join(logs.path, "stdout.log"), err: join(logs.path, "stderr.log") }
   const child = Bun.spawn(
     [
@@ -105,7 +117,11 @@ export async function startFixture(
     ],
     {
       cwd: dir,
-      env: { ...process.env, ...entry.env },
+      env: {
+        ...process.env,
+        ...entry.env,
+        ...(distDir === null ? {} : { [NEXT_DIST_DIR_ENV]: distDir }),
+      },
       detached: true,
       stdin: "ignore",
       stdout: Bun.file(log.out),
@@ -116,7 +132,7 @@ export async function startFixture(
     try {
       await stopGroup(child)
     } finally {
-      await logs.dispose()
+      await dispose()
     }
   }
   try {
@@ -135,7 +151,7 @@ export async function startFixture(
       { timeoutMs: readyTimeoutMs, everyMs: 250 },
     )
   } catch (cause) {
-    const output = await stopAndRead(child, logs, log)
+    const output = await stopAndRead(child, dispose, log)
     throw new Error(`${name} did not become ready; dev log:\n${output}`, { cause })
   }
   return { name, dir, origin, port, url, stop }
@@ -191,14 +207,14 @@ async function stopGroup(child: Bun.Subprocess): Promise<void> {
 
 async function stopAndRead(
   child: Bun.Subprocess,
-  logs: Scratch,
+  dispose: () => Promise<void>,
   log: { out: string; err: string },
 ): Promise<string> {
   try {
     await stopGroup(child)
     return await tail(log)
   } finally {
-    await logs.dispose()
+    await dispose()
   }
 }
 
@@ -219,7 +235,7 @@ const STATIC_BUILD_TOOL: Partial<Record<FixtureName, string>> = {
 }
 
 export async function buildFixture(name: FixtureName): Promise<Scratch> {
-  const out = await scratchDir(`/tmp/iter8-w${WORKER}-${name}-build-`)
+  const out = await scratchDir(`${SCRATCH_ROOT}${name}-build-`)
   try {
     await buildInto(name, out.path)
   } catch (error) {
