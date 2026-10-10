@@ -750,6 +750,21 @@ test("an owner's death updates every one of its pages and orphans every one of i
   expect(stayingHeard).toEqual([])
 }, 60_000)
 
+test("status lists only the pool ports the service actually bound", async () => {
+  const home = await makeHome()
+  const pool = freePool(3)
+  const occupied = pool.ports[1] ?? 0
+  const holder = Bun.listen({ hostname: "127.0.0.1", port: occupied, socket: { data() {} } })
+  cleanups.push(() => holder.stop(true))
+  const crowded: Home = { ...home, pool, env: { ...home.env, [ENV.pool]: pool.range } }
+
+  const started = await cli(crowded, ["rounds", "--json"])
+  expect(started.exitCode, started.stderr).toBe(0)
+  const status = await serviceStatus(crowded)
+  expect(status.pool).toEqual(pool.ports.filter((port) => port !== occupied))
+  expect(status.pool).not.toContain(occupied)
+}, 60_000)
+
 test("a restarted service rebinds its pages to the new pool, proxies them and watches their folders again", async () => {
   const home = await makeHome()
   const session = sleeper(home)
