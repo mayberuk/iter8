@@ -3,13 +3,216 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { type SourceFrame, SourceLead } from "@iter8/protocol"
+import { type MarkupPath, type SourceFrame, SourceLead } from "@iter8/protocol"
 import type { Server } from "bun"
 import fc from "fast-check"
 import { createSymbolicator, type SymbolicateScope } from "./symbolicate"
 
 const pageOrigin = "http://cardinal.localhost:3990"
 const marker = "iter8_unique_source_literal"
+
+describe("folder markup symbolication", () => {
+  const html = [
+    "<!doctype html>",
+    "<html><head><title>page</title></head>",
+    "<body>",
+    '  <main><div id="picked" class="hero">Hello <em>world</em></div></main>',
+    "</body></html>",
+  ].join("\n")
+  let workDir: string
+  let scope: SymbolicateScope
+  let reads: string[]
+
+  beforeEach(async () => {
+    workDir = await mkdtemp(join(tmpdir(), "iter8-folder-markup-"))
+    const projectRoot = join(workDir, "project")
+    const folderRoot = join(projectRoot, "pages")
+    await mkdir(folderRoot, { recursive: true })
+    await writeFile(join(folderRoot, "index.html"), html)
+    await writeFile(join(folderRoot, "second.html"), html)
+    await writeFile(join(folderRoot, "style.css"), "body {}")
+    scope = { projectRoot, folderRoot, pageOrigin, upstream: null }
+    reads = []
+  })
+
+  afterEach(async () => {
+    await rm(workDir, { recursive: true, force: true })
+  })
+
+  function resolveMarkup(
+    url = `${pageOrigin}/second.html`,
+    identity: Partial<MarkupPath> = {},
+    read = readText,
+  ) {
+    return createSymbolicator({
+      fetch: fakeFetch(() => {
+        throw new Error("Markup lookup must not fetch")
+      }),
+      readFile: (path) => {
+        reads.push(path)
+        return read(path)
+      },
+    }).resolve(
+      SourceLead.parse({
+        confidence: "none",
+        markup: {
+          url,
+          steps: [
+            { tag: "main", index: 0 },
+            { tag: "div", index: 0 },
+          ],
+          id: "picked",
+          className: "hero",
+          text: "Hello world",
+          onPickedElement: true,
+          ...identity,
+        },
+      }),
+      scope,
+    )
+  }
+
+  function expectedPosition() {
+    const prefix = html.slice(0, html.indexOf('<div id="picked"')).split("\n")
+    return { line: prefix.length, column: (prefix.at(-1)?.length ?? 0) + 1 }
+  }
+
+  test.each([
+    ["/second.html?x=1#y", "pages/second.html"],
+    ["/", "pages/index.html"],
+  ])("locates the opening tag in the served project file at %s", async (url, file) => {
+    expect(await resolveMarkup(`${pageOrigin}${url}`)).toEqual({
+      confidence: "exact",
+      framework: "html",
+      component: null,
+      file,
+      ...expectedPosition(),
+    })
+  })
+
+  test("a proxied page keeps no-framework and does not read markup", async () => {
+    scope.folderRoot = null
+    scope.upstream = "http://127.0.0.1:5173"
+    expect(await resolveMarkup()).toEqual({ confidence: "none", reason: "no-framework" })
+    expect(reads).toEqual([])
+  })
+
+  test.each([
+    "http://different.localhost/second.html",
+    `${pageOrigin}/missing.html`,
+    `${pageOrigin}/style.css`,
+    `${pageOrigin}/../secret.html`,
+    `${pageOrigin}/%2e%2e/secret.html`,
+    `${pageOrigin}/link.html`,
+    "invalid-url",
+  ])("refuses an unavailable or unserved HTML file without reading: %s", async (url) => {
+    await writeFile(join(scope.projectRoot, "secret.html"), html)
+    if (!scope.folderRoot) throw new Error("Missing folder root")
+    await symlink(join(scope.projectRoot, "secret.html"), join(scope.folderRoot, "link.html"))
+    expect(await resolveMarkup(url)).toEqual({ confidence: "none", reason: "no-frames-resolved" })
+    expect(reads).toEqual([])
+  })
+
+  test.each(["outside", "dist", "build", "node_modules"])(
+    "rejects a served folder in %s before reading",
+    async (directory) => {
+      scope.folderRoot = join(directory === "outside" ? workDir : scope.projectRoot, directory)
+      await mkdir(scope.folderRoot, { recursive: true })
+      await writeFile(join(scope.folderRoot, "second.html"), html)
+      expect(await resolveMarkup()).toEqual({ confidence: "none", reason: "outside-project" })
+      expect(reads).toEqual([])
+    },
+  )
+
+  test("an unreadable served file resolves no-frames-resolved", async () => {
+    expect(await resolveMarkup(undefined, {}, async () => null)).toEqual({
+      confidence: "none",
+      reason: "no-frames-resolved",
+    })
+  })
+
+  test("a file above the parse cap is file-only without coordinates", async () => {
+    if (!scope.folderRoot) throw new Error("Missing folder root")
+    await writeFile(join(scope.folderRoot, "second.html"), html + " ".repeat(512 * 1024))
+    expect(await resolveMarkup()).toEqual({
+      confidence: "file-only",
+      framework: "html",
+      component: null,
+      file: "pages/second.html",
+    })
+  })
+
+  test("the parse cap counts UTF-8 bytes", async () => {
+    if (!scope.folderRoot) throw new Error("Missing folder root")
+    await writeFile(join(scope.folderRoot, "second.html"), html + "é".repeat(256 * 1024))
+    expect(await resolveMarkup()).toEqual({
+      confidence: "file-only",
+      framework: "html",
+      component: null,
+      file: "pages/second.html",
+    })
+  })
+
+  test("an implied body with no located step is file-only", async () => {
+    if (!scope.folderRoot) throw new Error("Missing folder root")
+    await writeFile(join(scope.folderRoot, "second.html"), "<!doctype html><title>empty</title>")
+    expect(await resolveMarkup()).toEqual({
+      confidence: "file-only",
+      framework: "html",
+      component: null,
+      file: "pages/second.html",
+    })
+  })
+
+  const approximateIdentities: Partial<MarkupPath>[] = [
+    { className: "changed" },
+    { onPickedElement: false },
+    {
+      steps: [
+        { tag: "main", index: 0 },
+        { tag: "div", index: 0 },
+        { tag: "section", index: 0 },
+      ],
+    },
+  ]
+  test.each(approximateIdentities)(
+    "a mismatch or shadow pick resolves approximately at the deepest located node: %j",
+    async (identity) => {
+      expect(await resolveMarkup(undefined, identity)).toEqual({
+        confidence: "approximate",
+        framework: "html",
+        component: null,
+        file: "pages/second.html",
+        ...expectedPosition(),
+      })
+    },
+  )
+
+  test("markup is parsed afresh after a folder file changes", async () => {
+    if (!scope.folderRoot) throw new Error("Missing folder root")
+    const symbolicator = createSymbolicator({ fetch, readFile: readText })
+    const lead = SourceLead.parse({
+      confidence: "none",
+      markup: {
+        url: `${pageOrigin}/second.html`,
+        steps: [
+          { tag: "main", index: 0 },
+          { tag: "div", index: 0 },
+        ],
+        id: "picked",
+        className: "hero",
+        text: "Hello world",
+        onPickedElement: true,
+      },
+    })
+    expect(await symbolicator.resolve(lead, scope)).toMatchObject(expectedPosition())
+    await writeFile(join(scope.folderRoot, "second.html"), `\n${html}`)
+    expect(await symbolicator.resolve(lead, scope)).toMatchObject({
+      ...expectedPosition(),
+      line: expectedPosition().line + 1,
+    })
+  })
+})
 const cardSource = [
   "export function card(): string {",
   "  const before: number = 7",
