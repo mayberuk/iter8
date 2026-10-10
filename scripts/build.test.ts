@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, stat, unlink } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { ASSET_PREFIX, BUILD_OUTPUTS, buildOverlayBundles, compileBinary } from "./build"
@@ -130,6 +130,11 @@ test("the release entry point refuses a mismatched tag before building anything"
     version: string
   }
   const out = await standInRoot()
+  const overlay = join(repoRoot, BUILD_OUTPUTS.overlayDir, "overlay.js")
+  const overlayBefore = await stat(overlay).then(
+    (s) => s.mtimeMs,
+    () => null,
+  )
   const child = Bun.spawn(
     ["bun", join(repoRoot, "scripts/release.ts"), "--tag", "v9.9.9", "--out", out],
     { cwd: await standInRoot(), stdout: "pipe", stderr: "pipe" },
@@ -139,7 +144,9 @@ test("the release entry point refuses a mismatched tag before building anything"
   expect(stderr).toContain(`expected v${version}`)
   expect(stderr).not.toContain("Missing overlay entry")
   expect(await readdir(out)).toEqual([])
-  expect(await Bun.file(join(repoRoot, BUILD_OUTPUTS.overlayDir, "overlay.js")).exists()).toBe(
-    false,
+  const overlayAfter = await stat(overlay).then(
+    (s) => s.mtimeMs,
+    () => null,
   )
+  expect(overlayAfter).toBe(overlayBefore)
 })
