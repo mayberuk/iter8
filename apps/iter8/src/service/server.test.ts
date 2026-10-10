@@ -539,12 +539,12 @@ describe("request routing", () => {
 })
 
 describe("websockets", () => {
-  test("attach a live socket offering the page token to the page's live hub as iter8.v1", async () => {
+  test("attach a live socket offering the page token at the current protocol version", async () => {
     const { openServer, live } = await startDefault()
     const record = openServer(startUpstream("primary").url)
 
     const client = await connectLive(record)
-    expect(client.ws.protocol).toBe("iter8.v1")
+    expect(client.ws.protocol).toBe(`iter8.v${PROTOCOL_VERSION}`)
     await until("the socket to attach", () => live.size() === 1)
     live.push(record.page.id, { type: "draining" })
     await until("the pushed message", () => client.messages.length > 0)
@@ -586,7 +586,7 @@ describe("websockets", () => {
     ]
     for (const refusal of refusals) await expect(refusal()).rejects.toThrow()
     expect(live.size()).toBe(0)
-    expect((await connectLive(record)).ws.protocol).toBe("iter8.v1")
+    expect((await connectLive(record)).ws.protocol).toBe(`iter8.v${PROTOCOL_VERSION}`)
   })
 
   test("deliver a push to every live socket of its page and none of another page, and keep the rest when one closes", async () => {

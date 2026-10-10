@@ -1,6 +1,6 @@
 {
   "outcome": "accepted",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "serviceVersion": "0.1.0",
   "machineId": "devbox-7f3a91c2",
   "machineName": "devbox",

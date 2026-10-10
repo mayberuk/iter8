@@ -30,6 +30,7 @@ const Queued = {
   queuedAt: z.iso.datetime(),
   idempotencyKey: IdempotencyKey,
   requeuedAt: z.iso.datetime().optional(),
+  sendNowAt: z.iso.datetime().optional(),
 }
 
 export const RoundState = z.discriminatedUnion("stage", [

@@ -29,6 +29,9 @@ const routeFixtures = Object.entries(protocol.OVERLAY_ROUTES).flatMap(([route, s
     .filter((schema) => schema !== null)
     .map((schema) => `${nameOf(schema, `OVERLAY_ROUTES.${route}`)}.json`),
 )
+const agentRouteFixtures = Object.entries(protocol.AGENT_ROUTES).flatMap(([route, spec]) =>
+  [spec.request, spec.response].map((schema) => `${nameOf(schema, `AGENT_ROUTES.${route}`)}.json`),
+)
 const messageFixtures = [
   ...protocol.ServerMessage.options.map(
     (option) => `ServerMessage.${option.shape.type.value}.json`,
@@ -49,6 +52,18 @@ const namedVariants: Record<string, unknown> = {
   "Pairing.gone.json": { state: { status: "gone" } },
   "Round.orphaned.json": { state: { stage: "orphaned" } },
   "Round.queued.json": { state: { stage: "queued" } },
+  "Round.send-now.json": {
+    state: { stage: "queued", sendNowAt: "2026-10-09T18:35:00.000Z" },
+  },
+  "ConversationMessage.user.json": { author: { kind: "user" } },
+  "ConversationMessage.page.json": { author: { kind: "page", delivery: { status: "queued" } } },
+  "ConversationMessage.failed.json": {
+    author: { kind: "page", delivery: { status: "failed", reason: "session-gone" } },
+  },
+  "ChatSetting.unreachable.json": { reachable: false },
+  "PostMessageResult.refused.json": { outcome: "refused" },
+  "SendNowResult.refused.json": { outcome: "refused" },
+  "AgentWaitResult.timeout.json": { outcome: "timeout" },
   "HelloResult.refused.json": { outcome: "refused" },
   "SendResult.refused.json": { outcome: "refused" },
   "AttachResult.refused.json": { outcome: "refused" },
@@ -72,6 +87,7 @@ test("a schema missing from the exports fails by where it is used", () => {
 
 for (const required of new Set([
   ...routeFixtures,
+  ...agentRouteFixtures,
   ...messageFixtures,
   ...cliFixtures,
   ...degradedFixtures,

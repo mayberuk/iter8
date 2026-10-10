@@ -2,7 +2,7 @@
   "state": "ready",
   "version": "0.1.0",
   "build": "644f7a9",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "schemaVersion": 1,
   "machineId": "devbox-7f3a91c2",
   "machineName": "devbox",

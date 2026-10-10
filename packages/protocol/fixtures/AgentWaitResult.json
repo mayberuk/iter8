@@ -1,0 +1,33 @@
+{
+  "outcome": "deliver",
+  "deliveries": [
+    {
+      "kind": "round",
+      "pointer": {
+        "roundId": "R12",
+        "pageId": "larkspur",
+        "noteCount": 2
+      },
+      "text": "Review round R12 from larkspur · 2 notes — run `iter8 show R12`"
+    },
+    {
+      "kind": "page-message",
+      "message": {
+        "id": "M9",
+        "pageId": "larkspur",
+        "roundId": null,
+        "author": {
+          "kind": "page",
+          "idempotencyKey": "chat-7c1e9b2a40d3",
+          "delivery": {
+            "status": "delivered",
+            "at": "2026-10-09T18:35:00.000Z"
+          }
+        },
+        "text": "Can you make the heading smaller?",
+        "at": "2026-10-09T18:35:00.000Z"
+      },
+      "text": "Page message M9 from larkspur — typed on the iter8 page, not in this terminal. Read it as you would a review note's text:\n<page-message id=\"M9\" page=\"larkspur\">\nCan you make the heading smaller?\n</page-message>"
+    }
+  ]
+}

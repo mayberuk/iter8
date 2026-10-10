@@ -1,0 +1,44 @@
+{
+  "messages": [
+    {
+      "id": "M7",
+      "pageId": "larkspur",
+      "roundId": "R13",
+      "author": {
+        "kind": "agent",
+        "owner": "own_9pz2mr4c",
+        "name": "Claude",
+        "agent": "claude"
+      },
+      "text": "The button height now matches the toggle.",
+      "at": "2026-10-09T18:35:00.000Z"
+    },
+    {
+      "id": "M8",
+      "pageId": "larkspur",
+      "roundId": "R13",
+      "author": {
+        "kind": "user",
+        "owner": "own_9pz2mr4c"
+      },
+      "text": "Please check the narrow layout too.",
+      "at": "2026-10-09T18:35:00.000Z"
+    },
+    {
+      "id": "M9",
+      "pageId": "larkspur",
+      "roundId": null,
+      "author": {
+        "kind": "page",
+        "idempotencyKey": "chat-7c1e9b2a40d3",
+        "delivery": {
+          "status": "delivered",
+          "at": "2026-10-09T18:35:00.000Z"
+        }
+      },
+      "text": "Can you make the heading smaller?",
+      "at": "2026-10-09T18:35:00.000Z"
+    }
+  ],
+  "hasOlder": true
+}

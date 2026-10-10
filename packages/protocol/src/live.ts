@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { ChatSetting, ConversationMessage } from "./conversation"
 import { NoteId } from "./ids"
 import { Note } from "./note"
 import { HttpUrl, Port } from "./page"
@@ -9,6 +10,8 @@ export const ServerMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("pairing"), pairing: Pairing.nullable() }),
   /** The full round, which also carries every note's done or answered change. */
   z.object({ type: z.literal("round"), round: Round }),
+  z.object({ type: z.literal("message"), message: ConversationMessage }),
+  z.object({ type: z.literal("chat"), chat: ChatSetting }),
   /** An agent's note, added or updated. */
   z.object({ type: z.literal("agent-note"), note: Note }),
   z.object({ type: z.literal("agent-note-removed"), noteId: NoteId }),

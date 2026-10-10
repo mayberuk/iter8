@@ -1,0 +1,8 @@
+{
+  "type": "chat",
+  "chat": {
+    "enabled": true,
+    "defaultEnabled": true,
+    "reachable": true
+  }
+}
