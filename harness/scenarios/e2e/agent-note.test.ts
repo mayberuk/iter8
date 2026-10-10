@@ -12,7 +12,6 @@ import { startBuiltService } from "./steps"
 
 const UI_TIMEOUT_MS = 10_000
 const CARD = '[data-source-target="card"]'
-const CARD_TEXT = "Card in static"
 const PIN_REACH_PX = 24
 
 async function teardown(steps: (() => Promise<unknown> | undefined)[]): Promise<void> {
@@ -65,8 +64,6 @@ test("an agent's note is pinned on its element with the agent's avatar and body,
         pinnedBody,
         "--at",
         CARD,
-        "--text",
-        CARD_TEXT,
         "--json",
       ])
     ).json(AgentNoteResult)
