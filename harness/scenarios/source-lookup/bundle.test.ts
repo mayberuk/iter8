@@ -1,17 +1,33 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
-import { SOURCE_BUNDLE_PATH } from "@iter8/protocol"
+import { SOURCE_BUNDLE_PATH, type SourceLead } from "@iter8/protocol"
 import type { Browser, Page } from "playwright"
 import type { lookupSource } from "../../../packages/source/src/index"
 import { buildOverlayBundles } from "../../../scripts/build"
 import { launchChromium } from "../../rig/browser"
 import { type RunningFixture, startFixture } from "../../rig/fixtures"
 import { type RunningService, startService } from "../../rig/service"
-import { lookupInPage, resolveInPage, startSourceRig } from "./lookup"
+import { type LookupView, lookupInPage, resolveInPage, startSourceRig } from "./lookup"
 
 const CARD = '[data-source-target="card"]'
 const RIG_TIMEOUT_MS = 120_000
+
+const noFrameworkCard = (view: LookupView): SourceLead => ({
+  confidence: "none",
+  markup: {
+    url: view.page.url(),
+    steps: [
+      { tag: "main", index: 0 },
+      { tag: "section", index: 0 },
+      { tag: "p", index: 0 },
+    ],
+    id: null,
+    className: null,
+    text: "Card in static",
+    onPickedElement: true,
+  },
+})
 
 type Steps = NonNullable<Parameters<typeof startSourceRig>[0]>
 type Made = { outDir?: string; service?: RunningService; browser?: Browser }
@@ -108,7 +124,7 @@ test("a page with no supported framework gives a none lead that resolves as no-f
   const view = await rig.open(fixture)
   try {
     const lead = await lookupInPage(view, CARD)
-    expect(lead).toEqual({ confidence: "none" })
+    expect(lead).toEqual(noFrameworkCard(view))
     if ("rejected" in lead) throw new Error(`lookup rejected with ${lead.rejected}`)
     expect(await resolveInPage(view, lead)).toEqual({ confidence: "none", reason: "no-framework" })
   } finally {
@@ -121,7 +137,7 @@ test("importing the bundle and running a lookup leaves no trace on the host page
   try {
     const before = await hostTraces(view.page)
     expect(before.devtoolsHook).toBe(false)
-    expect(await lookupInPage(view, CARD)).toEqual({ confidence: "none" })
+    expect(await lookupInPage(view, CARD)).toEqual(noFrameworkCard(view))
     expect(await hostTraces(view.page)).toEqual(before)
   } finally {
     await view.close()
@@ -406,7 +422,7 @@ test("a lookup leaves the page's own Error.prepareStackTrace function in place",
       Reflect.set(window, "ownHandler", (_error: Error, frames: unknown[]) => frames.length)
       Error.prepareStackTrace = Reflect.get(window, "ownHandler")
     })
-    expect(await lookupInPage(view, CARD)).toEqual({ confidence: "none" })
+    expect(await lookupInPage(view, CARD)).toEqual(noFrameworkCard(view))
     expect(
       await view.page.evaluate(() => Error.prepareStackTrace === Reflect.get(window, "ownHandler")),
     ).toBe(true)

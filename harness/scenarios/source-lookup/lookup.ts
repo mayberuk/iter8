@@ -31,6 +31,8 @@ export async function startSourceRig(
   } = { build: buildOverlayBundles, start: startService, launch: launchChromium },
 ): Promise<{
   open(fixture: RunningFixture, path?: string): Promise<LookupView>
+  /** Runs `iter8 open <folder>` from `cwd`, so the folder is the project root only when `cwd` holds it. */
+  openFolder(folder: string, options: { cwd: string; path?: string }): Promise<LookupView>
   stop(): Promise<void>
 }> {
   const bundles = await scratchDir(`/tmp/iter8-w${WORKER}-source-bundles-`)
@@ -68,6 +70,27 @@ export async function startSourceRig(
     return { page, token, close }
   }
 
+  const openFolder = async (
+    folder: string,
+    options: { cwd: string; path?: string },
+  ): Promise<LookupView> => {
+    const run = await running.cli(["open", folder, "--json"], { cwd: options.cwd })
+    if (run.exitCode !== 0) {
+      throw new Error(`open ${folder} exited ${run.exitCode}:\n${run.stdout}${run.stderr}`)
+    }
+    const opened = run.json(OpenResult)
+    const fragment = new URLSearchParams(new URL(opened.landingUrl).hash.slice(1))
+    const { t: token } = LandingFragment.parse(Object.fromEntries(fragment))
+    const { page, close } = await newPage(browser)
+    try {
+      await page.goto(new URL(options.path ?? "/", opened.url).href)
+    } catch (error) {
+      await close()
+      throw error
+    }
+    return { page, token, close }
+  }
+
   const stop = async () => {
     try {
       await browser.close()
@@ -80,21 +103,25 @@ export async function startSourceRig(
     }
   }
 
-  return { open, stop }
+  return { open, openFolder, stop }
 }
 
-/** Imports the served source bundle into the page and looks up the first element `selector` matches. */
+/**
+ * Imports the served source bundle into the page and looks up the first element `selector`
+ * matches, in the open shadow root of the first element `within` matches when it is given.
+ */
 export async function lookupInPage(
   view: LookupView,
   selector: string,
-  options: { abortAfterMs?: number } = {},
+  options: { abortAfterMs?: number; within?: string } = {},
 ): Promise<SourceLead | { rejected: string }> {
   const outcome = await view.page.evaluate(
-    async ({ bundlePath, selector, abortAfterMs }) => {
+    async ({ bundlePath, selector, abortAfterMs, within }) => {
       const bundle: { lookupSource: typeof lookupSource } = await import(
         new URL(bundlePath, location.origin).href
       )
-      const element = document.querySelector(selector)
+      const scope = within === undefined ? document : document.querySelector(within)?.shadowRoot
+      const element = scope?.querySelector(selector) ?? null
       if (element === null) throw new Error(`No element matches ${selector}`)
       const controller = new AbortController()
       const timer =
@@ -107,7 +134,12 @@ export async function lookupInPage(
         clearTimeout(timer)
       }
     },
-    { bundlePath: SOURCE_BUNDLE_PATH, selector, abortAfterMs: options.abortAfterMs },
+    {
+      bundlePath: SOURCE_BUNDLE_PATH,
+      selector,
+      abortAfterMs: options.abortAfterMs,
+      within: options.within,
+    },
   )
   return "rejected" in outcome ? { rejected: outcome.rejected } : SourceLead.parse(outcome.lead)
 }
