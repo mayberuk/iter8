@@ -72,7 +72,8 @@ export async function upgradeBridged(
   let data: BridgeSocketData | undefined
   try {
     upstream = await openUpstream(
-      new URL(pathname + search, upstreamUrl),
+      // Concatenated, not resolved: a path starting with `//` would otherwise name another host.
+      new URL(`${new URL(upstreamUrl).origin}${pathname}${search}`),
       protocols,
       upstreamHeaders,
       backlog,

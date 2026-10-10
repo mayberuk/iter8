@@ -529,3 +529,24 @@ describe("close codes", () => {
     }
   })
 })
+
+test.each([
+  ["a double slash", (port: number) => `//127.0.0.1:${port}/x?q=1`],
+  ["a triple slash", (port: number) => `///127.0.0.1:${port}/x?q=1`],
+  ["a backslash", (port: number) => `/\\127.0.0.1:${port}/x?q=1`],
+  ["an encoded double slash", (port: number) => `/%2F%2F127.0.0.1:${port}/x?q=1`],
+])("a path with %s cannot move the upstream socket to another host", async (_name, pathFor) => {
+  const upstream = startUpstream()
+  const elsewhere = startUpstream()
+  const elsewherePort = Number(new URL(elsewhere.url).port)
+  const bridge = startBridge(upstream.url)
+  const sent = pathFor(elsewherePort)
+  const client = connect(bridge.port, sent, ["vite-hmr"])
+  await client.opened
+  await until("the first upstream frame", () => client.received.length > 0)
+
+  const expectedPath = new URL(`ws://127.0.0.1:${bridge.port}${sent}`).pathname
+  expect(client.received[0]).toBe(`0 ${expectedPath}?q=1`)
+  expect(upstream.offered).toHaveLength(1)
+  expect(elsewhere.offered).toEqual([])
+})

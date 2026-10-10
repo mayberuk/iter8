@@ -454,11 +454,24 @@ describe("request forwarding", () => {
     expect(seen[0]?.headers.referer).toBe("https://elsewhere.example/a")
   })
 
-  test("a path that starts with // stays on the upstream", async () => {
+  test.each([
+    ["a double slash", (port: string) => `//127.0.0.1:${port}/x?q=1`],
+    ["a triple slash", (port: string) => `///127.0.0.1:${port}/x?q=1`],
+    ["a backslash", (port: string) => `/\\127.0.0.1:${port}/x?q=1`],
+    ["an encoded double slash", (port: string) => `/%2F%2F127.0.0.1:${port}/x?q=1`],
+  ])("a path with %s stays on the upstream", async (_name, pathFor) => {
     const { origin, seen, target } = upstream(() => new Response("ok"))
-    await proxyHttp(pageRequest("//evil.example/x"), target, deps)
+    const elsewhere = upstream(() => new Response("elsewhere"))
+    const sent = pageRequest(pathFor(new URL(elsewhere.origin).port))
+    await proxyHttp(sent, target, deps)
+    expect(elsewhere.seen).toEqual([])
     expect(seen).toHaveLength(1)
-    expect(new URL(seen[0]?.url ?? "").origin).toBe(origin)
+    const received = new URL(seen[0]?.url ?? "")
+    expect(received.origin).toBe(origin)
+    // Bun's fetch collapses a leading run of slashes, so only the host is pinned, not the slash count.
+    expect(`${received.pathname}${received.search}`.replace(/^\/+/, "/")).toBe(
+      `${new URL(sent.url).pathname}${new URL(sent.url).search}`.replace(/^\/+/, "/"),
+    )
   })
 })
 

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { Capture, NoteId, OwnerId, ShowResult } from "@iter8/protocol"
+import { Capture, Intent, NoteId, OwnerId, ShowResult } from "@iter8/protocol"
 import fc from "fast-check"
 import { renderShow } from "./render-show"
 
@@ -450,6 +450,77 @@ test.each([
   for (const run of body.matchAll(/`+/g)) {
     expect(run[0].length).toBeLessThan(bodies[0]?.fenceLength ?? 0)
   }
+})
+
+test("an empty authored body still gets its own empty fence under the heading", () => {
+  const show = example()
+  const note = show.notes[0]!
+  note.authored.body = ""
+  const output = renderShow(show, new Map())
+  expect(output).toContain("## N3 — fix — Biruk\n\n```\n\n```\n\nTarget: element")
+  const { bodies, blocks } = splitFences(output)
+  expect(bodies).toEqual([{ text: "", fenceLength: 3 }])
+  expect(blocks).toHaveLength(1)
+})
+
+test.each(Intent.options)("the heading names the %s intent", (intent) => {
+  const show = example()
+  show.notes[0]!.authored.intent = intent
+  expect(renderShow(show, new Map())).toContain(`## N3 — ${intent} — Biruk\n`)
+})
+
+test("present but empty captured strings stay empty rather than becoming none", () => {
+  const show = example()
+  show.notes[0]!.untrustedCapture = Capture.parse({
+    ...show.notes[0]!.untrustedCapture,
+    landmark: "",
+    surroundingText: "",
+    computedStyles: {},
+    consoleErrors: [],
+  })
+  const block = splitFences(renderShow(show, new Map())).blocks[0]!
+  expect(block.text).toContain("Landmark: \nSurrounding text: \nComputed styles:\n  none\n")
+  expect(block.text).toContain("Console errors:\n  none\n")
+})
+
+test.each([
+  [1, 3],
+  [2, 3],
+  [3, 4],
+  [5, 6],
+  [8, 9],
+])("a captured run of %d backticks gets a fence of %d, and so does a body run", (run, fence) => {
+  const show = example()
+  const note = show.notes[0]!
+  note.authored.body = `before ${"`".repeat(run)} after`
+  note.untrustedCapture = Capture.parse({
+    ...note.untrustedCapture,
+    landmark: `x${"`".repeat(run)}y`,
+  })
+  const { bodies, blocks } = splitFences(renderShow(show, new Map()))
+  expect(blocks.map((block) => block.fenceLength)).toEqual([fence])
+  expect(bodies.map((body) => body.fenceLength)).toEqual([fence])
+})
+
+test("an exact lead shows its line and the confirmation wording, and an absent console source prints nothing extra", () => {
+  const show = example()
+  const capture = show.notes[0]!.untrustedCapture!
+  capture.sourceLead = {
+    confidence: "exact",
+    framework: "react",
+    component: "SaveButton",
+    file: "src/SaveButton.tsx",
+    line: 17,
+  }
+  capture.consoleErrors = [
+    { message: "no source here", at: "2026-10-09T12:00:00.000Z" },
+    { message: "with source", source: "app.js:3", at: "2026-10-09T12:00:01.000Z" },
+  ]
+  const text = splitFences(renderShow(show, new Map())).blocks[0]!.text
+  expect(text).toContain("Source lead: src/SaveButton.tsx:17 (exact) — a lead to confirm")
+  expect(text).toContain("  2026-10-09T12:00:00.000Z — no source here\n")
+  expect(text).toContain("  2026-10-09T12:00:01.000Z — with source (app.js:3)")
+  expect(text).not.toContain("undefined")
 })
 
 test("printed commands contain only ids", () => {
