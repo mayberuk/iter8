@@ -234,6 +234,45 @@ for (const forwardAddress of [undefined, SECOND_LOOPBACK]) {
   )
 }
 
+test("each -L forward reaches its own upstream, on the port and host it names", async () => {
+  const steps: (() => Promise<unknown>)[] = []
+  try {
+    const secondHost = unbindable === null ? SECOND_LOOPBACK : SERVICE_ADDRESS
+    const upstreams = [SERVICE_ADDRESS, secondHost].map((hostname, index) => {
+      const listener = Bun.listen({
+        hostname,
+        port: 0,
+        socket: {
+          data(socket) {
+            socket.write(`upstream-${index}`)
+          },
+        },
+      })
+      steps.push(async () => listener.stop(true))
+      return listener
+    })
+    const [first, second] = await ports(2)
+    const [one, two] = upstreams
+    const fake = ssh([
+      "-N",
+      "-L",
+      `${first}:${SERVICE_ADDRESS}:${one?.port}`,
+      "-L",
+      `${second}:${secondHost}:${two?.port}`,
+      "--",
+      HOST,
+    ])
+    steps.push(() => fake.stop())
+    await forwardReady(fake, SERVICE_ADDRESS, first ?? 0)
+    await forwardReady(fake, SERVICE_ADDRESS, second ?? 0)
+
+    expect(await exchange(SERVICE_ADDRESS, first ?? 0, "who", 10)).toBe("upstream-0")
+    expect(await exchange(SERVICE_ADDRESS, second ?? 0, "who", 10)).toBe("upstream-1")
+  } finally {
+    await teardown(steps)
+  }
+}, 30_000)
+
 test("an -R forward carries a unix-socket HTTP request from the remote path to the local one", async () => {
   const steps: (() => Promise<unknown>)[] = []
   try {
