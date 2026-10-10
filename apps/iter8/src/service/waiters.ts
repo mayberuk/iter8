@@ -1,6 +1,6 @@
 import type { OwnerId } from "@iter8/protocol"
 
-export type WaitOutcome = "woken" | "replaced" | "cancelled" | "timeout"
+type WaitOutcome = "woken" | "replaced" | "cancelled" | "timeout"
 
 export type Waiters = {
   arm(ownerId: OwnerId, timeoutMs: number): Promise<WaitOutcome>
