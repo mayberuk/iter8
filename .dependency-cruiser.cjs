@@ -36,7 +36,7 @@ module.exports = {
       name: "page-code-has-no-runtime-builtins",
       comment: "Page code runs in the browser, where Node and Bun runtime modules are unavailable.",
       severity: "error",
-      from: { path: "^(apps/overlay|packages/source)/" },
+      from: { path: "^(apps/overlay|packages/source)/", pathNot: "\\.test\\.tsx?$" },
       to: { dependencyTypes: ["core"] },
     },
     {
