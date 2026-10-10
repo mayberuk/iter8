@@ -37,6 +37,7 @@ import {
   TOKEN_HEADER,
   Whoami,
 } from "@iter8/protocol"
+import fc from "fast-check"
 import { createAgentNotes } from "../pages/agent-notes"
 import { createPages, type PageRecord } from "../pages/pages"
 import { createPrefs } from "../pages/prefs"
@@ -1198,6 +1199,69 @@ test("messages return the newest 30 in numeric order and page backwards without 
   ).toEqual({ messages: [], hasOlder: false })
 })
 
+test("a page of exactly limit messages with nothing older left reports hasOlder false", async () => {
+  const t = await setup()
+  for (let id = 1; id <= 6; id++) {
+    t.deps.inbox.conversation.post(
+      t.larkspur.page.id,
+      t.ownerA,
+      messageBody(`chat-key-${String(id).padStart(4, "0")}`, 1, `Message ${id}`),
+    )
+  }
+  const list = async (query: Record<string, string>) =>
+    MessagePage.parse(await (await t.call(R.listMessages, { query })).json())
+  const exact = await list({ before: "M6", limit: "5" })
+  expect<unknown>(exact.messages.map((message) => message.id)).toEqual([
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+  ])
+  expect(exact.hasOlder).toBe(false)
+  const short = await list({ before: "M6", limit: "4" })
+  expect<unknown>(short.messages.map((message) => message.id)).toEqual(["M2", "M3", "M4", "M5"])
+  expect(short.hasOlder).toBe(true)
+  const newest = await list({ limit: "6" })
+  expect(newest.messages).toHaveLength(6)
+  expect(newest.hasOlder).toBe(false)
+})
+
+test("property: listMessages pages ascending, never crosses pages and sets hasOlder exactly when an older message exists", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(fc.boolean(), { maxLength: 45 }),
+      fc.integer({ min: 1, max: 100 }),
+      fc.option(fc.integer({ min: 1, max: 50 }), { nil: null }),
+      async (onLarkspur, limit, beforeNumber) => {
+        const t = await setup()
+        const ours: number[] = []
+        onLarkspur.forEach((isOurs, index) => {
+          const page = isOurs ? t.larkspur : t.yarrow
+          const message = t.deps.inbox.conversation.post(
+            page.page.id,
+            t.ownerA,
+            messageBody(`chat-key-${String(index).padStart(4, "0")}`),
+          )
+          if (isOurs) ours.push(Number(message.id.slice(1)))
+        })
+        const query = {
+          limit: String(limit),
+          ...(beforeNumber === null ? {} : { before: `M${beforeNumber}` }),
+        }
+        const page = MessagePage.parse(await (await t.call(R.listMessages, { query })).json())
+        const eligible = ours.filter((number) => beforeNumber === null || number < beforeNumber)
+        const expected = eligible.slice(-limit)
+        const oldest = expected[0]
+        expect(page.messages.map((message) => Number(message.id.slice(1)))).toEqual(expected)
+        expect(page.messages.every((message) => message.pageId === t.larkspur.page.id)).toBe(true)
+        expect(page.hasOlder).toBe(oldest !== undefined && ours.some((number) => number < oldest))
+      },
+    ),
+    { numRuns: 60 },
+  )
+})
+
 test("invalid message queries and chat bodies answer 400 and store nothing", async () => {
   const t = await setup()
   const before = t.snapshot()
@@ -1290,6 +1354,127 @@ test("postMessage refusals follow pairing, generation, session, setting, then mo
   expect(live.sent.every((event) => event.type === "chat")).toBe(true)
   t.waiters.cancelAll()
   expect(await hookWait).toBe("cancelled")
+})
+
+test("property: postMessage stores each page and idempotency key at most once, however posts and retries interleave", async () => {
+  const post = fc.record({
+    onLarkspur: fc.boolean(),
+    key: fc.constantFrom("chat-key-0001", "chat-key-0002", "chat-key-0003"),
+    text: fc.string({ minLength: 1, maxLength: 20 }),
+    stale: fc.boolean(),
+  })
+  const step = fc.oneof(
+    fc
+      .array(post, { minLength: 1, maxLength: 3 })
+      .map((posts) => ({ kind: "posts" as const, posts })),
+    fc.boolean().map((enabled) => ({ kind: "chat" as const, enabled })),
+    fc.constant({ kind: "take" as const }),
+  )
+  await fc.assert(
+    fc.asyncProperty(fc.array(step, { minLength: 1, maxLength: 14 }), async (steps) => {
+      const t = await setup()
+      t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+      t.owners.pairPage(t.yarrow.page.id, t.ownerA)
+      const generationOf = (page: PageRecord) => {
+        const generation = t.pages.get(page.page.id)?.page.pairing?.generation
+        if (generation === undefined) throw new Error("Page lost its pairing")
+        return generation
+      }
+      const stored = new Map<string, string>()
+      const mods: Promise<unknown>[] = []
+      for (const next of steps) {
+        mods.push(t.waiters.armMod(t.ownerA, 60_000))
+        if (next.kind === "chat") {
+          await t.call(R.setChat, { body: { enabled: next.enabled } })
+        } else if (next.kind === "take") {
+          t.deps.inbox.conversation.takeQueued(t.ownerA)
+        } else {
+          const results = await Promise.all(
+            next.posts.map(async (request) => {
+              const page = request.onLarkspur ? t.larkspur : t.yarrow
+              const body = messageBody(
+                request.key,
+                generationOf(page) + (request.stale ? 1 : 0),
+                request.text,
+              )
+              return {
+                id: `${page.page.id}:${request.key}`,
+                result: await postMessage(t, body, page),
+              }
+            }),
+          )
+          for (const { id, result } of results) {
+            if (result.outcome === "refused") {
+              expect(stored.has(id)).toBe(false)
+            } else if (stored.has(id)) {
+              expect<unknown>(result.message.id).toBe(stored.get(id))
+            } else {
+              stored.set(id, result.message.id)
+            }
+          }
+        }
+        const rows = t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM messages").get()
+        expect(rows?.n).toBe(stored.size)
+        expect(new Set(stored.values()).size).toBe(stored.size)
+      }
+      t.waiters.cancelAll()
+      await Promise.allSettled(mods)
+    }),
+    { numRuns: 40 },
+  )
+})
+
+test("property: postMessage refuses in the order no-pairing, stale-generation, session-gone, chat-off, unreachable, after the stored-key check", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.record({
+        stored: fc.boolean(),
+        paired: fc.boolean(),
+        stale: fc.boolean(),
+        gone: fc.boolean(),
+        chatOn: fc.boolean(),
+        mod: fc.boolean(),
+      }),
+      async (c) => {
+        const t = await setup()
+        const pageId = t.larkspur.page.id
+        const seeded = c.stored
+          ? t.deps.inbox.conversation.post(
+              pageId,
+              t.ownerA,
+              messageBody("chat-key-0001", 1, "Seeded"),
+            )
+          : null
+        if (c.paired) t.owners.pairPage(pageId, t.ownerA)
+        if (c.gone) t.owners.end(sessionA.pid, sessionA.label, "other")
+        await t.call(R.setChat, { body: { enabled: c.chatOn } })
+        const waiting = c.mod ? t.waiters.armMod(t.ownerA, 60_000) : null
+        const refusals = [
+          [!c.paired, "no-pairing"],
+          [c.stale, "stale-generation"],
+          [c.gone, "session-gone"],
+          [!c.chatOn, "chat-off"],
+          [!c.mod, "unreachable"],
+        ] as const
+        const reason = c.stored ? undefined : refusals.find(([failed]) => failed)?.[1]
+        const before = t.snapshot()
+        const result = await postMessage(t, messageBody("chat-key-0001", c.stale ? 0 : 1, "Fresh"))
+        if (reason === undefined) {
+          expect(result.outcome).toBe("accepted")
+          if (result.outcome === "accepted") {
+            expect(result.message.text).toBe(seeded ? "Seeded" : "Fresh")
+          }
+        } else {
+          expect(result.outcome === "refused" && result.reason).toBe(reason)
+          expect(result.outcome === "refused" && result.pairing === null).toBe(!c.paired)
+        }
+        if (reason !== undefined || c.stored) expect(t.snapshot()).toEqual(before)
+        t.waiters.cancelAll()
+        await waiting
+      },
+    ),
+    { numRuns: 100 },
+  )
 })
 
 test("page chat reports reachable only for a paired living owner with a mod channel", async () => {

@@ -46,7 +46,7 @@ import { createInbox } from "../rounds/inbox"
 import { openStore, readOrCreateMachineId } from "../store/db"
 import { type ControlApp, createControlApi } from "./control-api"
 import { createLiveHub } from "./live"
-import { createWaiters, type Waiters } from "./waiters"
+import { createWaiters, MOD_GRACE_MS, type Waiters } from "./waiters"
 
 const databases: Database[] = []
 const directories: string[] = []
@@ -64,7 +64,7 @@ const projectRoot = "/home/biruk/dev/larkspur"
 const devServer = "http://localhost:5173"
 const cliPid = 9001
 
-function setup() {
+function setup(waiterNow?: () => number) {
   const db = openStore(":memory:")
   databases.push(db)
   const starts = new Map<number, string>([[cliPid, "linux:1:9001"]])
@@ -74,7 +74,7 @@ function setup() {
   const pages = createPages(db, {
     randomToken: () => PageToken.parse(`token${String(++tokens).padStart(40, "0")}`),
   })
-  const waiters = createWaiters()
+  const waiters = createWaiters(waiterNow)
   waiterSets.push(waiters)
   const live = createLiveHub()
   const listener = (owner: OwnerId) => (waiters.isArmed(owner) ? "armed" : "none")
@@ -266,6 +266,8 @@ async function until(label: string, condition: () => boolean, timeoutMs = 2000):
     await Bun.sleep(5)
   }
 }
+
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
 
 function pngBytes(width: number, height: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(33)
@@ -670,6 +672,170 @@ describe("agent control routes", () => {
       type: "chat",
       chat: { enabled: true, defaultEnabled: true, reachable: false },
     })
+  })
+
+  test.each(["clear", "resume"] as const)(
+    "hook end with %s keeps a queued page message queued and pushes no failed message",
+    async (reason) => {
+      const t = setup()
+      const session = await t.startSession(4821, "larkspur-session")
+      const { page } = await t.openServer(session)
+      const key = IdempotencyKey.parse("kept-chat")
+      const message = t.inbox.conversation.post(page.id, session.ownerId, {
+        generation: page.pairing?.generation ?? PairingGeneration.parse(0),
+        idempotencyKey: key,
+        text: "Still waiting",
+      })
+      const events = t.socket(page.id)
+      const response = await t.post("/hook/end", {
+        pid: session.pid,
+        label: session.label,
+        reason,
+      })
+      expect(response.status).toBe(200)
+      expect(t.owners.state(session.ownerId).status).not.toBe("gone")
+      expect(t.inbox.conversation.byKey(page.id, key)).toEqual(message)
+      expect(events.filter((event) => event.type === "message")).toEqual([])
+      const waited = await t.client.agent.wait.$get({
+        query: { owner: session.ownerId, timeoutSeconds: "1" },
+      })
+      expect(AgentWaitResult.parse(await waited.json())).toMatchObject({
+        outcome: "deliver",
+        deliveries: [{ kind: "page-message", messageId: message.id }],
+      })
+    },
+  )
+
+  test("a hook wait arms normally once MOD_GRACE_MS has passed since the mod wait ended", async () => {
+    let clock = Date.UTC(2026, 9, 10, 9, 0, 0)
+    const t = setup(() => clock)
+    const session = await t.startSession(4821, "larkspur-session")
+    const modWait = t.client.agent.wait.$get({
+      query: { owner: session.ownerId, timeoutSeconds: "25" },
+    })
+    await until("mod wait to arm", () => t.waiters.modAttached(session.ownerId))
+    t.waiters.cancelAll()
+    expect(await (await modWait).json()).toEqual({ outcome: "cancelled" })
+    const query = { pid: String(session.pid), timeoutSeconds: "0" }
+    const arm = spyOn(t.waiters, "arm")
+    try {
+      clock += MOD_GRACE_MS - 1
+      expect(await (await t.client.hook.wait.$get({ query })).json()).toEqual({
+        outcome: "replaced",
+      })
+      expect(arm).not.toHaveBeenCalled()
+      clock += 1
+      expect(await (await t.client.hook.wait.$get({ query })).json()).toEqual({
+        outcome: "timeout",
+      })
+      expect(arm).toHaveBeenCalledTimes(1)
+    } finally {
+      arm.mockRestore()
+    }
+  })
+
+  test.each([
+    ["busy", "busy"],
+    ["idle", "live"],
+  ] as const)(
+    "agent turn %s pushes a %s pairing to the owner's pages and to no other page",
+    async (turn, status) => {
+      const t = setup()
+      const session = await t.startSession(4821, "larkspur-session")
+      const { page } = await t.openServer(session)
+      const unpaired = await t.openServer(null, "http://localhost:5174")
+      if (turn === "idle") t.owners.setBusy(session.ownerId, true)
+      const events = t.socket(page.id)
+      const elsewhere = t.socket(unpaired.page.id)
+      const response = await t.client.agent.turn.$post({
+        json: { owner: session.ownerId, state: turn },
+      })
+      expect(response.status).toBe(200)
+      expect(events.filter((event) => event.type === "pairing")).toMatchObject([
+        {
+          type: "pairing",
+          pairing: {
+            owner: session.ownerId,
+            generation: page.pairing?.generation,
+            state: { status },
+          },
+        },
+      ])
+      expect(elsewhere).toEqual([])
+    },
+  )
+
+  const operations = [
+    "send",
+    "sendNow",
+    "busy",
+    "idle",
+    "prompt",
+    "stop",
+    "tool",
+    "hookWait",
+    "agentWait",
+  ] as const
+
+  test("property: a busy owner is handed a round pointer only by the prompt that pulls it or by Send now between tool calls", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.constantFrom(...operations), { minLength: 1, maxLength: 24 }),
+        async (sequence) => {
+          const t = setup()
+          const session = await t.startSession(4821, "larkspur-session")
+          const { page } = await t.openServer(session)
+          const owner = session.ownerId
+          const sent: Round["id"][] = []
+          const sentNow = new Set<Round["id"]>()
+          const waits: Promise<unknown>[] = []
+          const announced = () =>
+            sent.filter((id) => t.inbox.round(id)?.state.stage === "announced")
+          const turn = (state: "busy" | "idle") =>
+            t.client.agent.turn.$post({ json: { owner, state } })
+          const pid = session.pid
+          const run: Record<(typeof operations)[number], () => unknown> = {
+            send() {
+              sent.push(t.sendRound(page.id, "Check the heading").id)
+              t.waiters.wake(owner)
+            },
+            sendNow() {
+              const id = sent.findLast((candidate) => {
+                return t.inbox.round(candidate)?.state.stage === "queued"
+              })
+              if (id && t.inbox.sendNow(page.id, id)?.outcome === "accepted") sentNow.add(id)
+            },
+            busy: () => turn("busy"),
+            idle: () => turn("idle"),
+            prompt: () => t.post("/hook/prompt", { pid }),
+            stop: () => t.post("/hook/stop", { pid }),
+            tool: () => t.post("/hook/tool", { pid }),
+            hookWait() {
+              waits.push(
+                t.client.hook.wait.$get({ query: { pid: String(pid), timeoutSeconds: "25" } }),
+              )
+            },
+            agentWait() {
+              waits.push(t.client.agent.wait.$get({ query: { owner, timeoutSeconds: "25" } }))
+            },
+          }
+          for (const operation of sequence) {
+            const before = new Set(announced())
+            await run[operation]()
+            await settle()
+            const handed = announced().filter((id) => !before.has(id))
+            if (operation === "tool") {
+              expect(handed.filter((id) => !sentNow.has(id))).toEqual([])
+            } else if (operation !== "prompt" && t.owners.state(owner).status === "busy") {
+              expect(handed).toEqual([])
+            }
+          }
+          t.waiters.cancelAll()
+          await Promise.allSettled(waits)
+        },
+      ),
+      { numRuns: 40 },
+    )
   })
 })
 
