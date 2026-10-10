@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { OVERLAY_ROUTES, TOKEN_HEADER } from "@iter8/protocol"
+import { OVERLAY_ROUTES, Pairing, TOKEN_HEADER } from "@iter8/protocol"
 import type { Browser, Locator } from "playwright"
+import pairingJson from "../../../packages/protocol/fixtures/Pairing.json"
 import { launchChromium } from "../../rig/browser"
 import { fixtureDir } from "../../rig/fixtures"
 import type { Scratch } from "../../rig/scratch"
@@ -56,6 +57,10 @@ async function enterMarkup(o: Awaited<ReturnType<typeof open>>) {
 }
 
 async function surfaceBox(dialog: Locator) {
+  // The dialog springs into place as it opens, so a box read mid-slide misplaces every drag.
+  await dialog.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  )
   const box = await dialog.getByRole("img", { name: "Capture to mark up" }).boundingBox()
   if (!box) throw new Error("the drawing surface has no box")
   return box
@@ -365,7 +370,7 @@ describe("every tool is flattened into the saved image", () => {
     const fit = surface.width / REGION.width
     const at = (x: number, y: number) => ({ x: Math.floor(x / fit), y: Math.floor(y / fit) })
     const points = {
-      arrow: at(240, 253),
+      arrow: at(240, 250),
       highlighted: at(70, 55),
       plain: at(400, 20),
     }
@@ -410,4 +415,22 @@ test("the Add to round button opens the composer the same way Enter does", async
   expect(await o.overlay.getByRole("dialog", { name: "New note" }).innerText()).toContain(
     "Screenshot",
   )
+}, 30_000)
+
+test("the getting-started coach hides while Markup is open and returns once it closes", async () => {
+  const o = await openOverlay({
+    overlayDir: overlayBuild.path,
+    folder: STATIC,
+    browser,
+    mock: { pairing: Pairing.parse(pairingJson) },
+  })
+  opened = o
+  const coach = o.overlay.getByRole("dialog", { name: "Getting started" })
+  await until("the coach to show", () => coach.isVisible())
+  const dialog = await enterMarkup(o)
+  expect(await coach.isVisible()).toBe(false)
+  await dialog.getByRole("button", { name: /Add to round/ }).click({ timeout: 5000 })
+  await o.overlay.getByRole("img", { name: "Screenshot attached" }).waitFor({ timeout: 10_000 })
+  await o.page.keyboard.press("Escape")
+  await until("the coach to return", () => coach.isVisible())
 }, 30_000)

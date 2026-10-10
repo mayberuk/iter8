@@ -565,7 +565,8 @@ function Coach() {
     model.prefs.value.collapsed ||
     model.menu.value !== "none" ||
     model.paletteOpen.value ||
-    model.shortcutsOpen.value
+    model.shortcutsOpen.value ||
+    model.mode.value === "markup"
   const visible = armed && !covered
   const entry = COACH_STEPS[step]
 
