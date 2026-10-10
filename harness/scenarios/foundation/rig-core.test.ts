@@ -77,17 +77,15 @@ test("invalid worker ids and blocks reaching the ephemeral range are rejected", 
   expect(result.stdout.trim()).toBe("1")
 })
 
-test("pools and individual allocations share one consecutive block without repeating, then exhaust", async () => {
+test("pools and individual allocations share one consecutive block without repeating, then wrap", async () => {
   const result = await runAllocator(`
     const firstPool = await poolRange(4);
     const firstPort = await nextPort();
     const secondPool = await poolRange(4);
     const remaining = await Promise.all(Array.from({ length: 91 }, () => nextPort()));
-    let exhausted = "";
-    try { await nextPort(); } catch (error) { exhausted = error.message; }
-    let poolExhausted = "";
-    try { await poolRange(1); } catch (error) { poolExhausted = error.message; }
-    console.log(JSON.stringify({ firstPool, firstPort, secondPool, remaining, exhausted, poolExhausted }));
+    const wrapped = await nextPort();
+    const wrappedPool = await poolRange(3);
+    console.log(JSON.stringify({ firstPool, firstPort, secondPool, remaining, wrapped, wrappedPool }));
   `)
   expect(result.stderr).toBe("")
   expect(result.exitCode).toBe(0)
@@ -96,8 +94,8 @@ test("pools and individual allocations share one consecutive block without repea
     firstPort: number
     secondPool: string
     remaining: number[]
-    exhausted: string
-    poolExhausted: string
+    wrapped: number
+    wrappedPool: string
   }
   const first = 21000 + 100 * (WORKER - 1)
   expect(data.firstPool).toBe(`${first}-${first + 3}`)
@@ -105,21 +103,49 @@ test("pools and individual allocations share one consecutive block without repea
   expect(data.secondPool).toBe(`${first + 5}-${first + 8}`)
   expect(data.remaining).toEqual(Array.from({ length: 91 }, (_, index) => first + 9 + index))
   expect(new Set([data.firstPort, ...data.remaining]).size).toBe(92)
-  expect(data.exhausted).toContain("exhausted")
-  expect(data.exhausted).toContain(`worker ${WORKER}`)
-  expect(data.poolExhausted).toContain("exhausted")
+  expect(data.wrapped).toBe(first)
+  expect(data.wrappedPool).toBe(`${first + 1}-${first + 3}`)
 })
 
-test("occupied ports fail with their port and worker, and successful probes release their bind", async () => {
-  const port = await nextPort()
-  const server = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("held") })
+test("a pool never straddles the end of the block and is placed after wrapping instead", async () => {
+  const first = firstPortOf(116)
+  const result = await runAllocator(
+    `
+    const head = await poolRange(98);
+    const pool = await poolRange(5);
+    console.log(JSON.stringify({ head, pool }));
+  `,
+    "116",
+  )
+  expect(result.stderr).toBe("")
+  expect(result.exitCode).toBe(0)
+  expect(JSON.parse(result.stdout)).toEqual({
+    head: `${first}-${first + 97}`,
+    pool: `${first}-${first + 4}`,
+  })
+})
+
+test("allocation skips ports that are held and a pool needs a fully free run", async () => {
+  const held = await nextPort()
+  const server = Bun.serve({ hostname: "127.0.0.1", port: held, fetch: () => new Response("held") })
   try {
     const result = await runAllocator(`
-      try { await poolRange(100); } catch (error) { console.log(error.message); }
+      let failure = "";
+      try { await poolRange(100); } catch (error) { failure = error.message; }
+      const pool = await poolRange(3);
+      console.log(JSON.stringify({ failure, pool }));
     `)
+    expect(result.stderr).toBe("")
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain(`Port ${port}`)
-    expect(result.stdout).toContain(`worker ${WORKER}`)
+    const data = JSON.parse(result.stdout) as { failure: string; pool: string }
+    const first = firstPortOf(WORKER)
+    const block = `${first}-${first + 99}`
+    expect(data.failure).toBe(`Port block ${block} exhausted for worker ${WORKER}`)
+    const [start, end] = data.pool.split("-").map(Number) as [number, number]
+    expect(end - start).toBe(2)
+    expect(start).toBeGreaterThanOrEqual(first)
+    expect(end).toBeLessThanOrEqual(first + 99)
+    expect(held < start || held > end).toBe(true)
   } finally {
     await server.stop(true)
   }
@@ -144,22 +170,21 @@ test("child processes under two explicit worker ids allocate from disjoint block
   expect(firstPortOf(116) + 99).toBeLessThan(firstPortOf(117))
 })
 
-test("a pool of exactly the whole block succeeds and one port more is refused", async () => {
+test("a pool of exactly the whole block succeeds, the next port wraps and one port more is refused", async () => {
   const first = firstPortOf(116)
   const whole = await runAllocator(
     `
     const pool = await poolRange(100);
-    let after = "";
-    try { await nextPort(); } catch (error) { after = error.message; }
+    const after = await nextPort();
     console.log(JSON.stringify({ pool, after }));
   `,
     "116",
   )
   expect(whole.stderr).toBe("")
   expect(whole.exitCode).toBe(0)
-  const data = JSON.parse(whole.stdout) as { pool: string; after: string }
+  const data = JSON.parse(whole.stdout) as { pool: string; after: number }
   expect(data.pool).toBe(`${first}-${first + 99}`)
-  expect(data.after).toContain("exhausted")
+  expect(data.after).toBe(first)
 
   const oversized = await runAllocator(
     `
@@ -170,32 +195,90 @@ test("a pool of exactly the whole block succeeds and one port more is refused", 
     "116",
   )
   expect(oversized.exitCode).toBe(0)
-  expect(oversized.stdout).toContain("exhausted")
-  expect(oversized.stdout).toContain("worker 116")
+  expect(oversized.stdout.trim()).toBe(`Port block ${first}-${first + 99} exhausted for worker 116`)
 })
 
-test("nextPort fails naming the port and worker when its next candidate is held", async () => {
+test("nextPort skips a held port and cycles through the rest of the block", async () => {
   const held = await nextPort()
   const server = Bun.serve({ hostname: "127.0.0.1", port: held, fetch: () => new Response("held") })
   try {
     const result = await runAllocator(`
       const granted = [];
-      let failure = "";
-      for (let index = 0; index < 100 && failure === ""; index++) {
-        try { granted.push(await nextPort()); } catch (error) { failure = error.message; }
-      }
-      console.log(JSON.stringify({ granted, failure }));
+      for (let index = 0; index < 250; index++) granted.push(await nextPort());
+      console.log(JSON.stringify(granted));
     `)
     expect(result.stderr).toBe("")
     expect(result.exitCode).toBe(0)
-    const data = JSON.parse(result.stdout) as { granted: number[]; failure: string }
+    const granted = JSON.parse(result.stdout) as number[]
     const first = firstPortOf(WORKER)
-    expect(data.granted).toEqual(Array.from({ length: held - first }, (_, index) => first + index))
-    expect(data.failure).toContain(`Port ${held} `)
-    expect(data.failure).toContain(`worker ${WORKER}`)
+    const others = Array.from({ length: 100 }, (_, index) => first + index).filter(
+      (port) => port !== held,
+    )
+    expect(granted).toEqual(Array.from({ length: 250 }, (_, index) => others[index % 99] as number))
   } finally {
     await server.stop(true)
   }
+})
+
+test("a fully held block throws naming the block and worker, and a single free port is found repeatedly", async () => {
+  const worker = 117
+  const first = firstPortOf(worker)
+  const spare = first + 41
+  const servers = Array.from({ length: 100 }, (_, index) => first + index)
+    .filter((port) => port !== spare)
+    .map((port) => Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("held") }))
+  try {
+    const result = await runAllocator(
+      `
+      const granted = [await nextPort(), await nextPort(), await nextPort()];
+      console.log(JSON.stringify(granted));
+    `,
+      String(worker),
+    )
+    expect(result.stderr).toBe("")
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual([spare, spare, spare])
+
+    servers.push(
+      Bun.serve({ hostname: "127.0.0.1", port: spare, fetch: () => new Response("held") }),
+    )
+    const exhausted = await runAllocator(
+      `
+      const messages = [];
+      for (const attempt of [() => nextPort(), () => poolRange(1), () => poolRange(2)]) {
+        try { await attempt(); messages.push("granted"); } catch (error) { messages.push(error.message); }
+      }
+      console.log(JSON.stringify(messages));
+    `,
+      String(worker),
+    )
+    expect(exhausted.stderr).toBe("")
+    expect(exhausted.exitCode).toBe(0)
+    const message = `Port block ${first}-${first + 99} exhausted for worker ${worker}`
+    expect(JSON.parse(exhausted.stdout)).toEqual([message, message, message])
+  } finally {
+    await Promise.all(servers.map((server) => server.stop(true)))
+  }
+})
+
+test("a long run of allocate, bind and release cycles never exhausts the block", async () => {
+  const first = firstPortOf(116)
+  const result = await runAllocator(
+    `
+    const seen = new Set();
+    for (let cycle = 0; cycle < 250; cycle++) {
+      const port = await nextPort();
+      const server = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("ok") });
+      seen.add(port);
+      await server.stop(true);
+    }
+    console.log(JSON.stringify({ count: seen.size, min: Math.min(...seen), max: Math.max(...seen) }));
+  `,
+    "116",
+  )
+  expect(result.stderr).toBe("")
+  expect(result.exitCode).toBe(0)
+  expect(JSON.parse(result.stdout)).toEqual({ count: 100, min: first, max: first + 99 })
 })
 
 test("invalid pool sizes do not consume any ports", async () => {

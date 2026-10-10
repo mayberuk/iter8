@@ -7,11 +7,14 @@ import {
   LIVE_PATH,
   LiveSession,
   liveSubprotocols,
+  Note,
   OVERLAY_ROUTES,
   OverlayPrefs,
+  PageState,
   Pairing,
   PROTOCOL_VERSION,
   ServerMessage,
+  SOURCE_BUNDLE_PATH,
   SourceLead,
   TOKEN_HEADER,
 } from "@iter8/protocol"
@@ -30,8 +33,17 @@ const pairing = Pairing.parse(await sample("Pairing"))
 const liveSession = LiveSession.parse(await sample("LiveSession"))
 const sourceLead = SourceLead.parse(await sample("SourceLead"))
 const prefs = OverlayPrefs.parse(await sample("OverlayPrefs"))
+const gonePairing = Pairing.parse(await sample("Pairing.gone"))
+const seeded = PageState.parse(await sample("PageState"))
+const seededState = {
+  drafts: seeded.drafts,
+  rounds: seeded.rounds,
+  agentNotes: seeded.agentNotes,
+}
 
 const FONT = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3, 4])
+const OVERLAY_SCRIPT = "export function mount() { return () => {} }\n"
+const SOURCE_SCRIPT = "export function resolveSource() { return null }\n"
 const PNG_WIDTH = 640
 const PNG_HEIGHT = 360
 
@@ -54,7 +66,8 @@ beforeAll(async () => {
   overlayDir = overlay.path
   await mkdir(join(overlayDir, "fonts"))
   await Bun.write(join(overlayDir, "fonts/probe.woff2"), FONT)
-  await Bun.write(join(overlayDir, "overlay.js"), "export function mount() { return () => {} }\n")
+  await Bun.write(join(overlayDir, "overlay.js"), OVERLAY_SCRIPT)
+  await Bun.write(join(overlayDir, "source.js"), SOURCE_SCRIPT)
 })
 
 async function start(options: Partial<Parameters<typeof startMockService>[0]> = {}) {
@@ -84,6 +97,42 @@ async function api(method: string, path: string, { body, bytes, headers = {} }: 
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     ...(bytes === undefined ? {} : { body: bytes }),
   })
+}
+
+const idOf = (item: { id: string }): string => item.id
+const roundIdOf = (result: { outcome: string; round?: { id: string } }): string | null =>
+  result.outcome === "accepted" ? (result.round?.id ?? null) : null
+
+function bare(method: string, path: string, headers: Record<string, string> = {}, body?: unknown) {
+  return mock.app.request(mock.pageUrl(path), {
+    method,
+    headers: {
+      origin: mock.origin,
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+      ...headers,
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+}
+
+async function createNote(body: string) {
+  const response = await api("POST", OVERLAY_ROUTES.createDraft.path, {
+    body: { ...draftBody, body },
+  })
+  expect(response.status).toBe(201)
+  return Note.parse(await response.json())
+}
+
+async function hello(overrides: Record<string, unknown> = {}) {
+  const response = await api("POST", OVERLAY_ROUTES.hello.path, {
+    body: {
+      protocolVersion: PROTOCOL_VERSION,
+      pageId: mock.pageId,
+      machineId: mock.machineId,
+      ...overrides,
+    },
+  })
+  return OVERLAY_ROUTES.hello.response.parse(await response.json())
 }
 
 async function createDraft() {
@@ -204,6 +253,40 @@ describe("overlay routes", () => {
     expect(mock.draft()).toEqual([])
   })
 
+  test("a request with the page token absent or wrong is refused and changes nothing", async () => {
+    await start()
+    const before = mock.prefs()
+    const wrongTokens = ["x".repeat(43), mock.token.slice(0, -1), `${mock.token}x`]
+    for (const [name, route] of Object.entries(OVERLAY_ROUTES)) {
+      const path = withParams(route.path)
+      const body = route.method === "GET" || route.method === "DELETE" ? undefined : draftBody
+      const absent = await bare(route.method, path, {}, body)
+      expect({ name, status: absent.status }).toEqual({ name, status: 401 })
+      for (const token of wrongTokens) {
+        const wrong = await bare(route.method, path, { [TOKEN_HEADER]: token }, body)
+        expect({ name, token, status: wrong.status }).toEqual({ name, token, status: 401 })
+      }
+    }
+    const refusal = await bare(
+      "POST",
+      OVERLAY_ROUTES.hello.path,
+      {},
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        pageId: mock.pageId,
+        machineId: mock.machineId,
+      },
+    )
+    expect(OVERLAY_ROUTES.hello.response.parse(await refusal.json())).toEqual({
+      outcome: "refused",
+      reason: "bad-token",
+      expected: { protocolVersion: PROTOCOL_VERSION, machineId: mock.machineId },
+    })
+    expect(mock.draft()).toEqual([])
+    expect(mock.rounds()).toEqual([])
+    expect(mock.prefs()).toEqual(before)
+  })
+
   test("a same-origin GET without an Origin header is accepted only on Sec-Fetch-Site same-origin", async () => {
     await start()
     const unvouched = await mock.app.request(mock.pageUrl(OVERLAY_ROUTES.whoami.path), {
@@ -220,33 +303,161 @@ describe("overlay routes", () => {
     expect(crossSite.status).toBe(403)
   })
 
-  test("hello with another protocol version is refused as a version mismatch", async () => {
+  test("hello refuses a mismatched protocol version, machine id or page id", async () => {
     await start()
-    const response = await api("POST", OVERLAY_ROUTES.hello.path, {
-      body: {
-        protocolVersion: PROTOCOL_VERSION + 1,
-        pageId: mock.pageId,
-        machineId: mock.machineId,
-      },
-    })
-    expect(OVERLAY_ROUTES.hello.response.parse(await response.json())).toEqual({
+    const expected = { protocolVersion: PROTOCOL_VERSION, machineId: mock.machineId }
+    expect(await hello({ protocolVersion: PROTOCOL_VERSION + 1 })).toEqual({
       outcome: "refused",
       reason: "version-mismatch",
-      expected: { protocolVersion: PROTOCOL_VERSION, machineId: mock.machineId },
+      expected,
     })
+    expect(await hello({ machineId: `${mock.machineId}-other` })).toEqual({
+      outcome: "refused",
+      reason: "wrong-machine",
+      expected,
+    })
+    expect(await hello({ pageId: "otherpage" })).toEqual({
+      outcome: "refused",
+      reason: "unknown-page",
+      expected,
+    })
+    expect(await hello()).toMatchObject({ outcome: "accepted", machineId: mock.machineId })
   })
 
   test("hello returns the seeded page state", async () => {
-    await start({ liveSessions: [liveSession], prefs })
-    const response = await api("POST", OVERLAY_ROUTES.hello.path, {
-      body: { protocolVersion: PROTOCOL_VERSION, pageId: mock.pageId, machineId: mock.machineId },
-    })
-    const hello = OVERLAY_ROUTES.hello.response.parse(await response.json())
-    expect(hello).toMatchObject({
+    await start({ liveSessions: [liveSession], prefs, pageState: seededState })
+    const accepted = await hello()
+    expect(accepted).toMatchObject({
       outcome: "accepted",
-      page: { id: mock.pageId, origin: mock.origin, pairing: { owner: pairing.owner } },
-      state: { drafts: [], rounds: [], pairing, liveSessions: [liveSession], prefs },
+      page: {
+        id: mock.pageId,
+        origin: mock.origin,
+        pairing: { owner: pairing.owner, generation: pairing.generation },
+      },
     })
+    if (accepted.outcome !== "accepted") throw new Error("hello was refused")
+    expect(accepted.state).toEqual({
+      ...seededState,
+      pairing,
+      liveSessions: [liveSession],
+      prefs,
+    })
+
+    const drafts = await api("GET", OVERLAY_ROUTES.listDrafts.path)
+    expect(await drafts.json()).toEqual(seeded.drafts)
+    const rounds = await api("GET", OVERLAY_ROUTES.listRounds.path)
+    expect(await rounds.json()).toEqual([
+      expect.objectContaining({
+        id: "R12",
+        stage: "claimed",
+        noteCount: 2,
+        doneCount: 1,
+        answeredCount: 1,
+      }),
+      expect.objectContaining({
+        id: "R11",
+        stage: "orphaned",
+        noteCount: 1,
+        doneCount: 0,
+        answeredCount: 0,
+      }),
+    ])
+  })
+
+  test("new drafts and rounds continue after the highest seeded id of each kind", async () => {
+    const [seededDraft] = seeded.drafts
+    const [seededRound, orphanedRound] = seeded.rounds
+    const [agentNote] = seeded.agentNotes
+    if (!seededDraft || !seededRound || !orphanedRound || !agentNote) {
+      throw new Error("the PageState fixture lacks a draft, two rounds or an agent note")
+    }
+    const orphanedNote = orphanedRound.notes[0]
+    if (!orphanedNote) throw new Error("the orphaned round has no note")
+    const cases = [
+      {
+        name: "a draft",
+        nextNote: "N41",
+        pageState: { ...seededState, drafts: [{ ...seededDraft, id: "N40" }] },
+      },
+      {
+        name: "a round's note",
+        nextNote: "N51",
+        pageState: {
+          ...seededState,
+          rounds: [seededRound, { ...orphanedRound, notes: [{ ...orphanedNote, id: "N50" }] }],
+        },
+      },
+      {
+        name: "an agent note",
+        nextNote: "N61",
+        pageState: { ...seededState, agentNotes: [{ ...agentNote, id: "N60" }] },
+      },
+    ]
+    for (const { name, nextNote, pageState } of cases) {
+      await start({ pageState })
+      const note = await createNote("Fresh.")
+      expect({ name, id: idOf(note) }).toEqual({ name, id: nextNote })
+      const sent = await send([note.id])
+      expect({ name, round: roundIdOf(sent) }).toEqual({
+        name,
+        round: "R13",
+      })
+      expect(mock.rounds().map(idOf)).toEqual(["R12", "R11", "R13"])
+      await mock.stop()
+    }
+  })
+
+  test("setPairing changes what hello reports and how send is judged", async () => {
+    await start({ pageState: seededState })
+    const [seededDraft] = seeded.drafts
+    if (!seededDraft) throw new Error("the PageState fixture has no draft")
+
+    mock.setPairing(null)
+    const unpaired = await hello()
+    expect(unpaired).toMatchObject({ outcome: "accepted", page: { pairing: null } })
+    expect(unpaired.outcome === "accepted" && unpaired.state.pairing).toBeNull()
+    expect(await send([seededDraft.id])).toEqual({
+      outcome: "refused",
+      reason: "no-pairing",
+      pairing: null,
+    })
+
+    mock.setPairing(gonePairing)
+    const gone = await hello()
+    expect(gone).toMatchObject({
+      outcome: "accepted",
+      page: { pairing: { owner: gonePairing.owner, generation: gonePairing.generation } },
+    })
+    expect(gone.outcome === "accepted" && gone.state.pairing).toEqual(gonePairing)
+    expect(await send([seededDraft.id], { generation: gonePairing.generation })).toEqual({
+      outcome: "refused",
+      reason: "session-gone",
+      pairing: gonePairing,
+    })
+
+    const next = Pairing.parse({ ...pairing, owner: "own_replacement", generation: 3 })
+    mock.setPairing(next)
+    const repaired = await hello()
+    expect(repaired).toMatchObject({
+      outcome: "accepted",
+      page: { pairing: { owner: "own_replacement", generation: 3 } },
+    })
+    expect(repaired.outcome === "accepted" && repaired.state.pairing).toEqual(next)
+    expect(await send([seededDraft.id], { generation: pairing.generation })).toEqual({
+      outcome: "refused",
+      reason: "stale-generation",
+      pairing: next,
+    })
+
+    const accepted = await send([seededDraft.id], { generation: 3 })
+    expect(accepted).toMatchObject({
+      outcome: "accepted",
+      round: { id: "R13", owner: "own_replacement", notes: [seededDraft] },
+    })
+    const after = await hello()
+    if (after.outcome !== "accepted") throw new Error("hello was refused")
+    expect(after.state.drafts).toEqual([])
+    expect(after.state.rounds.map(idOf)).toEqual(["R12", "R11", "R13"])
   })
 
   test("sending twice with one idempotency key yields one round", async () => {
@@ -261,17 +472,51 @@ describe("overlay routes", () => {
     expect(mock.draft()).toEqual([])
   })
 
-  test("failNextSend refuses exactly the next send and keeps the drafts", async () => {
+  test("duplicate sends racing on one idempotency key yield one round", async () => {
     await start()
     const noteId = await createDraft()
-    mock.failNextSend({ outcome: "refused", reason: "session-gone", pairing: null })
-    const refused = await send([noteId])
-    expect(refused).toEqual({ outcome: "refused", reason: "session-gone", pairing: null })
-    expect(mock.draft().map((note) => note.id)).toEqual([noteId])
-    expect(mock.rounds()).toEqual([])
-    const accepted = await send([noteId])
-    expect(accepted.outcome).toBe("accepted")
+    const key = crypto.randomUUID()
+    const results = await Promise.all(Array.from({ length: 6 }, () => send([noteId], { key })))
+    const firstResult = results[0]
+    if (!firstResult) throw new Error("no send result")
+    expect(firstResult.outcome).toBe("accepted")
+    for (const result of results) expect(result).toEqual(firstResult)
     expect(mock.rounds()).toHaveLength(1)
+    expect(mock.draft()).toEqual([])
+  })
+
+  test("sends with different idempotency keys yield different rounds", async () => {
+    await start()
+    const first = await send([await createDraft()])
+    const second = await send([await createDraft()])
+    expect(first.outcome).toBe("accepted")
+    expect(second.outcome).toBe("accepted")
+    expect(mock.rounds().map(idOf)).toEqual(["R1", "R2"])
+  })
+
+  test("failNextSend refuses exactly the next send and keeps every draft intact", async () => {
+    await start()
+    const first = await createNote("First.")
+    const second = await createNote("Second.")
+    const unrelated = await createNote("Unrelated.")
+    const refusal = { outcome: "refused", reason: "session-gone", pairing: null } as const
+    mock.failNextSend(refusal)
+    const key = crypto.randomUUID()
+
+    expect(await send([first.id, second.id], { key })).toEqual(refusal)
+    expect(mock.draft()).toEqual([first, second, unrelated])
+    expect(mock.rounds()).toEqual([])
+
+    const retried = await send([first.id, second.id], { key })
+    expect(retried).toMatchObject({
+      outcome: "accepted",
+      round: { notes: [first, second], state: { idempotencyKey: key } },
+    })
+    expect(mock.draft()).toEqual([unrelated])
+    expect(mock.rounds()).toHaveLength(1)
+
+    expect((await send([unrelated.id])).outcome).toBe("accepted")
+    expect(mock.rounds()).toHaveLength(2)
     expect(mock.draft()).toEqual([])
   })
 
@@ -343,6 +588,23 @@ describe("folder and assets", () => {
     expect(traversal.status).toBe(404)
   })
 
+  test("every file in the overlay directory is served under the asset prefix, source.js included", async () => {
+    await start()
+    const overlayScript = await mock.app.request(mock.pageUrl(`${ASSET_PREFIX}overlay.js`))
+    expect(overlayScript.status).toBe(200)
+    expect(overlayScript.headers.get("content-type")).toContain("javascript")
+    expect(await overlayScript.text()).toBe(OVERLAY_SCRIPT)
+
+    expect(SOURCE_BUNDLE_PATH).toBe(`${ASSET_PREFIX}source.js`)
+    const sourceScript = await mock.app.request(mock.pageUrl(SOURCE_BUNDLE_PATH))
+    expect(sourceScript.status).toBe(200)
+    expect(sourceScript.headers.get("content-type")).toContain("javascript")
+    expect(await sourceScript.text()).toBe(SOURCE_SCRIPT)
+
+    const missing = await mock.app.request(mock.pageUrl(`${ASSET_PREFIX}absent.js`))
+    expect(missing.status).toBe(404)
+  })
+
   test("an HTML page from the folder carries the boot script before its closing body tag", async () => {
     await start()
     const html = await (await mock.app.request(mock.pageUrl("/"))).text()
@@ -388,10 +650,20 @@ describe("live socket", () => {
     socket.close()
   })
 
-  test("a socket without the token subprotocol or from a foreign Origin is refused", async () => {
+  test("a socket without the full subprotocol pair or from a foreign Origin is refused", async () => {
     await start()
-    const [version] = liveSubprotocols(mock.token)
-    await expect(connect(mock.origin, [version ?? ""]).opened).rejects.toThrow("refused")
+    const [version = "", tokenProtocol = ""] = liveSubprotocols(mock.token)
+    const offers: Record<string, string[]> = {
+      "version only": [version],
+      "token only": [tokenProtocol],
+      "another version with the token": [`iter8.v${PROTOCOL_VERSION + 1}`, tokenProtocol],
+      "the version with a wrong token": [version, `iter8-token.${"x".repeat(43)}`],
+      "the version with a truncated token": [version, tokenProtocol.slice(0, -1)],
+      "the version with an extended token": [version, `${tokenProtocol}x`],
+    }
+    for (const [name, protocols] of Object.entries(offers)) {
+      await expect(connect(mock.origin, protocols).opened, name).rejects.toThrow("refused")
+    }
     await expect(
       connect("http://elsewhere.localhost:1", liveSubprotocols(mock.token)).opened,
     ).rejects.toThrow("refused")
