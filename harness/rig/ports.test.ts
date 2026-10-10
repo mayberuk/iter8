@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { WORKER } from "./ports"
+import { portBlock, WORKER } from "./ports"
 import { scratchDir } from "./scratch"
 
 const portsModule = new URL("./ports.ts", import.meta.url).href
-const FIRST = 21000
+const FIRST = portBlock(WORKER).first
 
 async function withClaimsDir<T>(run: (claims: string) => Promise<T>): Promise<T> {
   const scratch = await scratchDir(`/tmp/iter8-w${WORKER}-claims-`)
@@ -36,7 +36,7 @@ function allocator(claims: string, code: string) {
       `const { nextPort, poolRange } = await import(${JSON.stringify(portsModule)}); ${code}`,
     ],
     {
-      env: { ...process.env, BUN_TEST_WORKER_ID: "1", ITER8_PORT_CLAIMS_DIR: claims },
+      env: { ...process.env, BUN_TEST_WORKER_ID: String(WORKER), ITER8_PORT_CLAIMS_DIR: claims },
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
