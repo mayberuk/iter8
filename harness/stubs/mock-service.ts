@@ -1,7 +1,9 @@
 import { extname, join, resolve, sep } from "node:path"
 import {
   ASSET_PREFIX,
+  ChatSetting,
   ClientMessage,
+  ConversationMessage,
   LIVE_PATH,
   LiveSessionList,
   liveSubprotocols,
@@ -140,6 +142,8 @@ export async function startMockService(options: MockServiceOptions) {
     ...seeded.rounds.flatMap((round) => round.notes.map((note) => note.id)),
   ])
   let roundCounter = nextNumber(seeded.rounds.map((round) => round.id))
+  const messages: ConversationMessage[] = []
+  let chatEnabled = true
   let sendFailure: z.output<typeof SendRefusal> | null = null
   const sockets = new Map<unknown, WSContext>()
   const requests: RecordedRequest[] = []
@@ -151,6 +155,13 @@ export async function startMockService(options: MockServiceOptions) {
       origin,
       target: { kind: "folder", root: folder },
       pairing: pairing && { owner: pairing.owner, generation: pairing.generation },
+    })
+
+  const chat = () =>
+    ChatSetting.parse({
+      enabled: chatEnabled,
+      defaultEnabled: true,
+      reachable: pairing !== null && pairing.state.status !== "gone",
     })
 
   // Chromium omits Origin on a same-origin GET, so Sec-Fetch-Site vouches for the page instead.
@@ -334,6 +345,50 @@ export async function startMockService(options: MockServiceOptions) {
         })),
       ),
     )
+    .get(R.listMessages.path, () =>
+      reply(R.listMessages.response, { messages: [...messages], hasOlder: false }),
+    )
+    .post(R.postMessage.path, async (c) => {
+      const post = await parseBody(c, R.postMessage.request)
+      if (!post) return c.body(null, 400)
+      const stored = messages.find(
+        (message) =>
+          message.author.kind === "page" && message.author.idempotencyKey === post.idempotencyKey,
+      )
+      const message =
+        stored ??
+        ConversationMessage.parse({
+          id: `M${nextNumber(messages.map((message) => message.id))}`,
+          pageId,
+          roundId: null,
+          author: {
+            kind: "page",
+            idempotencyKey: post.idempotencyKey,
+            delivery: { status: "queued" },
+          },
+          text: post.text,
+          at: now(),
+        })
+      if (!stored) messages.push(message)
+      return reply(R.postMessage.response, { outcome: "accepted", message })
+    })
+    .get(R.getChat.path, () => reply(R.getChat.response, chat()))
+    .put(R.setChat.path, async (c) => {
+      const toggle = await parseBody(c, R.setChat.request)
+      if (!toggle) return c.body(null, 400)
+      chatEnabled = toggle.enabled
+      return reply(R.setChat.response, chat())
+    })
+    .post(R.sendNow.path, (c) => {
+      const round = rounds.find((candidate) => candidate.id === c.req.param("roundId"))
+      if (!round) return c.body(null, 404)
+      if (round.state.stage !== "queued") {
+        return reply(R.sendNow.response, { outcome: "refused", reason: "not-waiting", round })
+      }
+      const sent = { ...round, state: { ...round.state, sendNowAt: now() } }
+      rounds = rounds.map((candidate) => (candidate.id === sent.id ? sent : candidate))
+      return reply(R.sendNow.response, { outcome: "accepted", round: sent })
+    })
     .post(R.uploadScreenshot.path, async (c) => {
       const bytes = new Uint8Array(await c.req.arrayBuffer())
       const size = pngSize(bytes)

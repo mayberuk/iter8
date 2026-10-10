@@ -24,7 +24,7 @@ import { createSymbolicator } from "../symbolicate/symbolicate"
 import { resolveOverlayDir } from "./assets"
 import { createControlApi } from "./control-api"
 import { createLiveHub } from "./live"
-import { createOverlayApi, type OverlayApiDeps, pagePairing } from "./overlay-api"
+import { createOverlayApi, type OverlayApiDeps, pageChat, pagePairing } from "./overlay-api"
 import { type RunningServer, startServer } from "./server"
 import { createWaiters } from "./waiters"
 
@@ -193,6 +193,13 @@ export async function runService(options: RunServiceOptions): Promise<void> {
       }
     }
 
+    const pushChat = (ownerId: OwnerId) => {
+      for (const pageId of owners.pagesOf(ownerId)) {
+        const record = pages.get(pageId)
+        if (record) live.push(pageId, { type: "chat", chat: pageChat(overlay, record) })
+      }
+    }
+
     const orphanRoundsOf = (ownerId: OwnerId) => {
       for (const round of inbox.orphanFor(ownerId)) {
         live.push(round.pageId, { type: "round", round })
@@ -203,8 +210,15 @@ export async function runService(options: RunServiceOptions): Promise<void> {
       try {
         for (const { ownerId, state: ownerState } of owners.sweep()) {
           pushPairing(ownerId)
-          if (ownerState.status === "gone") orphanRoundsOf(ownerId)
+          if (ownerState.status === "gone") {
+            orphanRoundsOf(ownerId)
+            for (const message of inbox.conversation.failQueued(ownerId)) {
+              live.push(message.pageId, { type: "message", message })
+            }
+            pushChat(ownerId)
+          }
         }
+        for (const ownerId of waiters.lapsedMods()) pushChat(ownerId)
       } catch (error) {
         logger.error({ err: error }, "liveness sweep failed")
       }

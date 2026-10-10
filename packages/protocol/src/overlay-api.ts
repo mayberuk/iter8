@@ -1,6 +1,14 @@
 import { z } from "zod"
 import { Screenshot } from "./capture"
 import {
+  ChatSetting,
+  ChatToggle,
+  MessagePage,
+  PostMessageRequest,
+  PostMessageResult,
+  SendNowResult,
+} from "./conversation"
+import {
   IdempotencyKey,
   MachineId,
   NoteId,
@@ -177,6 +185,36 @@ export const OVERLAY_ROUTES = {
     path: `${OVERLAY_PREFIX}/rounds`,
     request: null,
     response: RoundSummaryList,
+  },
+  listMessages: {
+    method: "GET",
+    path: `${OVERLAY_PREFIX}/messages`,
+    request: null,
+    response: MessagePage,
+  },
+  postMessage: {
+    method: "POST",
+    path: `${OVERLAY_PREFIX}/messages`,
+    request: PostMessageRequest,
+    response: PostMessageResult,
+  },
+  getChat: {
+    method: "GET",
+    path: `${OVERLAY_PREFIX}/chat`,
+    request: null,
+    response: ChatSetting,
+  },
+  setChat: {
+    method: "PUT",
+    path: `${OVERLAY_PREFIX}/chat`,
+    request: ChatToggle,
+    response: ChatSetting,
+  },
+  sendNow: {
+    method: "POST",
+    path: `${OVERLAY_PREFIX}/rounds/:roundId/now`,
+    request: null,
+    response: SendNowResult,
   },
   uploadScreenshot: {
     method: "POST",

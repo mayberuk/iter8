@@ -24,7 +24,7 @@ export const CliCommand = z.enum([
 ])
 export type CliCommand = z.infer<typeof CliCommand>
 
-export const HookCommand = z.enum(["start", "prompt", "stop", "wait", "end"])
+export const HookCommand = z.enum(["start", "prompt", "stop", "wait", "end", "tool"])
 export type HookCommand = z.infer<typeof HookCommand>
 
 export const HookSource = z.enum(["startup", "resume", "clear", "compact"])
@@ -236,6 +236,13 @@ export const CLI_SURFACE = {
   },
   "hook prompt": {
     summary: "Mark the process busy and print pointer lines for its next turn on stdout",
+    positionals: [],
+    flags: [pidFlag],
+    output: null,
+    owner: HOOK_OWNER,
+  },
+  "hook tool": {
+    summary: "Print pointer lines for rounds sent now, for a session between tool calls",
     positionals: [],
     flags: [pidFlag],
     output: null,

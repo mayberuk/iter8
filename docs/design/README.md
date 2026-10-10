@@ -7,7 +7,7 @@ Copied from the cc-plugins brainstorm on 2026-10-09; these copies are now the so
 | `requirements.md` | The grilled requirements: hard constraints, dealbreakers, success and failure conditions |
 | `brainstorm.md` | Every decision with its rejected alternatives, the 13 review-forced decisions, research findings |
 | `handoff-brief.md` | The condensed brief planning starts from |
-| `sketches/overlay-reference.html` | The approved overlay design (open in a browser; light and dark) |
+| `sketches/overlay-reference.html` | The approved structure, layout and interaction reference (open in a browser; light and dark); Amended 2026-10-10: superseded on colour, type and icons by the iteration-2 decisions; warm values kept as the historical baseline for token tests |
 | `sketches/proof-direction.html` | The rejected "Proof" direction, source of the inspector path, history rows and health meter |
 | `review/` | The adversarial design review (Codex gpt-6.1-sol and Opus) and its resolutions |
 | `prior-art/` | reviewdesk's annotate system, which iter8 replaces |

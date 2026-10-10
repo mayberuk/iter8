@@ -15,10 +15,12 @@ import {
   type RoundStage,
   RoundState,
   RoundSummary,
+  type SendNowResult,
   type SendRequest,
   type SendResult,
 } from "@iter8/protocol"
 import { nextSequence } from "../store/db"
+import { type Conversation, createConversation } from "./conversation"
 import { nextRoundState, type RoundEvent } from "./round-state"
 
 export type InboxDeps = {
@@ -34,7 +36,9 @@ export type Inbox = {
   deleteDraft(pageId: PageId, noteId: NoteId): boolean
   /** Throws an error whose `cause` is `"not-found"` when a note id is not a draft of the page. */
   send(pageId: PageId, request: SendRequest): SendResult
-  pending(ownerId: OwnerId, label: string): RoundPointer[]
+  conversation: Conversation
+  pending(ownerId: OwnerId, label: string, only?: "send-now"): RoundPointer[]
+  sendNow(pageId: PageId, roundId: RoundId): SendNowResult | null
   announce(ownerId: OwnerId, label: string, roundIds: RoundId[]): void
   /** Null only for an unknown round; a round that cannot be claimed comes back unchanged. */
   claim(roundId: RoundId): Round | null
@@ -86,6 +90,7 @@ function noteFromRow(row: NoteRow): Note {
 
 export function createInbox(db: Database, deps: InboxDeps): Inbox {
   const at = () => deps.now().toISOString()
+  const conversation = createConversation(db, deps)
 
   const draftRows = db.query<NoteRow, [string]>(
     `SELECT ${NOTE_COLUMNS} FROM notes WHERE page_id = ? AND kind = 'draft' ORDER BY ordinal`,
@@ -144,6 +149,7 @@ export function createInbox(db: Database, deps: InboxDeps): Inbox {
     `json_extract(state_json, '$.stage') IN (${stages.map((stage) => `'${stage}'`).join(", ")})`
 
   return {
+    conversation,
     drafts(pageId) {
       return draftRows.all(pageId).map(noteFromRow)
     },
@@ -255,13 +261,31 @@ export function createInbox(db: Database, deps: InboxDeps): Inbox {
       return { outcome: "accepted", round }
     }),
 
-    pending(ownerId, label) {
+    sendNow: db.transaction((pageId: PageId, roundId: RoundId): SendNowResult | null => {
+      const round = readRound(roundId)
+      if (!round || round.pageId !== pageId) return null
+      if (!deps.pairing(pageId)) return { outcome: "refused", reason: "no-pairing", round }
+      if (
+        round.state.stage === "orphaned" ||
+        (round.owner !== null && deps.ownerState(round.owner).status === "gone")
+      ) {
+        return { outcome: "refused", reason: "session-gone", round }
+      }
+      if (round.state.stage !== "queued")
+        return { outcome: "refused", reason: "not-waiting", round }
+      const state = { ...round.state, sendNowAt: round.state.sendNowAt ?? at() }
+      writeState.run(JSON.stringify(state), round.owner, round.id)
+      return { outcome: "accepted", round: Round.parse({ ...round, state }) }
+    }),
+
+    pending(ownerId, label, only) {
       return db
         .query<{ id: string; page_id: string; note_count: number }, [string, string, string]>(
           `SELECT rounds.id, rounds.page_id,
              (SELECT COUNT(*) FROM notes WHERE notes.round_id = rounds.id) AS note_count
            FROM rounds
            WHERE owner_id = ? AND ${stageIn("queued", "announced")}
+             ${only === "send-now" ? "AND json_extract(state_json, '$.sendNowAt') IS NOT NULL" : ""}
              AND NOT EXISTS (
                SELECT 1 FROM announcements
                WHERE announcements.owner_id = ? AND announcements.label = ?
@@ -300,7 +324,11 @@ export function createInbox(db: Database, deps: InboxDeps): Inbox {
     claim: db.transaction((roundId: RoundId): Round | null => {
       const row = roundRow.get(roundId)
       if (!row) return null
-      return move(row, { to: "claimed" }, row.owner_id) ?? roundFromRow(row)
+      const round = move(row, { to: "claimed" }, row.owner_id) ?? roundFromRow(row)
+      if (round.state.stage === "claimed" && round.owner !== null) {
+        conversation.setFocus(round.owner, round.pageId, round.id)
+      }
+      return round
     }),
 
     resolveNote: db.transaction(
@@ -364,6 +392,7 @@ export function createInbox(db: Database, deps: InboxDeps): Inbox {
     ),
 
     requeuePage: db.transaction((pageId: PageId, ownerId: OwnerId): Round[] => {
+      conversation.setFocus(ownerId, pageId, null)
       // A requeued round is delivered afresh, so an earlier announcement must not hide it from
       // pending, even when the new owner is the old one under the same label.
       const forget = db.query("DELETE FROM announcements WHERE round_id = ?")
@@ -375,7 +404,16 @@ export function createInbox(db: Database, deps: InboxDeps): Inbox {
         const state = stateOf(row)
         // Queued to queued is not an edge: a round still queued only changes hands.
         if (state.stage === "queued") {
-          writeState.run(JSON.stringify({ ...state, requeuedAt: at() }), ownerId, row.id)
+          writeState.run(
+            JSON.stringify({
+              stage: "queued",
+              queuedAt: state.queuedAt,
+              idempotencyKey: state.idempotencyKey,
+              requeuedAt: at(),
+            }),
+            ownerId,
+            row.id,
+          )
           return readRound(row.id) ?? []
         }
         return move(row, { to: "queued" }, ownerId) ?? []

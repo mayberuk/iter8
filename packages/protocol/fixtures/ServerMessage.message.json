@@ -1,0 +1,16 @@
+{
+  "type": "message",
+  "message": {
+    "id": "M7",
+    "pageId": "larkspur",
+    "roundId": "R13",
+    "author": {
+      "kind": "agent",
+      "owner": "own_9pz2mr4c",
+      "name": "Claude",
+      "agent": "claude"
+    },
+    "text": "The button height now matches the toggle.",
+    "at": "2026-10-09T18:35:00.000Z"
+  }
+}

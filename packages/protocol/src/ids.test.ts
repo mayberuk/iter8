@@ -1,8 +1,13 @@
 import { expect, test } from "bun:test"
 import fc from "fast-check"
-import { IdempotencyKey, NoteId, OwnerId, PageId, PageToken, RoundId } from "./ids"
+import { IdempotencyKey, MessageId, NoteId, OwnerId, PageId, PageToken, RoundId } from "./ids"
 
 const whitespace = fc.constantFrom(" ", "\t", "\n", "\r", " ", " ")
+
+test("message ids use M followed by a positive decimal sequence", () => {
+  expect<string>(MessageId.parse("M1")).toBe("M1")
+  for (const id of ["M0", "R1", "M01", "M1x"]) expect(MessageId.safeParse(id).success).toBe(false)
+})
 
 function withInserted(valid: fc.Arbitrary<string>, insert: fc.Arbitrary<string>) {
   return fc.tuple(valid, insert, fc.nat()).map(([id, extra, at]) => {
@@ -14,6 +19,7 @@ function withInserted(valid: fc.Arbitrary<string>, insert: fc.Arbitrary<string>)
 const pageIds = fc.stringMatching(/^[a-z][a-z0-9-]{1,30}$/)
 const roundIds = fc.integer({ min: 1 }).map((n) => `R${n}`)
 const noteIds = fc.integer({ min: 1 }).map((n) => `N${n}`)
+const messageIds = fc.integer({ min: 1 }).map((n) => `M${n}`)
 const ownerIds = fc.string({ minLength: 1, maxLength: 200 }).filter((s) => !/\s/.test(s))
 const pageTokens = fc.stringMatching(/^[A-Za-z0-9_-]{32,64}$/)
 
@@ -21,6 +27,7 @@ test("every id generated from its stated format parses", () => {
   fc.assert(fc.property(pageIds, (id) => PageId.safeParse(id).success))
   fc.assert(fc.property(roundIds, (id) => RoundId.safeParse(id).success))
   fc.assert(fc.property(noteIds, (id) => NoteId.safeParse(id).success))
+  fc.assert(fc.property(messageIds, (id) => MessageId.safeParse(id).success))
   fc.assert(fc.property(ownerIds, (id) => OwnerId.safeParse(id).success))
   fc.assert(fc.property(pageTokens, (id) => PageToken.safeParse(id).success))
   fc.assert(
@@ -32,7 +39,7 @@ test("every id generated from its stated format parses", () => {
 })
 
 test("an empty id is refused", () => {
-  for (const schema of [PageId, RoundId, NoteId, OwnerId, PageToken, IdempotencyKey])
+  for (const schema of [PageId, RoundId, NoteId, MessageId, OwnerId, PageToken, IdempotencyKey])
     expect(schema.safeParse("").success).toBe(false)
 })
 
@@ -41,6 +48,7 @@ test("an id with whitespace anywhere in it is refused", () => {
     [PageId, pageIds],
     [RoundId, roundIds],
     [NoteId, noteIds],
+    [MessageId, messageIds],
     [OwnerId, ownerIds],
     [PageToken, pageTokens],
   ] as const

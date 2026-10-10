@@ -28,6 +28,10 @@ export function nextRoundState(
     state.stage !== "orphaned" && state.requeuedAt !== undefined
       ? { requeuedAt: state.requeuedAt }
       : {}
+  const sendNow =
+    state.stage !== "orphaned" && state.sendNowAt !== undefined
+      ? { sendNowAt: state.sendNowAt }
+      : {}
   const announced =
     state.stage === "announced"
       ? { announcedAt: state.announcedAt, generation: state.generation }
@@ -39,6 +43,7 @@ export function nextRoundState(
         queuedAt,
         idempotencyKey,
         ...requeued,
+        ...sendNow,
         announcedAt: at,
         generation: event.generation,
       }
@@ -49,6 +54,7 @@ export function nextRoundState(
         idempotencyKey,
         ...requeued,
         ...announced,
+        ...sendNow,
         claimedAt: at,
       }
     case "orphaned":

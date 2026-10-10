@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { ROUND_STAGE_ORDER, ROUND_TRANSITIONS, RoundStage } from "./round"
+import { ROUND_STAGE_ORDER, ROUND_TRANSITIONS, RoundStage, RoundState } from "./round"
 
 const edges = Object.entries(ROUND_TRANSITIONS).flatMap(([from, targets]) =>
   targets.map((to: string) => [from, to] as const),
@@ -41,4 +41,25 @@ test("an orphaned round can only be requeued", () => {
 
 test("the forward order is draft, queued, announced, claimed", () => {
   expect([...ROUND_STAGE_ORDER]).toEqual(["draft", "queued", "announced", "claimed"])
+})
+
+const at = "2026-10-09T18:35:00.000Z"
+const queued = { queuedAt: at, idempotencyKey: "send-now-test", sendNowAt: at }
+
+for (const state of [
+  { stage: "queued", ...queued },
+  { stage: "announced", ...queued, announcedAt: at, generation: 1 },
+  { stage: "claimed", ...queued, announcedAt: at, generation: 1, claimedAt: at },
+])
+  test(`a ${state.stage} round retains sendNowAt`, () => {
+    expect<unknown>(RoundState.parse(state)).toEqual(state)
+  })
+
+test("an orphaned round drops sendNowAt", () => {
+  expect<unknown>(RoundState.parse({ stage: "orphaned", ...queued, orphanedAt: at })).toEqual({
+    stage: "orphaned",
+    queuedAt: at,
+    idempotencyKey: "send-now-test",
+    orphanedAt: at,
+  })
 })

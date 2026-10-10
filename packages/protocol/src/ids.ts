@@ -13,6 +13,12 @@ export const RoundId = z
   .brand<"RoundId">()
 export type RoundId = z.infer<typeof RoundId>
 
+export const MessageId = z
+  .string()
+  .regex(/^M[1-9][0-9]*$/)
+  .brand<"MessageId">()
+export type MessageId = z.infer<typeof MessageId>
+
 /** Unique per service, so a note is addressable without its round. */
 export const NoteId = z
   .string()

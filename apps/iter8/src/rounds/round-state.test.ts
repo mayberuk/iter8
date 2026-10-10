@@ -10,6 +10,31 @@ import fc from "fast-check"
 import { nextRoundState, type RoundEvent } from "./round-state"
 
 const queuedAt = "2026-10-09T18:00:00.000Z"
+
+test("Send now survives announcement and claim and is dropped by orphaning or requeue", () => {
+  fc.assert(
+    fc.property(fc.integer({ min: 0, max: 100_000 }), (offset) => {
+      const sendNowAt = new Date(Date.parse(queuedAt) + offset).toISOString()
+      const nudged = RoundState.parse({ ...queued, sendNowAt })
+      const announcement = nextRoundState(nudged, { to: "announced", generation }, later)
+      if ("refused" in announcement) throw new Error(announcement.refused)
+      expect(announcement).toHaveProperty("sendNowAt", sendNowAt)
+      const claim = nextRoundState(announcement, { to: "claimed" }, later)
+      expect(claim).toHaveProperty("sendNowAt", sendNowAt)
+      expect(nextRoundState(nudged, { to: "claimed" }, later)).toHaveProperty(
+        "sendNowAt",
+        sendNowAt,
+      )
+      expect(nextRoundState(announcement, { to: "queued" }, later)).not.toHaveProperty("sendNowAt")
+      for (const state of [nudged, announcement]) {
+        const orphan = nextRoundState(state, { to: "orphaned" }, later)
+        if ("refused" in orphan) throw new Error(orphan.refused)
+        expect(orphan).not.toHaveProperty("sendNowAt")
+        expect(nextRoundState(orphan, { to: "queued" }, later)).not.toHaveProperty("sendNowAt")
+      }
+    }),
+  )
+})
 const later = "2026-10-09T18:05:00.000Z"
 const idempotencyKey = IdempotencyKey.parse("send-7c1e9b2a40d3")
 const generation = PairingGeneration.parse(3)

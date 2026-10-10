@@ -4,6 +4,9 @@ import { existsSync, readFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import {
+  AGENT_ROUTES,
+  AGENT_WAIT_MAX_SECONDS,
+  AgentWaitResult,
   CONFIG_FILE,
   DraftBody,
   ENV,
@@ -15,6 +18,7 @@ import {
   OpenResult,
   OVERLAY_ROUTES,
   PairResult,
+  PostMessageResult,
   RoundsResult,
   SendResult,
   ServerMessage,
@@ -24,11 +28,13 @@ import {
 import type { Subprocess } from "bun"
 import type { z } from "zod"
 import { readProcessStart } from "../pairing/process-identity"
+import { MOD_GRACE_MS } from "./waiters"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const MAIN = join(REPO, "apps/iter8/src/main.ts")
 const LIFECYCLE = join(import.meta.dir, "lifecycle.ts")
 const SWEEP_MS = 2_000
+const LAPSE_MARGIN_MS = 500
 const IDLE_MS = 2_400
 const IDLE_CHECK_MS = IDLE_MS / 4
 const IDLE_WINDOW_MS = IDLE_MS + IDLE_CHECK_MS + 800
@@ -756,6 +762,118 @@ test("an owner's death updates every one of its pages and orphans every one of i
       (message.type === "round" && message.round.state.stage === "orphaned"),
   )
   expect(stayingHeard).toEqual([])
+}, 60_000)
+
+async function modWaitTimesOut(home: Home, owner: string): Promise<number> {
+  const query = new URLSearchParams({ owner, timeoutSeconds: "1" })
+  const wait = await controlFetch(home, `${AGENT_ROUTES.wait.path}?${query}`)
+  const endedAt = Date.now()
+  expect(wait.status).toBe(200)
+  expect(AgentWaitResult.parse(await wait.json())).toEqual({ outcome: "timeout" })
+  return endedAt
+}
+
+test("a mod wait that ends without a re-poll tells the page chat is unreachable within the grace period and one sweep", async () => {
+  const home = await makeHome()
+  const session = sleeper(home)
+  const owner = await registerOwner(home, session.pid)
+  const { access } = await openPage(home, "site", owner)
+  const live = await connectLive(access)
+  const chats = (reachable: boolean) =>
+    live.messages.filter(
+      ({ message }) => message.type === "chat" && message.chat.reachable === reachable,
+    )
+
+  const endedAt = await modWaitTimesOut(home, owner)
+  expect(chats(true)).not.toEqual([])
+  const lapsed = await until(
+    "the page to hear the mod channel lapsed",
+    () => chats(false).find((entry) => entry.at >= endedAt),
+    MOD_GRACE_MS + SWEEP_MS + 3_000,
+  )
+  expect(lapsed.at - endedAt).toBeLessThanOrEqual(MOD_GRACE_MS + SWEEP_MS)
+}, 60_000)
+
+test("a mod that stops with a long poll pending tells the page chat is unreachable within the grace period and one sweep of stopping", async () => {
+  const home = await makeHome()
+  const session = sleeper(home)
+  const owner = await registerOwner(home, session.pid)
+  const { access } = await openPage(home, "site", owner)
+  const live = await connectLive(access)
+  const chats = (reachable: boolean) =>
+    live.messages.filter(
+      ({ message }) => message.type === "chat" && message.chat.reachable === reachable,
+    )
+
+  const stopping = new AbortController()
+  const query = new URLSearchParams({ owner, timeoutSeconds: String(AGENT_WAIT_MAX_SECONDS) })
+  const poll = controlFetch(home, `${AGENT_ROUTES.wait.path}?${query}`, {
+    signal: stopping.signal,
+  }).catch(() => null)
+  await until("the page to hear the mod channel attached", () => chats(true)[0], 10_000)
+
+  const stoppedAt = Date.now()
+  stopping.abort()
+  expect(await poll).toBeNull()
+  const lapsed = await until(
+    "the page to hear the mod channel lapsed",
+    () => chats(false).find((entry) => entry.at >= stoppedAt),
+    MOD_GRACE_MS + SWEEP_MS + LAPSE_MARGIN_MS,
+  )
+  expect(lapsed.at - stoppedAt).toBeLessThanOrEqual(MOD_GRACE_MS + SWEEP_MS + LAPSE_MARGIN_MS)
+}, 60_000)
+
+test("a crashed owner's queued page message is pushed to its page as failed with reason session-gone", async () => {
+  const home = await makeHome()
+  const session = sleeper(home)
+  const owner = await registerOwner(home, session.pid)
+  const { open, access } = await openPage(home, "site", owner)
+  const live = await connectLive(access)
+
+  // Posting inside the grace window after the wait ends leaves the message queued: no wait is
+  // pending to take it, yet the page still counts as reachable.
+  await modWaitTimesOut(home, owner)
+  const posted = await fetch(`http://127.0.0.1:${access.port}${OVERLAY_ROUTES.postMessage.path}`, {
+    method: OVERLAY_ROUTES.postMessage.method,
+    headers: {
+      host: access.host,
+      origin: access.origin,
+      [TOKEN_HEADER]: access.token,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      idempotencyKey: "lifecycle-test-crash",
+      generation: open.page.pairing?.generation,
+      text: "is this still on?",
+    }),
+  })
+  const result = PostMessageResult.parse(await posted.json())
+  if (result.outcome !== "accepted") throw new Error(`Post refused: ${result.reason}`)
+  const { message } = result
+  if (message.author.kind !== "page") throw new Error("a posted message is authored by the page")
+  expect(message.author.delivery).toEqual({ status: "queued" })
+
+  session.kill("SIGKILL")
+  await session.exited
+  const failed = await until(
+    "the page to hear its message failed",
+    () =>
+      live.messages.find(
+        ({ message: pushed }) =>
+          pushed.type === "message" &&
+          pushed.message.id === message.id &&
+          pushed.message.author.kind === "page" &&
+          pushed.message.author.delivery.status !== "queued",
+      ),
+    2 * SWEEP_MS + 3_000,
+  )
+  expect(failed.message).toEqual({
+    type: "message",
+    message: {
+      ...message,
+      author: { ...message.author, delivery: { status: "failed", reason: "session-gone" } },
+    },
+  })
 }, 60_000)
 
 test("status lists only the pool ports the service actually bound", async () => {

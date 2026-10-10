@@ -4,8 +4,12 @@ import { chmodSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { MachineId } from "@iter8/protocol"
 import initialSchema from "./migrations/001_init.sql" with { type: "text" }
+import conversationSchema from "./migrations/002_conversation.sql" with { type: "text" }
 
-const migrations = [{ version: 1, sql: initialSchema }] as const
+const migrations = [
+  { version: 1, sql: initialSchema },
+  { version: 2, sql: conversationSchema },
+] as const
 
 export const LATEST_MIGRATION_VERSION: number = migrations[migrations.length - 1]?.version ?? 0
 
@@ -47,7 +51,7 @@ export function readOrCreateMachineId(db: Database): MachineId {
 }
 
 /** Sequence allocation rolls back with the caller's transaction, so an aborted write consumes no id. */
-export function nextSequence(db: Database, name: "note_seq" | "round_seq"): number {
+export function nextSequence(db: Database, name: "note_seq" | "round_seq" | "message_seq"): number {
   const row = db
     .query<{ value: string }, [string]>(
       `INSERT INTO meta (key, value) VALUES (?, '1')

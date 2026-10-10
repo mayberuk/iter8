@@ -149,7 +149,8 @@ function send(
   }).then(async (response) => OVERLAY_ROUTES.send.response.parse(await response.json()))
 }
 
-const withParams = (path: string) => path.replace(":noteId", "N1").replace(":ref", "missing")
+const withParams = (path: string) =>
+  path.replace(":noteId", "N1").replace(":ref", "missing").replace(":roundId", "R1")
 
 describe("overlay routes", () => {
   test("every route answers with a body its protocol schema accepts", async () => {
@@ -195,6 +196,18 @@ describe("overlay routes", () => {
           body: { idempotencyKey: crypto.randomUUID(), noteIds: [noteId], generation: 2 },
         }),
       listRounds: () => api("GET", OVERLAY_ROUTES.listRounds.path),
+      listMessages: () => api("GET", OVERLAY_ROUTES.listMessages.path),
+      postMessage: () =>
+        api("POST", OVERLAY_ROUTES.postMessage.path, {
+          body: { idempotencyKey: "chat-7c1e9b2a40d3", generation: 2, text: "Hello." },
+        }),
+      getChat: () => api("GET", OVERLAY_ROUTES.getChat.path),
+      setChat: () => api("PUT", OVERLAY_ROUTES.setChat.path, { body: { enabled: false } }),
+      sendNow: () => {
+        const [round] = mock.rounds()
+        if (!round) throw new Error("send queued no round")
+        return api("POST", OVERLAY_ROUTES.sendNow.path.replace(":roundId", round.id))
+      },
       listSessions: () => api("GET", OVERLAY_ROUTES.listSessions.path),
       attach: () => api("POST", OVERLAY_ROUTES.attach.path, { body: { owner: liveSession.owner } }),
       getPrefs: () => api("GET", OVERLAY_ROUTES.getPrefs.path),

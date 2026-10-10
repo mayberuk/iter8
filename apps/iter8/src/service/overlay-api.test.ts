@@ -6,12 +6,14 @@ import { join } from "node:path"
 import {
   ASSET_PREFIX,
   AttachResult,
+  ChatSetting,
   DraftBody,
   HelloResult,
   LANDING_PATH,
   LiveSessionList,
   liveSubprotocols,
   MachineId,
+  MessagePage,
   Note,
   OVERLAY_PREFIX,
   OVERLAY_ROUTES,
@@ -21,10 +23,13 @@ import {
   PageToken,
   Pairing,
   PairingGeneration,
+  PostMessageRequest,
+  PostMessageResult,
   PROTOCOL_VERSION,
   ResolvedSourceLead,
   RoundSummaryList,
   Screenshot,
+  SendNowResult,
   SendResult,
   ServerMessage,
   SOURCE_BUNDLE_PATH,
@@ -32,6 +37,7 @@ import {
   TOKEN_HEADER,
   Whoami,
 } from "@iter8/protocol"
+import fc from "fast-check"
 import { createAgentNotes } from "../pages/agent-notes"
 import { createPages, type PageRecord } from "../pages/pages"
 import { createPrefs } from "../pages/prefs"
@@ -47,14 +53,17 @@ import {
   createOverlayApi,
   type OverlayApiDeps,
   type OverlayEnv,
+  pageChat,
   pagePairing,
 } from "./overlay-api"
 import { createWaiters } from "./waiters"
 
 const databases: Database[] = []
 const directories: string[] = []
+const waitersToCancel: ReturnType<typeof createWaiters>[] = []
 
 afterEach(async () => {
+  for (const waiters of waitersToCancel.splice(0)) waiters.cancelAll()
   for (const db of databases.splice(0)) db.close()
   for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true })
 })
@@ -82,6 +91,9 @@ const TABLES = [
   "announcements",
   "screenshots",
   "prefs",
+  "messages",
+  "page_chat",
+  "owner_focus",
 ]
 
 function draftBody(body: string) {
@@ -107,7 +119,7 @@ const reactLead: SourceLead = {
 
 type Fake = { sent: ServerMessage[]; closed: boolean }
 
-async function setup() {
+async function setup(now = () => new Date(Date.UTC(2026, 9, 9, 18, 0, 0))) {
   const db = openStore(":memory:")
   databases.push(db)
   const scratch = await mkdtemp(join(tmpdir(), "iter8-"))
@@ -122,7 +134,7 @@ async function setup() {
     [sessionA.pid, sessionA.startedAt],
     [sessionB.pid, sessionB.startedAt],
   ])
-  const now = () => new Date(Date.UTC(2026, 9, 9, 18, 0, 0))
+
   const owners = createOwners(db, { processStart: (pid) => starts.get(pid) ?? null, now })
   const tokens = ["a", "b"].map((letter) => PageToken.parse(letter.repeat(43)))
   const pages = createPages(db, {
@@ -133,6 +145,7 @@ async function setup() {
     },
   })
   const waiters = createWaiters()
+  waitersToCancel.push(waiters)
   const resolved: Array<{ lead: SourceLead; scope: SymbolicateScope }> = []
   const symbolicated = ResolvedSourceLead.parse({
     confidence: "exact",
@@ -200,6 +213,7 @@ async function setup() {
   type Call = {
     page?: PageRecord
     params?: Record<string, string>
+    query?: Record<string, string>
     body?: unknown
     raw?: Uint8Array<ArrayBuffer>
     method?: string
@@ -215,6 +229,7 @@ async function setup() {
     for (const [name, value] of Object.entries(options.params ?? {})) {
       path = path.replace(`:${name}`, encodeURIComponent(value))
     }
+    if (options.query) path += `?${new URLSearchParams(options.query)}`
     const headers = new Headers({ origin: record.page.origin, [TOKEN_HEADER]: record.token })
     if (options.body !== undefined) headers.set("content-type", "application/json")
     for (const name of options.omit ?? []) headers.delete(name)
@@ -280,6 +295,7 @@ function sendBody(noteIds: string[], generation: number, key = "send-key-0001") 
 
 async function everyRouteCall(t: Setup) {
   const draft = await createDraft(t, "seeded")
+  await t.call(R.send, { body: sendBody([draft.id], 1) })
   const stored = t.deps.screenshots.store(t.larkspur.page.id, png)
   if (!stored) throw new Error("Seed screenshot was refused")
   const calls: Record<keyof typeof R, Parameters<Setup["call"]>[1]> = {
@@ -293,6 +309,13 @@ async function everyRouteCall(t: Setup) {
     deleteDraft: { params: { noteId: draft.id } },
     send: { body: sendBody([draft.id], 1) },
     listRounds: {},
+    listMessages: {},
+    postMessage: {
+      body: { idempotencyKey: "chat-key-0001", generation: 1, text: "From the page" },
+    },
+    getChat: {},
+    setChat: { body: { enabled: false } },
+    sendNow: { params: { roundId: "R1" } },
     uploadScreenshot: { raw: png },
     getScreenshot: { params: { ref: stored.ref } },
     symbolicate: { body: reactLead },
@@ -675,6 +698,7 @@ test("attach to a live session re-pairs only the calling page and requeues its r
   expect(requeued.state.stage).toBe("queued")
   expect(larkspurSocket.sent).toEqual([
     { type: "pairing", pairing },
+    { type: "chat", chat: { enabled: true, defaultEnabled: true, reachable: false } },
     { type: "round", round: requeued },
   ])
   expect(yarrowSocket.sent).toEqual([])
@@ -1048,7 +1072,14 @@ test("attach on a page with no rounds pairs it, pushes the pairing and leaves th
   expect(result.requeued).toEqual([])
   expect<unknown>(result.pairing.generation).toBe(1)
   expect(t.waiters.isArmed(t.ownerB)).toBe(true)
-  expect(live.sent).toEqual([{ type: "pairing", pairing: result.pairing }])
+  expect(live.sent).toEqual([
+    { type: "pairing", pairing: result.pairing },
+    { type: "chat", chat: { enabled: true, defaultEnabled: true, reachable: false } },
+  ])
+  expect(t.deps.inbox.conversation.focus(t.ownerB)).toEqual({
+    pageId: t.larkspur.page.id,
+    roundId: null,
+  })
 
   t.waiters.wake(t.ownerB)
   expect(await waiting).toBe("woken")
@@ -1114,6 +1145,496 @@ test("a pairing reports relabelPending once its owner's context was cleared", as
   })
   const hello = R.hello.response.parse(await response.json())
   expect(hello.outcome === "accepted" && hello.state.pairing?.relabelPending).toBe(true)
+})
+
+function messageBody(key = "chat-key-0001", generation = 1, text = "From the page") {
+  return PostMessageRequest.parse({ idempotencyKey: key, generation, text })
+}
+
+async function postMessage(t: Setup, body = messageBody(), page?: PageRecord) {
+  const response = await t.call(R.postMessage, { body, ...(page ? { page } : {}) })
+  expect(response.status).toBe(200)
+  return PostMessageResult.parse(await response.json())
+}
+
+test("messages return the newest 30 in numeric order and page backwards without crossing pages", async () => {
+  const t = await setup()
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  for (let id = 1; id <= 35; id++) {
+    t.deps.inbox.conversation.post(
+      t.larkspur.page.id,
+      t.ownerA,
+      messageBody(`chat-key-${String(id).padStart(4, "0")}`, 1, `Message ${id}`),
+    )
+  }
+  t.deps.inbox.conversation.post(t.yarrow.page.id, t.ownerA, messageBody("other-page-key"))
+  const newest = MessagePage.parse(await (await t.call(R.listMessages)).json())
+  expect<unknown>(newest.messages.map((message) => message.id)).toEqual(
+    Array.from({ length: 30 }, (_, index) => `M${index + 6}`),
+  )
+  expect(newest.hasOlder).toBe(true)
+  const older = MessagePage.parse(
+    await (await t.call(R.listMessages, { query: { before: "M6" } })).json(),
+  )
+  expect<unknown>(older.messages.map((message) => message.id)).toEqual([
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+  ])
+  expect(older.hasOlder).toBe(false)
+  const limited = MessagePage.parse(
+    await (await t.call(R.listMessages, { query: { before: "M6", limit: "2" } })).json(),
+  )
+  expect<unknown>(limited.messages.map((message) => message.id)).toEqual(["M4", "M5"])
+  expect(limited.hasOlder).toBe(true)
+  const all = MessagePage.parse(
+    await (await t.call(R.listMessages, { query: { limit: "100" } })).json(),
+  )
+  expect(all.messages).toHaveLength(35)
+  expect(all.hasOlder).toBe(false)
+  expect(
+    MessagePage.parse(await (await t.call(R.listMessages, { query: { before: "M1" } })).json()),
+  ).toEqual({ messages: [], hasOlder: false })
+})
+
+test("a page of exactly limit messages with nothing older left reports hasOlder false", async () => {
+  const t = await setup()
+  for (let id = 1; id <= 6; id++) {
+    t.deps.inbox.conversation.post(
+      t.larkspur.page.id,
+      t.ownerA,
+      messageBody(`chat-key-${String(id).padStart(4, "0")}`, 1, `Message ${id}`),
+    )
+  }
+  const list = async (query: Record<string, string>) =>
+    MessagePage.parse(await (await t.call(R.listMessages, { query })).json())
+  const exact = await list({ before: "M6", limit: "5" })
+  expect<unknown>(exact.messages.map((message) => message.id)).toEqual([
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+  ])
+  expect(exact.hasOlder).toBe(false)
+  const short = await list({ before: "M6", limit: "4" })
+  expect<unknown>(short.messages.map((message) => message.id)).toEqual(["M2", "M3", "M4", "M5"])
+  expect(short.hasOlder).toBe(true)
+  const newest = await list({ limit: "6" })
+  expect(newest.messages).toHaveLength(6)
+  expect(newest.hasOlder).toBe(false)
+})
+
+test("property: listMessages pages ascending, never crosses pages and sets hasOlder exactly when an older message exists", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(fc.boolean(), { maxLength: 45 }),
+      fc.integer({ min: 1, max: 100 }),
+      fc.option(fc.integer({ min: 1, max: 50 }), { nil: null }),
+      async (onLarkspur, limit, beforeNumber) => {
+        const t = await setup()
+        const ours: number[] = []
+        onLarkspur.forEach((isOurs, index) => {
+          const page = isOurs ? t.larkspur : t.yarrow
+          const message = t.deps.inbox.conversation.post(
+            page.page.id,
+            t.ownerA,
+            messageBody(`chat-key-${String(index).padStart(4, "0")}`),
+          )
+          if (isOurs) ours.push(Number(message.id.slice(1)))
+        })
+        const query = {
+          limit: String(limit),
+          ...(beforeNumber === null ? {} : { before: `M${beforeNumber}` }),
+        }
+        const page = MessagePage.parse(await (await t.call(R.listMessages, { query })).json())
+        const eligible = ours.filter((number) => beforeNumber === null || number < beforeNumber)
+        const expected = eligible.slice(-limit)
+        const oldest = expected[0]
+        expect(page.messages.map((message) => Number(message.id.slice(1)))).toEqual(expected)
+        expect(page.messages.every((message) => message.pageId === t.larkspur.page.id)).toBe(true)
+        expect(page.hasOlder).toBe(oldest !== undefined && ours.some((number) => number < oldest))
+      },
+    ),
+    { numRuns: 60 },
+  )
+})
+
+test("invalid message queries and chat bodies answer 400 and store nothing", async () => {
+  const t = await setup()
+  const before = t.snapshot()
+  for (const query of [
+    { before: "M0" },
+    { before: "R1" },
+    { limit: "0" },
+    { limit: "101" },
+    { limit: "1.5" },
+    { limit: "01" },
+  ]) {
+    expect((await t.call(R.listMessages, { query })).status).toBe(400)
+  }
+  for (const body of [{}, { ...messageBody(), text: "" }, { ...messageBody(), generation: -1 }]) {
+    expect((await t.call(R.postMessage, { body })).status).toBe(400)
+  }
+  for (const body of [{}, { enabled: "yes" }]) {
+    expect((await t.call(R.setChat, { body })).status).toBe(400)
+  }
+  expect(t.snapshot()).toEqual(before)
+})
+
+test("postMessage is idempotent even after chat is disabled, with no repeated push or wake", async () => {
+  const t = await setup()
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  const waiting = t.waiters.armMod(t.ownerA, 60_000)
+  const live = t.socket(t.larkspur)
+  const body = messageBody("chat-key-0001", 1, "<b>Stored as given</b>\n**message**")
+  const accepted = await postMessage(t, body)
+  if (accepted.outcome !== "accepted") throw new Error(`Message refused: ${accepted.reason}`)
+  expect(await waiting).toBe("woken")
+  expect(accepted.message).toMatchObject({
+    id: "M1",
+    pageId: t.larkspur.page.id,
+    roundId: null,
+    text: body.text,
+    author: {
+      kind: "page",
+      idempotencyKey: body.idempotencyKey,
+      delivery: { status: "queued" },
+    },
+  })
+  expect(live.sent).toEqual([{ type: "message", message: accepted.message }])
+  await t.call(R.setChat, { body: { enabled: false } })
+  const delivered = t.deps.inbox.conversation.takeQueued(t.ownerA)[0]
+  const retriedWait = t.waiters.armMod(t.ownerA, 60_000)
+  const before = t.snapshot()
+  const pushed = [...live.sent]
+  expect<unknown>(
+    await postMessage(t, { ...body, generation: PairingGeneration.parse(0), text: "retry" }),
+  ).toEqual({ outcome: "accepted", message: delivered })
+  expect(t.snapshot()).toEqual(before)
+  expect(live.sent).toEqual(pushed)
+  t.waiters.cancelAll()
+  expect(await retriedWait).toBe("cancelled")
+})
+
+test("postMessage refusals follow pairing, generation, session, setting, then mod reachability", async () => {
+  const t = await setup()
+  const live = t.socket(t.larkspur)
+  await t.call(R.setChat, { body: { enabled: false } })
+  const assertRefusal = async (reason: string, generation: number) => {
+    const before = t.snapshot()
+    const result = await postMessage(t, messageBody("refused-chat-key", generation))
+    const record = t.pages.get(t.larkspur.page.id)
+    if (!record) throw new Error("Page vanished")
+    expect<unknown>(result).toEqual({
+      outcome: "refused",
+      reason,
+      chat: { enabled: reason === "unreachable", defaultEnabled: true, reachable: false },
+      pairing: pagePairing(t.deps, record),
+    })
+    expect(t.snapshot()).toEqual(before)
+  }
+  await assertRefusal("no-pairing", 0)
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  t.owners.end(sessionA.pid, sessionA.label, "other")
+  await assertRefusal("stale-generation", 0)
+  await assertRefusal("session-gone", 1)
+  t.owners.pairPage(t.larkspur.page.id, t.ownerB)
+  await assertRefusal("chat-off", 2)
+  const hookWait = t.waiters.arm(t.ownerB, 60_000)
+  await t.call(R.setChat, { body: { enabled: true } })
+  await assertRefusal("unreachable", 2)
+  expect(ChatSetting.parse(await (await t.call(R.getChat)).json())).toEqual({
+    enabled: true,
+    defaultEnabled: true,
+    reachable: false,
+  })
+  expect(live.sent.every((event) => event.type === "chat")).toBe(true)
+  t.waiters.cancelAll()
+  expect(await hookWait).toBe("cancelled")
+})
+
+test("property: postMessage stores each page and idempotency key at most once, however posts and retries interleave", async () => {
+  const post = fc.record({
+    onLarkspur: fc.boolean(),
+    key: fc.constantFrom("chat-key-0001", "chat-key-0002", "chat-key-0003"),
+    text: fc.string({ minLength: 1, maxLength: 20 }),
+    stale: fc.boolean(),
+  })
+  const step = fc.oneof(
+    fc
+      .array(post, { minLength: 1, maxLength: 3 })
+      .map((posts) => ({ kind: "posts" as const, posts })),
+    fc.boolean().map((enabled) => ({ kind: "chat" as const, enabled })),
+    fc.constant({ kind: "take" as const }),
+  )
+  await fc.assert(
+    fc.asyncProperty(fc.array(step, { minLength: 1, maxLength: 14 }), async (steps) => {
+      const t = await setup()
+      t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+      t.owners.pairPage(t.yarrow.page.id, t.ownerA)
+      const generationOf = (page: PageRecord) => {
+        const generation = t.pages.get(page.page.id)?.page.pairing?.generation
+        if (generation === undefined) throw new Error("Page lost its pairing")
+        return generation
+      }
+      const stored = new Map<string, string>()
+      const mods: Promise<unknown>[] = []
+      for (const next of steps) {
+        mods.push(t.waiters.armMod(t.ownerA, 60_000))
+        if (next.kind === "chat") {
+          await t.call(R.setChat, { body: { enabled: next.enabled } })
+        } else if (next.kind === "take") {
+          t.deps.inbox.conversation.takeQueued(t.ownerA)
+        } else {
+          const results = await Promise.all(
+            next.posts.map(async (request) => {
+              const page = request.onLarkspur ? t.larkspur : t.yarrow
+              const body = messageBody(
+                request.key,
+                generationOf(page) + (request.stale ? 1 : 0),
+                request.text,
+              )
+              return {
+                id: `${page.page.id}:${request.key}`,
+                result: await postMessage(t, body, page),
+              }
+            }),
+          )
+          for (const { id, result } of results) {
+            if (result.outcome === "refused") {
+              expect(stored.has(id)).toBe(false)
+            } else if (stored.has(id)) {
+              expect<unknown>(result.message.id).toBe(stored.get(id))
+            } else {
+              stored.set(id, result.message.id)
+            }
+          }
+        }
+        const rows = t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM messages").get()
+        expect(rows?.n).toBe(stored.size)
+        expect(new Set(stored.values()).size).toBe(stored.size)
+      }
+      t.waiters.cancelAll()
+      await Promise.allSettled(mods)
+    }),
+    { numRuns: 40 },
+  )
+})
+
+test("property: postMessage refuses in the order no-pairing, stale-generation, session-gone, chat-off, unreachable, after the stored-key check", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.record({
+        stored: fc.boolean(),
+        paired: fc.boolean(),
+        stale: fc.boolean(),
+        gone: fc.boolean(),
+        chatOn: fc.boolean(),
+        mod: fc.boolean(),
+      }),
+      async (c) => {
+        const t = await setup()
+        const pageId = t.larkspur.page.id
+        const seeded = c.stored
+          ? t.deps.inbox.conversation.post(
+              pageId,
+              t.ownerA,
+              messageBody("chat-key-0001", 1, "Seeded"),
+            )
+          : null
+        if (c.paired) t.owners.pairPage(pageId, t.ownerA)
+        if (c.gone) t.owners.end(sessionA.pid, sessionA.label, "other")
+        await t.call(R.setChat, { body: { enabled: c.chatOn } })
+        const waiting = c.mod ? t.waiters.armMod(t.ownerA, 60_000) : null
+        const refusals = [
+          [!c.paired, "no-pairing"],
+          [c.stale, "stale-generation"],
+          [c.gone, "session-gone"],
+          [!c.chatOn, "chat-off"],
+          [!c.mod, "unreachable"],
+        ] as const
+        const reason = c.stored ? undefined : refusals.find(([failed]) => failed)?.[1]
+        const before = t.snapshot()
+        const result = await postMessage(t, messageBody("chat-key-0001", c.stale ? 0 : 1, "Fresh"))
+        if (reason === undefined) {
+          expect(result.outcome).toBe("accepted")
+          if (result.outcome === "accepted") {
+            expect(result.message.text).toBe(seeded ? "Seeded" : "Fresh")
+          }
+        } else {
+          expect(result.outcome === "refused" && result.reason).toBe(reason)
+          expect(result.outcome === "refused" && result.pairing === null).toBe(!c.paired)
+        }
+        if (reason !== undefined || c.stored) expect(t.snapshot()).toEqual(before)
+        t.waiters.cancelAll()
+        await waiting
+      },
+    ),
+    { numRuns: 100 },
+  )
+})
+
+test("page chat reports reachable only for a paired living owner with a mod channel", async () => {
+  const t = await setup()
+  const chat = async () => ChatSetting.parse(await (await t.call(R.getChat)).json())
+  expect(await chat()).toEqual({ enabled: true, defaultEnabled: true, reachable: false })
+  const waiting = t.waiters.armMod(t.ownerA, 60_000)
+  expect((await chat()).reachable).toBe(false)
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  t.owners.setBusy(t.ownerA, true)
+  expect(await chat()).toEqual({ enabled: true, defaultEnabled: true, reachable: true })
+  t.owners.end(sessionA.pid, sessionA.label, "other")
+  expect((await chat()).reachable).toBe(false)
+  t.waiters.cancelAll()
+  expect(await waiting).toBe("cancelled")
+})
+
+test("setChat persists on the same database across a fresh API and pushes only to its page", async () => {
+  const t = await setup()
+  const live = t.socket(t.larkspur)
+  const elsewhere = t.socket(t.yarrow)
+  const saved = await t.call(R.setChat, { body: { enabled: false } })
+  const expected = { enabled: false, defaultEnabled: true, reachable: false }
+  expect(ChatSetting.parse(await saved.json())).toEqual(expected)
+  expect(live.sent).toEqual([{ type: "chat", chat: expected }])
+  expect(elsewhere.sent).toEqual([])
+  const freshDeps = {
+    ...t.deps,
+    inbox: createInbox(t.db, {
+      now: () => new Date("2026-10-09T18:00:00.000Z"),
+      ownerState: (owner) => t.owners.state(owner),
+      pairing: (pageId) => {
+        const record = t.pages.get(pageId)
+        return record && pagePairing(t.deps, record)
+      },
+    }),
+  }
+  const fresh = createOverlayApi(freshDeps)
+  const response = await fresh.request(
+    R.getChat.path,
+    { headers: { origin: t.larkspur.page.origin, [TOKEN_HEADER]: t.larkspur.token } },
+    t.envFor(t.larkspur),
+  )
+  expect(ChatSetting.parse(await response.json())).toEqual(expected)
+  expect(ChatSetting.parse(await (await t.call(R.getChat, { page: t.yarrow })).json())).toEqual({
+    enabled: true,
+    defaultEnabled: true,
+    reachable: false,
+  })
+})
+
+test("postMessage attaches the page's newest round and isolates idempotency keys by page", async () => {
+  const t = await setup()
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  t.owners.pairPage(t.yarrow.page.id, t.ownerA)
+  await sendDraftOn(t, t.larkspur, "send-key-0001")
+  const newest = await sendDraftOn(t, t.larkspur, "send-key-0002")
+  const waiting = t.waiters.armMod(t.ownerA, 60_000)
+  const live = t.socket(t.larkspur)
+  const elsewhere = t.socket(t.yarrow)
+  const first = await postMessage(t)
+  expect(first).toMatchObject({ outcome: "accepted", message: { id: "M1", roundId: newest.id } })
+  expect(await waiting).toBe("woken")
+  expect(live.sent).toHaveLength(1)
+  expect(elsewhere.sent).toEqual([])
+  const second = await postMessage(t, messageBody(), t.yarrow)
+  expect(second).toMatchObject({ outcome: "accepted", message: { id: "M2", roundId: null } })
+})
+
+test("sendNow sets and preserves sendNowAt, pushes its round and leaves a busy owner's waiter asleep", async () => {
+  let time = Date.parse("2026-10-09T18:00:00.000Z")
+  const t = await setup(() => new Date(time))
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  const round = await sendDraftOn(t, t.larkspur, "send-key-0001")
+  t.owners.setBusy(t.ownerA, true)
+  const waiting = t.waiters.armMod(t.ownerA, 60_000)
+  const live = t.socket(t.larkspur)
+  const elsewhere = t.socket(t.yarrow)
+  for (let retry = 0; retry < 2; retry++) {
+    const response = await t.call(R.sendNow, { params: { roundId: round.id } })
+    expect(response.status).toBe(200)
+    const result = SendNowResult.parse(await response.json())
+    expect<unknown>(result).toEqual({
+      outcome: "accepted",
+      round: { ...round, state: { ...round.state, sendNowAt: "2026-10-09T18:00:00.000Z" } },
+    })
+    expect(t.deps.inbox.round(round.id)?.state).toMatchObject({
+      stage: "queued",
+      sendNowAt: "2026-10-09T18:00:00.000Z",
+    })
+    time += 60_000
+  }
+  expect(live.sent).toHaveLength(2)
+  expect(live.sent.every((event) => event.type === "round")).toBe(true)
+  expect(elsewhere.sent).toEqual([])
+  t.waiters.cancelAll()
+  expect(await waiting).toBe("cancelled")
+})
+
+test("sendNow refuses unpaired, gone and nonwaiting rounds in order and hides other pages' rounds", async () => {
+  const t = await setup()
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  t.owners.pairPage(t.yarrow.page.id, t.ownerA)
+  const round = await sendDraftOn(t, t.larkspur, "send-key-0001")
+  const elsewhere = await sendDraftOn(t, t.yarrow, "send-key-0002")
+  const live = t.socket(t.larkspur)
+  const assertRefusal = async (reason: string) => {
+    const before = t.snapshot()
+    const response = await t.call(R.sendNow, { params: { roundId: round.id } })
+    expect(response.status).toBe(200)
+    expect<unknown>(SendNowResult.parse(await response.json())).toEqual({
+      outcome: "refused",
+      reason,
+      round: t.deps.inbox.round(round.id),
+    })
+    expect(t.snapshot()).toEqual(before)
+  }
+  for (const roundId of ["bad", "R0", "R999", elsewhere.id]) {
+    expect((await t.call(R.sendNow, { params: { roundId } })).status).toBe(404)
+  }
+  t.deps.inbox.announce(t.ownerA, sessionA.label, [round.id])
+  await assertRefusal("not-waiting")
+  t.deps.inbox.claim(round.id)
+  await assertRefusal("not-waiting")
+  t.owners.end(sessionA.pid, sessionA.label, "other")
+  await assertRefusal("session-gone")
+  t.deps.inbox.orphanFor(t.ownerA)
+  const orphan = await t.call(R.sendNow, { page: t.yarrow, params: { roundId: elsewhere.id } })
+  expect(SendNowResult.parse(await orphan.json())).toMatchObject({
+    outcome: "refused",
+    reason: "session-gone",
+    round: { state: { stage: "orphaned" } },
+  })
+  t.db.query("UPDATE pages SET owner_id = NULL WHERE id = ?").run(t.larkspur.page.id)
+  await assertRefusal("no-pairing")
+  expect(live.sent).toEqual([])
+})
+
+test("attach resets an owner's round focus and pushes chat using the attached mod's reachability", async () => {
+  const t = await setup()
+  t.owners.pairPage(t.yarrow.page.id, t.ownerB)
+  const round = await sendDraftOn(t, t.yarrow, "send-key-0001")
+  t.deps.inbox.claim(round.id)
+  const waiting = t.waiters.armMod(t.ownerB, 60_000)
+  const live = t.socket(t.larkspur)
+  const response = await t.call(R.attach, { body: { owner: t.ownerB } })
+  expect(AttachResult.parse(await response.json()).outcome).toBe("accepted")
+  expect(t.deps.inbox.conversation.focus(t.ownerB)).toEqual({
+    pageId: t.larkspur.page.id,
+    roundId: null,
+  })
+  expect(live.sent[1]).toEqual({
+    type: "chat",
+    chat: { enabled: true, defaultEnabled: true, reachable: true },
+  })
+  const record = t.pages.get(t.larkspur.page.id)
+  if (!record) throw new Error("Page vanished")
+  expect(pageChat(t.deps, record)).toEqual({ enabled: true, defaultEnabled: true, reachable: true })
+  t.waiters.cancelAll()
+  expect(await waiting).toBe("cancelled")
 })
 
 type LandingRun = {

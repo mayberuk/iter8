@@ -1,0 +1,86 @@
+{
+  "outcome": "refused",
+  "reason": "session-gone",
+  "round": {
+    "id": "R11",
+    "pageId": "larkspur",
+    "owner": "own_3kq9xw7d",
+    "state": {
+      "stage": "orphaned",
+      "queuedAt": "2026-10-09T18:20:00.000Z",
+      "idempotencyKey": "send-31f0aa8c5e72",
+      "announcedAt": "2026-10-09T18:20:00.000Z",
+      "orphanedAt": "2026-10-09T18:26:00.000Z"
+    },
+    "notes": [
+      {
+        "id": "N9",
+        "pageId": "larkspur",
+        "author": {
+          "kind": "user"
+        },
+        "intent": "fix",
+        "body": "The price wraps onto two lines at this width; keep it on one.",
+        "target": {
+          "kind": "element",
+          "anchor": {
+            "selector": ["main > section.plans > article:nth-of-type(2)"],
+            "role": "article",
+            "name": "Pro plan",
+            "text": "Pro plan $24 / month",
+            "box": {
+              "x": 24,
+              "y": 312,
+              "width": 360,
+              "height": 148
+            },
+            "renderGeneration": 3
+          }
+        },
+        "anchorStatus": "anchored",
+        "createdAt": "2026-10-09T18:19:00.000Z",
+        "capture": {
+          "completeness": "complete",
+          "omittedParts": [],
+          "url": "http://larkspur.localhost:3990/pricing",
+          "viewport": {
+            "width": 1440,
+            "height": 900,
+            "devicePixelRatio": 2
+          },
+          "theme": "light",
+          "landmark": "main",
+          "surroundingText": "Choose a plan. Starter $0 / month. Pro $24 / month. Team $79 / month.",
+          "computedStyles": {
+            "font-size": "18px",
+            "color": "rgb(17, 17, 17)",
+            "padding-top": "12px"
+          },
+          "consoleErrors": [
+            {
+              "message": "Failed to load resource: the server responded with a status of 404",
+              "source": "http://larkspur.localhost:3990/api/plans",
+              "at": "2026-10-09T18:29:00.000Z"
+            }
+          ],
+          "screenshot": {
+            "ref": "shot_8f2c1a9e",
+            "width": 720,
+            "height": 296
+          },
+          "sourceLead": {
+            "confidence": "exact",
+            "framework": "react",
+            "component": "PricingCard",
+            "file": "src/components/PricingCard.tsx",
+            "line": 18,
+            "column": 7
+          }
+        },
+        "resolution": {
+          "status": "open"
+        }
+      }
+    ]
+  }
+}

@@ -7,14 +7,17 @@ import { Pairing } from "./pairing"
 export const Intent = z.enum(["fix", "change", "question", "keep"])
 export type Intent = z.infer<typeof Intent>
 
+export const AgentAuthor = z.object({
+  kind: z.literal("agent"),
+  owner: OwnerId,
+  name: z.string().min(1),
+  agent: Pairing.shape.agent,
+})
+export type AgentAuthor = z.infer<typeof AgentAuthor>
+
 export const NoteAuthor = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("user") }),
-  z.object({
-    kind: z.literal("agent"),
-    owner: OwnerId,
-    name: z.string().min(1),
-    agent: Pairing.shape.agent,
-  }),
+  AgentAuthor,
 ])
 export type NoteAuthor = z.infer<typeof NoteAuthor>
 
