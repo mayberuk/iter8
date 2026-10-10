@@ -155,6 +155,23 @@ describe("symbolication", () => {
     column: 3,
   }
 
+  test.each(["//evil.example/chunk.js", "///evil.example/chunk.js", "/\\evil.example/chunk.js"])(
+    "a page-origin frame whose path is %s is fetched from the upstream only",
+    async (path) => {
+      const fetched: string[] = []
+      const symbolicator = createSymbolicator({
+        fetch: fakeFetch((requested) => {
+          fetched.push(requested)
+          return new Response(inlineMapScript)
+        }),
+        readFile: readText,
+      })
+      await symbolicator.resolve(generatedAt(`${pageOrigin}${path}`), scope)
+      expect(fetched.length).toBeGreaterThan(0)
+      for (const url of fetched) expect(new URL(url).origin).toBe("http://127.0.0.1:5173")
+    },
+  )
+
   test.each([
     "http://other.localhost:3990/chunk.js",
     "http://cardinal.localhost:3991/chunk.js",

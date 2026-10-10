@@ -138,7 +138,7 @@ export function createSymbolicator(deps: {
       const pageUrl = new URL(frame.file)
       if (pageUrl.origin !== new URL(scope.pageOrigin).origin) return null
       if (scope.upstream) {
-        scriptUrl = new URL(`${pageUrl.pathname}${pageUrl.search}`, scope.upstream)
+        scriptUrl = new URL(`${new URL(scope.upstream).origin}${pageUrl.pathname}${pageUrl.search}`)
       } else if (scope.folderRoot) {
         const folderRoot = await realpath(scope.folderRoot)
         const path = await realpath(join(folderRoot, decodeURIComponent(pageUrl.pathname)))
