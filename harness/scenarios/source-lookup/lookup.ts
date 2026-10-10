@@ -108,22 +108,44 @@ export async function startSourceRig(
 
 /**
  * Imports the served source bundle into the page and looks up the first element `selector`
- * matches, in the open shadow root of the first element `within` matches when it is given.
+ * matches. `within` names hosts to enter one after another, each in the open shadow root of the
+ * first element the previous scope matches. `detach` removes the element from the page first.
+ * `breakTreeWalker` makes the page's `document.createTreeWalker` throw, or abort the lookup's
+ * signal, which is how a hostile page reaches the lookup's markup step.
  */
 export async function lookupInPage(
   view: LookupView,
   selector: string,
-  options: { abortAfterMs?: number; within?: string } = {},
+  options: {
+    abortAfterMs?: number
+    within?: string[]
+    detach?: boolean
+    breakTreeWalker?: "throw" | "abort"
+  } = {},
 ): Promise<SourceLead | { rejected: string }> {
   const outcome = await view.page.evaluate(
-    async ({ bundlePath, selector, abortAfterMs, within }) => {
+    async ({ bundlePath, selector, abortAfterMs, within, detach, breakTreeWalker }) => {
       const bundle: { lookupSource: typeof lookupSource } = await import(
         new URL(bundlePath, location.origin).href
       )
-      const scope = within === undefined ? document : document.querySelector(within)?.shadowRoot
-      const element = scope?.querySelector(selector) ?? null
+      let scope: Document | ShadowRoot = document
+      for (const host of within) {
+        const root: ShadowRoot | null | undefined = scope.querySelector(host)?.shadowRoot
+        if (root === null || root === undefined) throw new Error(`No open shadow root on ${host}`)
+        scope = root
+      }
+      const element = scope.querySelector(selector)
       if (element === null) throw new Error(`No element matches ${selector}`)
+      if (detach) element.remove()
       const controller = new AbortController()
+      if (breakTreeWalker !== undefined) {
+        const createTreeWalker = document.createTreeWalker.bind(document)
+        Reflect.set(document, "createTreeWalker", (root: Node, whatToShow?: number) => {
+          if (breakTreeWalker === "throw") throw new Error("the page broke createTreeWalker")
+          controller.abort()
+          return createTreeWalker(root, whatToShow)
+        })
+      }
       const timer =
         abortAfterMs === undefined ? undefined : setTimeout(() => controller.abort(), abortAfterMs)
       try {
@@ -138,7 +160,9 @@ export async function lookupInPage(
       bundlePath: SOURCE_BUNDLE_PATH,
       selector,
       abortAfterMs: options.abortAfterMs,
-      within: options.within,
+      within: options.within ?? [],
+      detach: options.detach ?? false,
+      breakTreeWalker: options.breakTreeWalker,
     },
   )
   return "rejected" in outcome ? { rejected: outcome.rejected } : SourceLead.parse(outcome.lead)

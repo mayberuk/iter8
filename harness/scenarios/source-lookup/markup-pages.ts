@@ -102,3 +102,42 @@ export const NESTED_PAGE = `<!doctype html>
 </body>
 </html>
 `
+
+export const TEXT_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Text the identity reads</title>
+</head>
+<body>
+  <main>
+    <div id="folded">  Alpha <b>beta
+      gamma</b><template><p>template text</p></template><span id="shadow-host"></span> delta</div>
+    <div id="capped"></div>
+  </main>
+  <script>
+    document.getElementById("shadow-host").attachShadow({ mode: "open" }).append("shadow text")
+    const capped = document.getElementById("capped")
+    for (let count = 0; count < 5000; count += 1) capped.append(document.createTextNode(""))
+    capped.append("late text")
+  </script>
+</body>
+</html>
+`
+
+export const FRAMEWORK_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Astro source attributes on a folder page</title>
+  <script src="data:text/javascript,//@vite/client"></script>
+</head>
+<body>
+  <main>
+    <section data-astro-source-file="/work/site/src/pages/index.astro" data-astro-source-loc="7:12">
+      <span id="inside">Inside the annotated section</span>
+    </section>
+  </main>
+</body>
+</html>
+`

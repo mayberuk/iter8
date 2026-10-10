@@ -40,8 +40,8 @@ function stepsFromBody(element: Element): MarkupPath["steps"] | null {
 }
 
 /**
- * Where `element` sits in the page's markup, or null when it is outside `<body>` or too deep. An
- * element in a shadow root is described by its outermost light-DOM host.
+ * Where `element` sits in the page's markup, or null when it is `<body>` itself, outside it, or
+ * too deep. An element in a shadow root is described by its outermost light-DOM host.
  */
 export function markupOf(element: Element): MarkupPath | null {
   let located = element
@@ -51,7 +51,7 @@ export function markupOf(element: Element): MarkupPath | null {
     onPickedElement = false
   }
   const steps = stepsFromBody(located)
-  if (steps === null) return null
+  if (steps === null || steps.length === 0) return null
   return {
     url: location.href,
     steps,
