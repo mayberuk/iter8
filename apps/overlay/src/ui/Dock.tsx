@@ -48,6 +48,8 @@ const POP_EDGE = 12
 const POP_WIDTH = 320
 const MORE_WIDTH = 272
 const BUMP_MS = 200
+/** The dock stays unseen until the fonts are in, so the width it is placed by is the width it keeps. */
+const HIDDEN = { visibility: "hidden" } as const
 
 const THEMES = {
   auto: { label: "Auto", icon: "auto" },
@@ -392,6 +394,7 @@ type Drag = {
   height: number
   moved: boolean
   best: DockAnchor
+  frame: number
 }
 
 export function Dock() {
@@ -407,8 +410,10 @@ export function Dock() {
   const drag = useRef<Drag | null>(null)
   const justDragged = useRef(false)
   const placed = useRef(false)
+  const [fontsReady, setFontsReady] = useState(document.fonts.status !== "loading")
   const [near, setNear] = useState<DockAnchor | null>(null)
-  const [, setViewport] = useState(0)
+  const [viewport, setViewport] = useState(0)
+  const [resized, setResized] = useState(0)
   const [bump, setBump] = useState(false)
 
   const composeTool = useComputed<Mode | null>(() => {
@@ -478,24 +483,58 @@ export function Dock() {
     return () => window.removeEventListener("resize", onResize, { capture: true })
   }, [])
 
+  useEffect(() => {
+    const observer = new ResizeObserver(() => setResized((tick) => tick + 1))
+    for (const el of [dockRef.current, iter8Ref.current]) if (el) observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (drag.current) cancelAnimationFrame(drag.current.frame)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (fontsReady) return
+    let live = true
+    document.fonts.ready.then(() =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (live) setFontsReady(true)
+        }),
+      ),
+    )
+    return () => {
+      live = false
+    }
+  }, [fontsReady])
+
+  const dragging = near !== null
+  const roundNumber = nextRoundNumber(model.rounds.value)
+  const compact = sheetOpen && window.innerWidth < COMPACT_BELOW
+  const hasAvatar = pairing !== null
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the dock's rendered content sets its width, so a change re-places it in the same frame; viewport and resized are re-measure ticks.
   useLayoutEffect(() => {
     const dock = dockRef.current
     const iter8 = iter8Ref.current
-    if (!dock || !iter8) return
+    if (!dock || !iter8 || dragging) return
     const shown = prefs.collapsed ? iter8 : dock
     const other = prefs.collapsed ? dock : iter8
     const width = shown.offsetWidth
     const height = shown.offsetHeight
+    const otherWidth = other.offsetWidth
+    const otherHeight = other.offsetHeight
+    const more = moreRef.current
+    const moreRight = more ? more.offsetLeft + more.offsetWidth : 0
     const at = anchorXY(prefs.dock, width, height, sheetOpen)
-    // Without this the first placement animates in from the stylesheet's 0,0.
-    if (!placed.current) for (const el of [dock, iter8]) el.style.transition = "none"
-    if (!drag.current?.moved) {
-      shown.style.left = `${at.x}px`
-      shown.style.top = `${at.y}px`
-    }
-    other.style.left = `${at.x + width / 2 - other.offsetWidth / 2}px`
-    other.style.top = `${at.y + height / 2 - other.offsetHeight / 2}px`
-    if (!placed.current) {
+    // The first placement would animate in from the stylesheet's 0,0, and a font landing changes the width the dock was placed by.
+    const instant = !placed.current || !fontsReady
+    if (instant) for (const el of [dock, iter8]) el.style.transition = "none"
+    shown.style.translate = `${at.x}px ${at.y}px`
+    other.style.translate = `${at.x + width / 2 - otherWidth / 2}px ${at.y + height / 2 - otherHeight / 2}px`
+    if (instant) {
       placed.current = true
       void dock.offsetWidth
       for (const el of [dock, iter8]) el.style.transition = ""
@@ -509,15 +548,31 @@ export function Dock() {
       pops.style.top = above ? "auto" : `${at.y + height + POP_GAP}px`
       pops.style.bottom = above ? `${window.innerHeight - at.y + POP_GAP}px` : "auto"
     }
-    const more = moreRef.current
     const morePop = morePopRef.current
     if (more && morePop) {
-      const right = at.x + more.offsetLeft + more.offsetWidth
+      const right = at.x + moreRight
       morePop.style.left = `${clamp(right - MORE_WIDTH, POP_EDGE, window.innerWidth - MORE_WIDTH - POP_EDGE)}px`
       morePop.style.top = above ? "auto" : `${at.y + height + POP_GAP}px`
       morePop.style.bottom = above ? `${window.innerHeight - at.y + POP_GAP}px` : "auto"
     }
-  })
+  }, [
+    prefs.dock,
+    prefs.collapsed,
+    sheetOpen,
+    compact,
+    menu,
+    viewport,
+    resized,
+    dragging,
+    name,
+    where,
+    word,
+    state,
+    count,
+    roundNumber,
+    label,
+    hasAvatar,
+  ])
 
   function toggleTool(tool: Mode) {
     model.setMode(mode === tool || (tool === "shot" && mode === "markup") ? "idle" : tool)
@@ -540,6 +595,7 @@ export function Dock() {
       height: dock.offsetHeight,
       moved: false,
       best: prefs.dock,
+      frame: 0,
     }
     ;(event.currentTarget as Element).setPointerCapture(event.pointerId)
     event.preventDefault()
@@ -576,8 +632,10 @@ export function Dock() {
       x += (target.x - x) * k
       y += (target.y - y) * k
     }
-    dock.style.left = `${x}px`
-    dock.style.top = `${y}px`
+    cancelAnimationFrame(current.frame)
+    current.frame = requestAnimationFrame(() => {
+      dock.style.translate = `${x}px ${y}px`
+    })
     current.best = best
     setNear(best)
   }
@@ -585,6 +643,7 @@ export function Dock() {
   function onGripEnd(event: PointerEvent) {
     const current = drag.current
     if (!current) return
+    cancelAnimationFrame(current.frame)
     if (event.type === "pointercancel" || current.moved) drag.current = null
     if (!current.moved) return
     justDragged.current = true
@@ -607,7 +666,6 @@ export function Dock() {
       ? mode === "shot" || mode === "markup"
       : mode === tool || (mode === "compose" && composeTool.value === tool)
   const stateClass = `s-${state}`
-  const compact = sheetOpen && window.innerWidth < COMPACT_BELOW
   const gripLabel = `Session ${name} on ${where}, ${word ?? state}. Drag to move the dock, press to switch session.`
 
   return (
@@ -651,6 +709,7 @@ export function Dock() {
         role="toolbar"
         aria-label="iter8 annotation tools"
         inert={prefs.collapsed}
+        style={fontsReady ? undefined : HIDDEN}
       >
         <button
           type="button"
@@ -720,7 +779,7 @@ export function Dock() {
           data-kbd="R"
           onClick={() => model.toggleSheet("round")}
         >
-          <span class="rl">ROUND {nextRoundNumber(model.rounds.value)}</span>
+          <span class="rl">ROUND {roundNumber}</span>
           <span class={["n", count ? "" : "zero", bump ? "bump" : ""].filter(Boolean).join(" ")}>
             {count}
           </span>
@@ -768,6 +827,7 @@ export function Dock() {
         }
         aria-label="Expand iter8 dock"
         inert={!prefs.collapsed}
+        style={fontsReady ? undefined : HIDDEN}
         onClick={() => model.setPrefs({ collapsed: false })}
       >
         <span class="vu">

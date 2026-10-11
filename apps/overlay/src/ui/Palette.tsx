@@ -579,11 +579,7 @@ function Coach() {
   useEffect(() => {
     const replace = () => setViewport((tick) => tick + 1)
     const onTransitionEnd = (event: Event) => {
-      if (
-        event instanceof TransitionEvent &&
-        (event.propertyName === "left" || event.propertyName === "top")
-      )
-        replace()
+      if (event instanceof TransitionEvent && event.propertyName === "translate") replace()
     }
     window.addEventListener("resize", replace, { capture: true, passive: true })
     root.addEventListener("transitionend", onTransitionEnd, { passive: true })

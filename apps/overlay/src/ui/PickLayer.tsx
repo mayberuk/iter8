@@ -720,7 +720,10 @@ export function PickLayer(): JSX.Element | null {
           )
         })
         if (panel && spot)
-          write(panel, `left:${Math.round(spot.x)}px;top:${Math.round(spot.y)}px;--ox:${spot.side}`)
+          write(
+            panel,
+            `translate:${Math.round(spot.x)}px ${Math.round(spot.y)}px;--ox:${spot.side}`,
+          )
       }
 
       window.addEventListener("pointermove", onMove, { capture: true, passive: true })

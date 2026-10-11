@@ -37,7 +37,6 @@
   border: 1px solid var(--cd);
   box-shadow: 0 3px 0 var(--cd);
   transition:
-    box-shadow 0.16s,
     opacity 0.2s,
     scale 0.16s var(--spring);
 }
@@ -70,13 +69,13 @@
 }
 @keyframes pinhop {
   0% {
-    margin-top: -12px;
+    transform: translateY(0);
   }
   35% {
-    margin-top: -20px;
+    transform: translateY(-8px);
   }
   100% {
-    margin-top: -12px;
+    transform: translateY(0);
   }
 }
 .pin.sent {
