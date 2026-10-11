@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { type ElementAnchor, Note, OverlayPrefs, Pairing, Round } from "@iter8/protocol"
-import type { Browser, Page } from "playwright"
+import type { Browser, Locator, Page } from "playwright"
 import noteJson from "../../../packages/protocol/fixtures/Note.json"
 import pairingJson from "../../../packages/protocol/fixtures/Pairing.json"
 import roundJson from "../../../packages/protocol/fixtures/Round.json"
@@ -168,6 +168,23 @@ async function audit(o: Opened, surface: string, wants: { mono: boolean }) {
     ).toBe(true)
 }
 
+type Face = { family: string; numerals: string }
+
+function faceOf(locator: Locator): Promise<Face> {
+  return locator.evaluate((el) => {
+    const style = getComputedStyle(el)
+    return {
+      family: (style.fontFamily.split(",")[0] ?? "").trim().replace(/^["']|["']$/g, ""),
+      numerals: style.fontVariantNumeric,
+    }
+  })
+}
+
+function expectDigitFace(face: Face, what: string) {
+  expect(face.family, `${what} family`).toBe(SANS)
+  expect(face.numerals, `${what} numerals`).toContain("tabular-nums")
+}
+
 describe("type roles on every surface", () => {
   test("the expanded dock, its round label and its menu", async () => {
     const o = await open(SEEDED)
@@ -245,5 +262,31 @@ describe("type roles on every surface", () => {
     const coach = o.overlay.getByRole("dialog", { name: "Getting started" })
     await until("the tour", () => coach.isVisible())
     await audit(o, "tour", { mono: false })
+  }, 30_000)
+
+  test("the screenshot selection and the markup editor", async () => {
+    const o = await open(SEEDED)
+    await o.page.keyboard.press("s")
+    await o.page.mouse.move(100, 100)
+    await o.page.mouse.down()
+    await o.page.mouse.move(340, 260, { steps: 6 })
+    const coords = o.overlay.locator(".shotlayer .coords")
+    await until("the coordinates badge", () =>
+      coords.evaluate((el) => getComputedStyle(el).visibility === "visible"),
+    )
+    await audit(o, "screenshot selection", { mono: false })
+    expectDigitFace(
+      await faceOf(coords),
+      "the coordinates badge (a canvas, so its digits are not DOM text)",
+    )
+    await o.page.mouse.up()
+
+    const markup = o.overlay.getByRole("dialog", { name: "Mark up screenshot" })
+    await until("the markup editor", async () => (await markup.innerText()).includes("240 × 160"))
+    await markup.locator("img").waitFor({ timeout: 10_000 })
+    await audit(o, "markup editor", { mono: true })
+    const dims = markup.locator(".mk-h .dims")
+    expect(await dims.innerText()).toBe("240 × 160")
+    expectDigitFace(await faceOf(dims), "the markup dimensions")
   }, 30_000)
 })
