@@ -5,6 +5,8 @@ import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { networkInterfaces } from "node:os"
 import { join } from "node:path"
 import {
+  DraftBody,
+  IdempotencyKey,
   LANDING_PATH,
   LIVE_PATH,
   liveSubprotocols,
@@ -552,6 +554,52 @@ describe("websockets", () => {
 
     client.ws.close()
     await until("the socket to detach", () => live.size() === 0)
+  })
+
+  test("replay the page's rounds and pairing to a live socket that attaches after a change", async () => {
+    const { openServer, overlay } = await startDefault()
+    const record = openServer(startUpstream("primary").url)
+    const pageId = record.page.id
+    const owner = overlay.owners.register({
+      pid: 4821,
+      label: "session-a",
+      source: "startup",
+      agent: "claude",
+      cwd: "/project",
+    }).owner
+    const generation = overlay.owners.pairPage(pageId, owner)
+    const draft = overlay.inbox.createDraft(
+      pageId,
+      DraftBody.parse({
+        intent: "fix",
+        body: "Tighten the heading",
+        target: {
+          kind: "region",
+          box: { x: 0, y: 10, width: 200, height: 40 },
+          viewport: { width: 1280, height: 800, devicePixelRatio: 1 },
+        },
+        anchorStatus: "anchored",
+      }),
+    )
+    const sent = overlay.inbox.send(pageId, {
+      idempotencyKey: IdempotencyKey.parse("send-key-replay"),
+      noteIds: [draft.id],
+      generation,
+    })
+    if (sent.outcome !== "accepted") throw new Error(`Send refused: ${sent.reason}`)
+
+    overlay.inbox.resolveNote(draft.id, null)
+    overlay.owners.end(4821, "session-a", "logout")
+
+    const client = await connectLive(record)
+    await until("the replay", () => client.messages.length >= 2)
+
+    const messages = serverMessages(client)
+    const pairing = messages.find((message) => message.type === "pairing")
+    expect(pairing?.pairing?.state).toEqual({ status: "gone", reason: "ended" })
+    const round = messages.find((message) => message.type === "round")
+    expect(round?.round.id).toBe(sent.round.id)
+    expect(round?.round.notes.map((note) => note.resolution.status)).toEqual(["done"])
   })
 
   test("refuse a live socket with the wrong token or from another origin", async () => {
