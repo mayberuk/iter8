@@ -1,6 +1,7 @@
 import type { CommandDef } from "citty"
 import type { CliDeps } from "../client"
 import { attach } from "./attach"
+import { connect } from "./connect"
 import { done } from "./done"
 import { hook } from "./hook"
 import { note } from "./note"
@@ -13,6 +14,7 @@ import { version } from "./version"
 export function cliCommands(deps: CliDeps): Record<string, CommandDef> {
   return {
     open: open(deps),
+    connect: connect(deps),
     attach: attach(deps),
     rounds: rounds(deps),
     show: show(deps),

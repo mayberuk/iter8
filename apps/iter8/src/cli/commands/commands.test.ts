@@ -29,6 +29,7 @@ import {
 import { type ArgsDef, type CommandDef, runCommand } from "citty"
 import { hc } from "hono/client"
 import { type LaptopOpen, listenForPages } from "../../connect/page-channel"
+import type { ConnectSystem } from "../../connect/run"
 import { createAgentNotes } from "../../pages/agent-notes"
 import { createPages } from "../../pages/pages"
 import { createScreenshots } from "../../pages/screenshots"
@@ -39,6 +40,7 @@ import { createLiveHub } from "../../service/live"
 import { createWaiters, type Waiters } from "../../service/waiters"
 import { openStore, readOrCreateMachineId } from "../../store/db"
 import { type CliDeps, controlClientFor } from "../client"
+import { connect } from "./connect"
 import { cliCommands } from "./index"
 
 const databases: Database[] = []
@@ -296,7 +298,18 @@ describe("command surface", () => {
   test("derives every owned command, positional and flag from CLI_SURFACE", async () => {
     const commands = cliCommands((await setup()).deps)
     expect(Object.keys(commands).sort()).toEqual(
-      ["open", "attach", "rounds", "show", "done", "note", "status", "version", "hook"].sort(),
+      [
+        "open",
+        "connect",
+        "attach",
+        "rounds",
+        "show",
+        "done",
+        "note",
+        "status",
+        "version",
+        "hook",
+      ].sort(),
     )
     for (const [name, spec] of Object.entries(CLI_SURFACE)) {
       if (name === "serve") continue
@@ -324,6 +337,62 @@ describe("command surface", () => {
         expect(args[flag.name]?.description).toBe(flag.repeatable ? "Repeatable" : "")
       }
     }
+  })
+
+  test("connect without a host exits usage before reaching the system", async () => {
+    const state = await setup()
+    const spawn = spyOn(Bun, "spawn").mockImplementation(() => {
+      throw new Error("connect must not spawn without a host")
+    })
+    try {
+      await state.run("connect")
+      expect(state.exits).toEqual([ExitCode.usage])
+      expect(state.stdout).toEqual([])
+      expect(state.connections).toEqual([])
+      expect(spawn).not.toHaveBeenCalled()
+    } finally {
+      spawn.mockRestore()
+    }
+  })
+
+  test.each([
+    { rawArgs: ["-oProxyCommand=x"] },
+    { rawArgs: ["--", "-oProxyCommand=x"] },
+    { rawArgs: [""] },
+    { rawArgs: ["dev box"] },
+    { rawArgs: ["dev\u0007box"] },
+  ])("connect rejects invalid host arguments %j without spawning", async ({ rawArgs }) => {
+    const state = await setup()
+    const spawned: string[][] = []
+    const fakeSystem: ConnectSystem = {
+      spawn: (argv) => {
+        spawned.push(argv)
+        throw new Error("invalid hosts must not spawn")
+      },
+      clock: {
+        now: () => 0,
+        setTimeout: () => {
+          throw new Error("invalid hosts must not schedule timers")
+        },
+        clearTimeout() {},
+      },
+      platform: "linux",
+      laptopName: "laptop",
+      home: state.home,
+      forwardAddress: null,
+      tailscale: () => null,
+      localPool: async () => null,
+      nonce: () => "01234567",
+      out: (line) => state.deps.stdout(`${line}\n`),
+      onInterrupt() {
+        throw new Error("invalid hosts must not register interrupts")
+      },
+    }
+    await runCommand(connect(state.deps, fakeSystem), { rawArgs: [...rawArgs] })
+    expect(state.exits).toEqual([ExitCode.usage])
+    expect(state.stdout).toEqual([])
+    expect(state.connections).toEqual([])
+    expect(spawned).toEqual([])
   })
 
   test("every missing required flag and invalid enum value exits usage", async () => {
