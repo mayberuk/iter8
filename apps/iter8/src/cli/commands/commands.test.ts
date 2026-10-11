@@ -124,6 +124,7 @@ async function setup() {
   const connections: { start: boolean }[] = []
   const requests: { path: string; search: string; body: unknown }[] = []
   const responses: { path: string; body: string }[] = []
+  let statusFailure: "disconnected" | "refused" | "invalid" | null = null
   const client = hc<ControlApp>("http://iter8", {
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input))
@@ -132,6 +133,12 @@ async function setup() {
         search: url.search,
         body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
       })
+      if (url.pathname === "/status" && statusFailure !== null) {
+        if (statusFailure === "disconnected") throw new Error("Control connection lost")
+        return statusFailure === "refused"
+          ? new Response("Service unavailable", { status: 503 })
+          : Response.json({})
+      }
       const response = await app.request(`${url.pathname}${url.search}`, init)
       responses.push({ path: url.pathname, body: await response.clone().text() })
       return response
@@ -159,6 +166,9 @@ async function setup() {
     connections.length = 0
     requests.length = 0
     responses.length = 0
+  }
+  function failStatus(kind: NonNullable<typeof statusFailure>) {
+    statusFailure = kind
   }
   async function run(name: string, rawArgs: string[] = []) {
     const commands = cliCommands(deps)
@@ -227,6 +237,7 @@ async function setup() {
     client,
     app,
     run,
+    failStatus,
     clear,
     start,
     openPage,
@@ -260,6 +271,26 @@ async function armed(waiters: Waiters, owner: OwnerId) {
 async function resolved<T>(value: T | Promise<T> | (() => T | Promise<T>)): Promise<T> {
   return typeof value === "function" ? await (value as () => T | Promise<T>)() : await value
 }
+
+type State = Awaited<ReturnType<typeof setup>>
+
+async function leaveStaleSocket(socketPath: string) {
+  const creating = `${socketPath}.creating`
+  const server = Bun.listen({ unix: creating, socket: { data() {} } })
+  try {
+    await rename(creating, socketPath)
+  } finally {
+    server.stop(true)
+  }
+  expect((await stat(socketPath)).isSocket()).toBe(true)
+}
+
+function servedOpen(state: State): unknown {
+  return JSON.parse(state.responses.find((response) => response.path === "/open")?.body ?? "")
+}
+
+const connectHint = () =>
+  `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).`
 
 describe("command surface", () => {
   test("derives every owned command, positional and flag from CLI_SURFACE", async () => {
@@ -1417,71 +1448,166 @@ describe("open targets", () => {
     }
   })
 
-  test("removes a stale laptop socket and prints the connection hint", async () => {
+  test("hands the page to the accepting laptop when another refuses and a third is stale", async () => {
     const state = await setup()
-    const originalPath = join(state.home, "creating.sock")
-    const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
-    const stale = Bun.listen({ unix: originalPath, socket: { data() {} } })
-    try {
-      await rename(originalPath, socketPath)
-    } finally {
-      stale.stop(true)
-    }
-    expect((await stat(socketPath)).isSocket()).toBe(true)
-
-    await state.run("open", ["http://localhost:5173"])
-    expect(state.exits).toEqual([ExitCode.ok])
-    expect(state.stderr).toEqual([])
-    expect(state.stdout.join("")).toContain(
-      `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
-    )
-    await expect(stat(socketPath)).rejects.toMatchObject({ code: "ENOENT" })
-  })
-
-  test("prints the connection hint when a laptop refuses the page", async () => {
-    const state = await setup()
-    const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
-    const listener = await listenForPages({ socketPath, accept: () => false })
+    const offered: LaptopOpen[] = []
+    const received: LaptopOpen[] = []
+    const refusing = join(state.home, "laptop-alpha-0000abcd.sock")
+    const accepting = join(state.home, "laptop-mac-0000abcd.sock")
+    const stale = join(state.home, "laptop-zulu-0000abcd.sock")
+    await leaveStaleSocket(stale)
+    const listeners = [
+      await listenForPages({
+        socketPath: refusing,
+        accept(message) {
+          offered.push(message)
+          return false
+        },
+      }),
+      await listenForPages({
+        socketPath: accepting,
+        accept(message) {
+          received.push(message)
+          return true
+        },
+      }),
+    ]
     try {
       await state.run("open", ["http://localhost:5173"])
+      const opened = OpenResult.parse(servedOpen(state))
+      const message = { machineId: state.machineId, url: opened.url }
       expect(state.exits).toEqual([ExitCode.ok])
       expect(state.stderr).toEqual([])
-      expect(state.stdout.join("")).toContain(
-        `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
+      expect(received).toEqual([message])
+      expect(offered).toEqual([message])
+      expect(state.stdout).toEqual([
+        `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
+      ])
+      await expect(stat(stale)).rejects.toMatchObject({ code: "ENOENT" })
+      expect((await stat(refusing)).isSocket()).toBe(true)
+      expect((await stat(accepting)).isSocket()).toBe(true)
+    } finally {
+      for (const listener of listeners) await listener.close()
+    }
+  })
+
+  test("each open announces its own url to the connected laptop", async () => {
+    const directory = await tempDir()
+    const file = join(directory, "a file.html")
+    await writeFile(file, "<h1>Hello</h1>")
+    const state = await setup()
+    const received: LaptopOpen[] = []
+    const listener = await listenForPages({
+      socketPath: join(state.home, "laptop-mac-0000abcd.sock"),
+      accept(message) {
+        received.push(message)
+        return true
+      },
+    })
+    try {
+      const served: OpenResult[] = []
+      for (const target of [file, "http://localhost:5173/view?q=1", directory]) {
+        await state.run("open", [target])
+        expect(state.exits).toEqual([ExitCode.ok])
+        const opened = OpenResult.parse(servedOpen(state))
+        served.push(opened)
+        expect(state.stdout).toEqual([
+          `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
+        ])
+        state.clear()
+      }
+      expect(new Set(served.map((opened) => opened.url)).size).toBe(3)
+      expect(new URL(served[0]?.url ?? "").pathname).toBe("/a%20file.html")
+      expect(received).toEqual(
+        served.map((opened) => ({ machineId: state.machineId, url: opened.url })),
       )
-      expect((await stat(socketPath)).isSocket()).toBe(true)
     } finally {
       await listener.close()
     }
   })
 
-  test.each(["disconnected", "refused", "invalid"])(
-    "a status failure (%s) does not fail open",
-    async (failure) => {
-      const state = await setup()
-      state.deps.connect = async () =>
-        hc<ControlApp>("http://iter8", {
-          fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-            const url = new URL(String(input))
-            if (url.pathname === "/status") {
-              if (failure === "disconnected") throw new Error("Control connection lost")
-              return failure === "refused"
-                ? new Response("Service unavailable", { status: 503 })
-                : Response.json({})
-            }
-            return state.app.request(`${url.pathname}${url.search}`, init)
-          },
-        })
+  const fallbacks: Record<
+    string,
+    (state: State) => Promise<{ verify(): Promise<void>; close(): Promise<void> }>
+  > = {
+    "a laptop refuses the page": async (state) => {
+      const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
+      const offered: LaptopOpen[] = []
+      const listener = await listenForPages({
+        socketPath,
+        accept(message) {
+          offered.push(message)
+          return false
+        },
+      })
+      return {
+        async verify() {
+          expect(offered).toHaveLength(1)
+          expect((await stat(socketPath)).isSocket()).toBe(true)
+        },
+        close: () => listener.close(),
+      }
+    },
+    "a laptop socket is stale": async (state) => {
+      const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
+      await leaveStaleSocket(socketPath)
+      return {
+        async verify() {
+          await expect(stat(socketPath)).rejects.toMatchObject({ code: "ENOENT" })
+        },
+        close: async () => {},
+      }
+    },
+    "the status call loses its connection": async (state) => {
+      state.failStatus("disconnected")
+      return { verify: async () => {}, close: async () => {} }
+    },
+    "the status call is refused": async (state) => {
+      state.failStatus("refused")
+      return { verify: async () => {}, close: async () => {} }
+    },
+    "the status reply is invalid": async (state) => {
+      state.failStatus("invalid")
+      return { verify: async () => {}, close: async () => {} }
+    },
+  }
 
-      await state.run("open", ["http://localhost:5173"])
-      expect(state.exits).toEqual([ExitCode.ok])
-      expect(state.stderr).toEqual([])
-      expect(state.stdout.join("").trim().split("\n")).toHaveLength(3)
-      expect(state.stdout.join("")).toContain(
-        `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
-      )
+  test.each(Object.keys(fallbacks).flatMap((name) => [false, true].map((json) => [name, json])))(
+    "when %s, open succeeds with its own urls and the connection hint, json=%s",
+    async (name, json) => {
+      const state = await setup()
+      const arranged = await fallbacks[name as string]?.(state)
+      if (!arranged) throw new Error(`Unknown branch ${name}`)
+      try {
+        await state.run("open", ["http://localhost:5173", ...(json ? ["--json"] : [])])
+        const served = servedOpen(state)
+        const opened = OpenResult.parse(served)
+        expect(state.exits).toEqual([ExitCode.ok])
+        expect(state.stderr).toEqual([])
+        expect(state.stdout).toHaveLength(1)
+        if (json) expect(JSON.parse(state.stdout[0] ?? "")).toEqual(served)
+        else {
+          expect(state.stdout).toEqual([`${opened.url}\n${opened.landingUrl}\n${connectHint()}\n`])
+        }
+        await arranged.verify()
+      } finally {
+        await arranged.close()
+      }
     },
   )
+
+  test("the status request carries the owner given with --owner", async () => {
+    const state = await setup()
+    const pairing = await state.start("claude")
+    await state.run("open", ["http://localhost:5173", "--owner", pairing.owner])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.requests.map((request) => request.path)).toEqual(["/open", "/status"])
+    expect(state.requests[0]?.body).toMatchObject({ owner: pairing.owner })
+    expect(state.requests[1]?.body).toEqual({
+      owner: pairing.owner,
+      identities: state.deps.ancestry(),
+    })
+  })
 
   test.each([
     "https://localhost:5173",
