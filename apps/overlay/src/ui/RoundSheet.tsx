@@ -10,13 +10,16 @@ import type { JSX } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { captureCrop } from "../enrich/crop"
 import {
+  canSendNow,
   type DisplayNoteState,
   displayNoteState,
   nextRoundNumber,
   roundOutcome,
+  type SheetTab,
   sessionName,
 } from "../model"
 import { resolveAnchor } from "../pick/anchor"
+import { Conversation } from "./Conversation"
 import { useOverlay, useSheet } from "./context"
 import { SessionRows, useSendRound } from "./Dock"
 import { Avatar, Icon, IntentGlyph, Meter, StatusGlyph } from "./glyphs"
@@ -30,6 +33,12 @@ const INTENT_LABEL = {
   question: "Question",
   keep: "Keep",
 } as const satisfies Record<Intent, string>
+
+const TAB_LABEL = {
+  round: "This round",
+  conversation: "Conversation",
+  history: "History",
+} as const satisfies Record<SheetTab, string>
 
 const TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 
@@ -317,7 +326,7 @@ function RoundTab() {
 
 function Footer({ sending }: { sending: Sending }) {
   const { model } = useOverlay()
-  const { send, blocked, label } = sending
+  const { send, sendNow, nowAvailable, blocked, label } = sending
   const notes = model.orderedDrafts.value
   const counts = Intent.options.flatMap((intent) => {
     const count = notes.filter((note) => note.intent === intent).length
@@ -347,6 +356,9 @@ function Footer({ sending }: { sending: Sending }) {
           {model.name.value} is mid-turn. This round delivers when its turn ends.
         </div>
       ) : null}
+      {nowAvailable ? (
+        <div class="wakeline">Send now reaches {model.name.value} after its current step.</div>
+      ) : null}
       {wake ? <div class="wakeline">{wake}</div> : null}
       <div class="sum">
         <div class="txt">
@@ -366,6 +378,11 @@ function Footer({ sending }: { sending: Sending }) {
             ))}
           </div>
         </div>
+        {nowAvailable ? (
+          <button type="button" class="sendnow" onClick={() => void sendNow()}>
+            Send now
+          </button>
+        ) : null}
         <button type="button" class="send" disabled={blocked !== null} onClick={() => void send()}>
           <Icon name="send" size={15} />
           {label} round
@@ -566,7 +583,12 @@ function StripFrame(props: { round: Round; note: Note; index: number; root: Shad
   )
 }
 
-function HistoryRound({ round }: { round: Round }) {
+function sentNowAt(round: Round): string | undefined {
+  const { state } = round
+  return state.stage === "queued" || state.stage === "announced" ? state.sendNowAt : undefined
+}
+
+function HistoryRound({ round, nudge }: { round: Round; nudge: Sending["nudge"] }) {
   const { model } = useOverlay()
   const outcome = roundOutcome(round)
   const pairing = model.pairing.value
@@ -577,27 +599,41 @@ function HistoryRound({ round }: { round: Round }) {
   const agentName = !owner ? "Agent" : owner.agent === "claude" ? "Claude" : owner.agent
   const ownerName = owner ? sessionName(owner, model.pageId.value) : agentName
   const sent = round.state.stage === "draft" ? undefined : clock(round.state.queuedAt)
+  const nudged = sentNowAt(round) !== undefined
+  const outcomeLabel = nudged
+    ? `Sent now · reaches ${ownerName} after its current step`
+    : round.state.stage === "orphaned"
+      ? `${outcome.label} — ${ownerName} ended before picking this up`
+      : outcome.label
 
   return (
-    <section class="round" aria-label={`Round ${round.id.slice(1)}`}>
+    <section class="round" id={`round-${round.id}`} aria-label={`Round ${round.id.slice(1)}`}>
       <header class="rh">
         <div class="rh1">
           <h3>Round {round.id.slice(1)}</h3>
           <span
-            class={outcome.tone === "done" ? "out" : `out ${outcome.tone}`}
+            class={nudged ? "out sent" : outcome.tone === "done" ? "out" : `out ${outcome.tone}`}
             role="status"
-            aria-label={outcome.label}
+            aria-label={nudged ? outcomeLabel : outcome.label}
           >
-            {outcome.tone === "done" ? <Icon name="check" size={13} /> : null}
-            {round.state.stage === "orphaned"
-              ? `${outcome.label} — ${ownerName} ended before picking this up`
-              : outcome.label}
+            {!nudged && outcome.tone === "done" ? <Icon name="check" size={13} /> : null}
+            {outcomeLabel}
           </span>
           <span class="ticks" aria-hidden="true">
             {round.notes.map((note) => (
               <i key={note.id} class={displayNoteState(round, note)} />
             ))}
           </span>
+          {canSendNow(round, pairing) ? (
+            <button
+              type="button"
+              class="chipbtn nowbtn"
+              aria-label={`Send round ${round.id.slice(1)} now`}
+              onClick={() => void nudge(round)}
+            >
+              Send now
+            </button>
+          ) : null}
         </div>
         <div class="rh2">
           <Avatar agent={owner?.agent ?? "agent"} size={16} />
@@ -620,7 +656,7 @@ function HistoryRound({ round }: { round: Round }) {
   )
 }
 
-function HistoryTab() {
+function HistoryTab({ nudge }: { nudge: Sending["nudge"] }) {
   const { model } = useOverlay()
   const rounds = [...model.rounds.value].reverse()
   useFreshSessions(rounds.some((round) => round.state.stage === "orphaned"))
@@ -636,7 +672,7 @@ function HistoryTab() {
   return (
     <>
       {rounds.map((round) => (
-        <HistoryRound key={round.id} round={round} />
+        <HistoryRound key={round.id} round={round} nudge={nudge} />
       ))}
     </>
   )
@@ -649,7 +685,7 @@ function Sheet({ sending }: { sending: Sending }) {
   const pairing = model.pairing.value
   const sentNotes = model.rounds.value.reduce((sum, round) => sum + round.notes.length, 0)
 
-  function pickTab(next: "round" | "history") {
+  function pickTab(next: SheetTab) {
     model.sheet.value = { ...model.sheet.value, tab: next }
     model.focus.value = -1
   }
@@ -698,14 +734,29 @@ function Sheet({ sending }: { sending: Sending }) {
           type="button"
           class="tab"
           role="tab"
+          aria-selected={tab === "conversation"}
+          onClick={() => pickTab("conversation")}
+        >
+          Conversation
+        </button>
+        <button
+          type="button"
+          class="tab"
+          role="tab"
           aria-selected={tab === "history"}
           onClick={() => pickTab("history")}
         >
           History <span class="ct">{sentNotes}</span>
         </button>
       </div>
-      <div class="sh-b" role="tabpanel" aria-label={tab === "round" ? "This round" : "History"}>
-        {tab === "round" ? <RoundTab /> : <HistoryTab />}
+      <div
+        class={tab === "conversation" ? "sh-b conv" : "sh-b"}
+        role="tabpanel"
+        aria-label={TAB_LABEL[tab]}
+      >
+        {tab === "round" ? <RoundTab /> : null}
+        {tab === "conversation" ? <Conversation /> : null}
+        {tab === "history" ? <HistoryTab nudge={sending.nudge} /> : null}
       </div>
       {tab === "round" ? <Footer sending={sending} /> : null}
     </aside>

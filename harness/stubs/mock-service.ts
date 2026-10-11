@@ -8,6 +8,9 @@ import {
   LiveSessionList,
   liveSubprotocols,
   MachineId,
+  MESSAGE_PAGE_DEFAULT,
+  type MessageId,
+  MessageQuery,
   type Note,
   OVERLAY_PREFIX,
   OVERLAY_ROUTES,
@@ -19,9 +22,11 @@ import {
   PageToken,
   Pairing,
   PairingGeneration,
+  PostMessageResult,
   PROTOCOL_VERSION,
   Round,
   renderBootScript,
+  SendNowResult,
   SendResult,
   ServerMessage,
   SOURCE_BUNDLE_PATH,
@@ -35,6 +40,9 @@ import { nextPort } from "../rig/ports"
 
 const SeededState = PageState.pick({ drafts: true, rounds: true, agentNotes: true })
 const SendRefusal = SendResult.options[1]
+const PostMessageRefusal = PostMessageResult.options[1]
+const PostFailure = PostMessageRefusal.omit({ chat: true, pairing: true })
+const SendNowRefusal = SendNowResult.options[1]
 
 export type MockServiceOptions = {
   folder: string
@@ -44,6 +52,8 @@ export type MockServiceOptions = {
   liveSessions?: z.input<typeof LiveSessionList>
   pageState?: z.input<typeof SeededState>
   prefs?: z.input<typeof OverlayPrefs>
+  chat?: z.input<typeof ChatSetting>
+  messages?: z.input<typeof ConversationMessage>[]
 }
 
 export type RecordedRequest = {
@@ -71,7 +81,11 @@ async function parseBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.
 }
 
 function nextNumber(ids: string[]): number {
-  return Math.max(0, ...ids.map((id) => Number(id.slice(1)))) + 1
+  return Math.max(0, ...ids.map(numberOf)) + 1
+}
+
+function numberOf(id: string): number {
+  return Number(id.slice(1))
 }
 
 // A built single-page app has no file per route, so with `spa` an extensionless miss serves the
@@ -142,9 +156,16 @@ export async function startMockService(options: MockServiceOptions) {
     ...seeded.rounds.flatMap((round) => round.notes.map((note) => note.id)),
   ])
   let roundCounter = nextNumber(seeded.rounds.map((round) => round.id))
-  const messages: ConversationMessage[] = []
-  let chatEnabled = true
+  let messages = options.messages ? options.messages.map((m) => ConversationMessage.parse(m)) : []
+  messages.sort((a, b) => numberOf(a.id) - numberOf(b.id))
+  let messageCounter = nextNumber(messages.map((message) => message.id))
+  let chat = ChatSetting.parse(
+    options.chat ?? { enabled: true, defaultEnabled: true, reachable: true },
+  )
   let sendFailure: z.output<typeof SendRefusal> | null = null
+  let postFailure: z.output<typeof PostFailure> | null = null
+  let sendNowFailure: z.output<typeof SendNowRefusal>["reason"] | null = null
+  let postGate: Promise<void> | null = null
   const sockets = new Map<unknown, WSContext>()
   const requests: RecordedRequest[] = []
   const clientMessages: ClientMessage[] = []
@@ -157,19 +178,25 @@ export async function startMockService(options: MockServiceOptions) {
       pairing: pairing && { owner: pairing.owner, generation: pairing.generation },
     })
 
-  const chat = () =>
-    ChatSetting.parse({
-      enabled: chatEnabled,
-      defaultEnabled: true,
-      reachable: pairing !== null && pairing.state.status !== "gone",
-    })
-
   // Chromium omits Origin on a same-origin GET, so Sec-Fetch-Site vouches for the page instead.
   const requestOrigin = (c: Context) =>
     c.req.header("origin") ?? (c.req.header("sec-fetch-site") === "same-origin" ? origin : null)
 
   const now = () => new Date().toISOString()
   const R = OVERLAY_ROUTES
+
+  const push = (message: z.input<typeof ServerMessage>) => {
+    const text = JSON.stringify(ServerMessage.parse(message))
+    for (const ws of sockets.values()) ws.send(text)
+  }
+
+  const storeMessage = (message: ConversationMessage) => {
+    messages = [...messages.filter((held) => held.id !== message.id), message].sort(
+      (a, b) => numberOf(a.id) - numberOf(b.id),
+    )
+    messageCounter = Math.max(messageCounter, numberOf(message.id) + 1)
+    push({ type: "message", message })
+  }
 
   const app = new Hono()
     .use("*", async (c, next) => {
@@ -345,48 +372,96 @@ export async function startMockService(options: MockServiceOptions) {
         })),
       ),
     )
-    .get(R.listMessages.path, () =>
-      reply(R.listMessages.response, { messages: [...messages], hasOlder: false }),
-    )
+    .get(R.listMessages.path, (c) => {
+      const query = MessageQuery.safeParse(c.req.query())
+      if (!query.success) return c.body(null, 400)
+      const limit = query.data.limit === undefined ? MESSAGE_PAGE_DEFAULT : Number(query.data.limit)
+      const { before } = query.data
+      const below =
+        before === undefined
+          ? messages
+          : messages.filter((message) => numberOf(message.id) < numberOf(before))
+      return reply(R.listMessages.response, {
+        messages: below.slice(-limit),
+        hasOlder: below.length > limit,
+      })
+    })
     .post(R.postMessage.path, async (c) => {
       const post = await parseBody(c, R.postMessage.request)
       if (!post) return c.body(null, 400)
+      await postGate
       const stored = messages.find(
         (message) =>
           message.author.kind === "page" && message.author.idempotencyKey === post.idempotencyKey,
       )
-      const message =
-        stored ??
-        ConversationMessage.parse({
-          id: `M${nextNumber(messages.map((message) => message.id))}`,
-          pageId,
-          roundId: null,
-          author: {
-            kind: "page",
-            idempotencyKey: post.idempotencyKey,
-            delivery: { status: "queued" },
-          },
-          text: post.text,
-          at: now(),
-        })
-      if (!stored) messages.push(message)
+      if (stored) return reply(R.postMessage.response, { outcome: "accepted", message: stored })
+      if (postFailure) {
+        const refusal = postFailure
+        postFailure = null
+        return reply(R.postMessage.response, { ...refusal, chat, pairing })
+      }
+      const reason = !pairing
+        ? "no-pairing"
+        : post.generation !== pairing.generation
+          ? "stale-generation"
+          : pairing.state.status === "gone"
+            ? "session-gone"
+            : !chat.enabled
+              ? "chat-off"
+              : !chat.reachable
+                ? "unreachable"
+                : null
+      if (reason) {
+        return reply(R.postMessage.response, { outcome: "refused", reason, chat, pairing })
+      }
+      const newest = rounds.reduce<Round | null>(
+        (best, round) => (!best || numberOf(round.id) > numberOf(best.id) ? round : best),
+        null,
+      )
+      const message = ConversationMessage.parse({
+        id: `M${messageCounter}`,
+        pageId,
+        roundId: newest?.id ?? null,
+        author: {
+          kind: "page",
+          idempotencyKey: post.idempotencyKey,
+          delivery: { status: "queued" },
+        },
+        text: post.text,
+        at: now(),
+      })
+      storeMessage(message)
       return reply(R.postMessage.response, { outcome: "accepted", message })
     })
-    .get(R.getChat.path, () => reply(R.getChat.response, chat()))
+    .get(R.getChat.path, () => reply(R.getChat.response, chat))
     .put(R.setChat.path, async (c) => {
       const toggle = await parseBody(c, R.setChat.request)
       if (!toggle) return c.body(null, 400)
-      chatEnabled = toggle.enabled
-      return reply(R.setChat.response, chat())
+      chat = { ...chat, enabled: toggle.enabled }
+      push({ type: "chat", chat })
+      return reply(R.setChat.response, chat)
     })
     .post(R.sendNow.path, (c) => {
       const round = rounds.find((candidate) => candidate.id === c.req.param("roundId"))
       if (!round) return c.body(null, 404)
-      if (round.state.stage !== "queued") {
-        return reply(R.sendNow.response, { outcome: "refused", reason: "not-waiting", round })
+      const refuse = (reason: z.output<typeof SendNowRefusal>["reason"]) =>
+        reply(R.sendNow.response, { outcome: "refused", reason, round })
+      if (sendNowFailure) {
+        const reason = sendNowFailure
+        sendNowFailure = null
+        return refuse(reason)
       }
-      const sent = { ...round, state: { ...round.state, sendNowAt: now() } }
+      if (!pairing) return refuse("no-pairing")
+      if (round.state.stage === "orphaned" || pairing.state.status === "gone") {
+        return refuse("session-gone")
+      }
+      if (round.state.stage !== "queued") return refuse("not-waiting")
+      const sent = {
+        ...round,
+        state: { ...round.state, sendNowAt: round.state.sendNowAt ?? now() },
+      }
       rounds = rounds.map((candidate) => (candidate.id === sent.id ? sent : candidate))
+      push({ type: "round", round: sent })
       return reply(R.sendNow.response, { outcome: "accepted", round: sent })
     })
     .post(R.uploadScreenshot.path, async (c) => {
@@ -503,10 +578,7 @@ export async function startMockService(options: MockServiceOptions) {
     setLiveSessions(list: z.input<typeof LiveSessionList>) {
       liveSessions = LiveSessionList.parse(list)
     },
-    push(message: z.input<typeof ServerMessage>) {
-      const text = JSON.stringify(ServerMessage.parse(message))
-      for (const ws of sockets.values()) ws.send(text)
-    },
+    push,
     draft: () => [...drafts.values()],
     rounds: () => [...rounds],
     prefs: () => prefs,
@@ -514,6 +586,45 @@ export async function startMockService(options: MockServiceOptions) {
     clientMessages: () => [...clientMessages],
     failNextSend(refusal: z.input<typeof SendRefusal>) {
       sendFailure = SendRefusal.parse(refusal)
+    },
+    messages: () => [...messages],
+    chat: () => chat,
+    pushMessage(message: z.input<typeof ConversationMessage>) {
+      storeMessage(ConversationMessage.parse(message))
+    },
+    markDelivered(id: MessageId) {
+      const held = messages.find((message) => message.id === id)
+      if (held?.author.kind !== "page" || held.author.delivery.status !== "queued") {
+        throw new Error(`${id} is not a queued page message`)
+      }
+      storeMessage({
+        ...held,
+        author: { ...held.author, delivery: { status: "delivered", at: now() } },
+      })
+    },
+    setChat(next: z.input<typeof ChatSetting>) {
+      chat = ChatSetting.parse(next)
+      push({ type: "chat", chat })
+    },
+    holdPosts() {
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      postGate = held
+      return () => {
+        if (postGate === held) postGate = null
+        release()
+      }
+    },
+    failNextPost(refusal: z.input<typeof PostFailure>) {
+      postFailure = PostFailure.parse(refusal)
+    },
+    failNextSendNow(reason: z.output<typeof SendNowRefusal>["reason"]) {
+      sendNowFailure = SendNowRefusal.shape.reason.parse(reason)
+    },
+    dropSockets() {
+      for (const ws of sockets.values()) ws.close(1012, "mock service dropped its sockets")
     },
     async stop() {
       for (const ws of sockets.values()) ws.close(1001, "mock service stopped")

@@ -167,6 +167,12 @@ function useCommands(sendRound: SendRound): Command[] {
       run: () => openSheet("round"),
     },
     { group: "Actions", icon: "history", label: "Show history", run: () => openSheet("history") },
+    {
+      group: "Actions",
+      icon: "history",
+      label: "Show conversation",
+      run: () => openSheet("conversation"),
+    },
   ]
   if (sendRound.blocked === null)
     commands.push({
@@ -175,6 +181,14 @@ function useCommands(sendRound: SendRound): Command[] {
       label: `${sendRound.label} round ${round}`,
       sub: roundSummary(drafts),
       run: () => void sendRound.send(),
+    })
+  if (sendRound.nowAvailable)
+    commands.push({
+      group: "Actions",
+      icon: "send",
+      label: `Send round ${round} now`,
+      sub: roundSummary(drafts),
+      run: () => void sendRound.sendNow(),
     })
   commands.push(
     {

@@ -1,0 +1,174 @@
+.sheet .sh-b.conv {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.cv-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overflow-anchor: none;
+  padding: 8px 12px 12px;
+  font-family: var(--sans);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.cv-top {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--mute);
+}
+.cv-msg {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+.cv-msg + .cv-msg {
+  margin-top: 4px;
+}
+.cv-msg.page {
+  background: var(--paper-2);
+}
+.cv-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--mute);
+}
+.cv-meta b {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.cv-meta span {
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+.cv-text {
+  margin: 3px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cv-state {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--mute);
+}
+.cv-state.delivered {
+  color: var(--keep-t);
+}
+.cv-state.failed {
+  color: var(--fix-d);
+}
+.cv-acts {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.cv-round {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mute);
+}
+.cv-round::before,
+.cv-round::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.cv-round:hover {
+  color: var(--ink);
+}
+.cv-chat {
+  border-top: 1px solid var(--line);
+  padding: 12px 16px 14px;
+  background: var(--paper-2);
+  border-radius: 0 0 12px 12px;
+  font-family: var(--sans);
+}
+.cv-chat .gonebox {
+  margin-bottom: 0;
+}
+.cv-line {
+  margin: 0 0 10px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mute);
+}
+.cv-line:last-child {
+  margin-bottom: 0;
+}
+.cv-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cv-link:hover {
+  color: var(--ink);
+}
+.cv-off p {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.cv-field {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.cv-field textarea {
+  flex: 1;
+  min-width: 0;
+  field-sizing: content;
+  min-height: 38px;
+  max-height: 160px;
+  resize: none;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.cv-field textarea::placeholder {
+  color: var(--faint);
+}
+.cv-field textarea:focus {
+  outline: none;
+  border-color: var(--cobalt);
+  box-shadow:
+    inset 0 2px 0 var(--cobalt-wash),
+    0 0 0 3px var(--cobalt-wash);
+}
+.cv-field .send {
+  padding: 0 11px;
+}
+.cv-over {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fix-d);
+}
