@@ -405,6 +405,56 @@ describe("command surface", () => {
     expect(spawned).toEqual([])
   })
 
+  test("connect runs the host it was given and exits with what the run ends with", async () => {
+    const state = await setup()
+    const spawned: string[][] = []
+    const finished = (code: number, output: { stdout?: string; stderr?: string } = {}) => {
+      const stream = (text: string) =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(text))
+            controller.close()
+          },
+        })
+      return {
+        exited: Promise.resolve(code),
+        exitCode: code,
+        stdout: stream(output.stdout ?? ""),
+        stderr: stream(output.stderr ?? ""),
+        kill() {},
+      }
+    }
+    const fakeSystem: ConnectSystem = {
+      spawn: (argv) => {
+        spawned.push(argv)
+        return argv[1] === "-G"
+          ? finished(0, { stdout: "host devbox-1\nhostname devbox-1.example\n" })
+          : finished(255, { stderr: "devbox-1: Permission denied (publickey).\n" })
+      },
+      clock: { now: Date.now, setTimeout, clearTimeout },
+      platform: "linux",
+      laptopName: "laptop",
+      home: state.home,
+      forwardAddress: null,
+      tailscale: () => null,
+      localPool: async () => null,
+      nonce: () => "01234567",
+      out: (line) => state.deps.stdout(`${line}\n`),
+      onInterrupt() {},
+    }
+    await runCommand(connect(state.deps, fakeSystem), { rawArgs: ["devbox-1"] })
+    expect(spawned.length).toBeGreaterThanOrEqual(2)
+    for (const argv of spawned) expect(argv[argv.indexOf("--") + 1]).toBe("devbox-1")
+    expect(spawned[0]?.slice(0, 4)).toEqual(["ssh", "-G", "--", "devbox-1"])
+    expect(state.stdout).toEqual([
+      "Connecting to devbox-1 over SSH…\n",
+      "SSH to devbox-1 needs a password or a host-key confirmation. Run ssh devbox-1 once, then retry.\n",
+    ])
+    expect(state.stderr).toEqual([])
+    expect(state.exits).toEqual([ExitCode.failure])
+    expect(state.connections).toEqual([])
+  })
+
   test("every missing required flag and invalid enum value exits usage", async () => {
     for (const [name, spec] of Object.entries(CLI_SURFACE)) {
       if (name === "serve") continue
