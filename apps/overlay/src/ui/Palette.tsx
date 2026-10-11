@@ -182,6 +182,14 @@ function useCommands(sendRound: SendRound): Command[] {
       sub: roundSummary(drafts),
       run: () => void sendRound.send(),
     })
+  if (sendRound.nowAvailable)
+    commands.push({
+      group: "Actions",
+      icon: "send",
+      label: `Send round ${round} now`,
+      sub: roundSummary(drafts),
+      run: () => void sendRound.sendNow(),
+    })
   commands.push(
     {
       group: "View",

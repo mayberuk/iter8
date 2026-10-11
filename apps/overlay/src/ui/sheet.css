@@ -377,6 +377,28 @@
 .sheet .sh-f .send {
   height: 36px;
 }
+.sheet .sh-f .sendnow {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  box-shadow:
+    0 2px 0 var(--edge),
+    var(--top);
+  margin-bottom: 2px;
+  transition: transform 0.09s var(--press);
+}
+.sheet .sh-f .sendnow:hover {
+  background: var(--raised);
+}
+.sheet .sh-f .sendnow:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--edge);
+}
 .sheet .gonebox {
   margin-bottom: 12px;
   padding: 10px;
@@ -457,6 +479,9 @@
 }
 .sheet .rh .out.failed {
   color: var(--fix-t);
+}
+.sheet .rh1 .nowbtn {
+  margin-left: auto;
 }
 .sheet .rh2 {
   display: flex;

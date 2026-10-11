@@ -4,6 +4,9 @@ import {
   type OverlayBoot,
   OverlayPrefs,
   type OwnerId,
+  type Round,
+  type RoundId,
+  type SendResult,
 } from "@iter8/protocol"
 import { useComputed } from "@preact/signals"
 import type { JSX } from "preact"
@@ -15,6 +18,7 @@ import {
   type Mode,
   nextRoundNumber,
   sessionName,
+  type ToastTone,
 } from "../model"
 import { adoptSheet, useOverlay, useSheet } from "./context"
 import dockCss from "./dock.css" with { type: "text" }
@@ -137,14 +141,27 @@ export function NoticeDock(props: { root: ShadowRoot; boot: OverlayBoot; state: 
 
 export function useSendRound(): {
   send: () => Promise<void>
+  sendNow: () => Promise<void>
+  nudge: (round: Round) => Promise<void>
+  nowAvailable: boolean
   blocked: "no-pairing" | "gone" | "empty" | null
   label: "Send" | "Queue"
 } {
   const { model, connection } = useOverlay()
+  const nudging = useRef(new Set<RoundId>())
+  const busy = model.pairing.value?.state.status === "busy"
   const blocked = model.sendBlocked.value
-  const label = model.pairing.value?.state.status === "busy" ? "Queue" : "Send"
+  const label = busy ? "Queue" : "Send"
 
-  async function send() {
+  async function requestNow(round: Round, failure: string, tone: ToastTone) {
+    try {
+      model.applySendNowResult(await connection.sendNow(round.id))
+    } catch {
+      model.pushToast(failure, { tone })
+    }
+  }
+
+  async function submit(andNow: boolean) {
     const pairing = model.pairing.value
     const { sending } = model
     if (sending.inFlight || !pairing || model.sendBlocked.value) return
@@ -158,17 +175,45 @@ export function useSendRound(): {
     sending.key = { revision, key }
     sending.inFlight = true
     try {
-      model.applySendResult(await connection.send(buildSendRequest(noteIds, pairing, key)))
-    } catch {
-      model.pushToast("Couldn't reach iter8 — your notes are still here, send again", {
-        tone: "failed",
-      })
+      let result: SendResult
+      try {
+        result = await connection.send(buildSendRequest(noteIds, pairing, key))
+      } catch {
+        model.pushToast("Couldn't reach iter8 — your notes are still here, send again", {
+          tone: "failed",
+        })
+        return
+      }
+      model.applySendResult(result)
+      if (andNow && result.outcome === "accepted")
+        await requestNow(
+          result.round,
+          `Round ${result.round.id.slice(1)} queued — couldn't send it now`,
+          "amber",
+        )
     } finally {
       sending.inFlight = false
     }
   }
 
-  return { send, blocked, label }
+  async function nudge(round: Round) {
+    if (nudging.current.has(round.id)) return
+    nudging.current.add(round.id)
+    try {
+      await requestNow(round, `Couldn't send round ${round.id.slice(1)} now`, "failed")
+    } finally {
+      nudging.current.delete(round.id)
+    }
+  }
+
+  return {
+    send: () => submit(false),
+    sendNow: () => submit(true),
+    nudge,
+    nowAvailable: busy && blocked === null,
+    blocked,
+    label,
+  }
 }
 
 export function SessionRows(props: {
