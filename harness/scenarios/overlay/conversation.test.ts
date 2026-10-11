@@ -154,6 +154,10 @@ const log = (panel: Locator) => panel.getByRole("log")
 const articles = (panel: Locator) => log(panel).getByRole("article")
 const input = (panel: Locator) => panel.getByRole("textbox", { name: `Message ${NAME}` })
 
+async function deliveryLines(row: Locator): Promise<string[]> {
+  return row.locator(".cv-state").evaluateAll((els) => els.map((el) => el.textContent ?? ""))
+}
+
 async function texts(panel: Locator): Promise<string[]> {
   return articles(panel).evaluateAll((els) =>
     els.map((el) => el.querySelector(".cv-text")?.textContent ?? ""),
@@ -423,11 +427,20 @@ describe("conversation: finished messages", () => {
     const panel = await openConversation(o)
     await untilCount(panel, 3)
     const rows = articles(panel)
-    expect(await rows.nth(0).textContent()).toContain(`Waiting for ${NAME} to take it`)
-    expect(await rows.nth(1).textContent()).toContain(`Taken by ${NAME}`)
-    expect(await rows.nth(2).textContent()).toContain(
+    expect(await deliveryLines(rows.nth(0))).toEqual([`Waiting for ${NAME} to take it`])
+    expect(await deliveryLines(rows.nth(1))).toEqual([`Taken by ${NAME}`])
+    expect(await deliveryLines(rows.nth(2))).toEqual([
       `Not delivered — ${NAME} ended before taking it`,
+    ])
+    const [waitingText, takenText, failedText] = await Promise.all(
+      [0, 1, 2].map(async (i) => (await rows.nth(i).textContent()) ?? ""),
     )
+    expect(waitingText).not.toContain("Taken by")
+    expect(waitingText).not.toContain("Not delivered")
+    expect(takenText).not.toContain("Waiting for")
+    expect(takenText).not.toContain("Not delivered")
+    expect(failedText).not.toContain("Waiting for")
+    expect(failedText).not.toContain("Taken by")
   }, 30_000)
 
   test("a divider marks each change into a round, and one switches to History scrolled to its round", async () => {
@@ -705,6 +718,9 @@ describe("conversation: sending from the page", () => {
     await until("the taken line", async () =>
       ((await articles(panel).last().textContent()) ?? "").includes(`Taken by ${NAME}`),
     )
+    expect(await deliveryLines(articles(panel).last())).toEqual([`Taken by ${NAME}`])
+    expect(await articles(panel).last().textContent()).not.toContain("Waiting for")
+    expect(await panel.getByText(`Waiting for ${NAME} to take it`).count()).toBe(0)
     expect(await articles(panel).count()).toBe(2)
   }, 30_000)
 
