@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -28,6 +28,8 @@ import {
 } from "@iter8/protocol"
 import { type ArgsDef, type CommandDef, runCommand } from "citty"
 import { hc } from "hono/client"
+import { type LaptopOpen, listenForPages } from "../../connect/page-channel"
+import type { ConnectSystem } from "../../connect/run"
 import { createAgentNotes } from "../../pages/agent-notes"
 import { createPages } from "../../pages/pages"
 import { createScreenshots } from "../../pages/screenshots"
@@ -37,7 +39,8 @@ import { type ControlApp, createControlApi } from "../../service/control-api"
 import { createLiveHub } from "../../service/live"
 import { createWaiters, type Waiters } from "../../service/waiters"
 import { openStore, readOrCreateMachineId } from "../../store/db"
-import { type CliDeps, controlClientFor } from "../client"
+import { type CliDeps, commandArgs, controlClientFor } from "../client"
+import { connect } from "./connect"
 import { cliCommands } from "./index"
 
 const databases: Database[] = []
@@ -58,7 +61,8 @@ async function tempDir() {
   return path
 }
 
-function setup() {
+async function setup() {
+  const home = await tempDir()
   const db = openStore(":memory:")
   databases.push(db)
   const cwd = "/tmp/iter8-project"
@@ -110,7 +114,7 @@ function setup() {
         machineId,
         machineName: "workstation",
         pid,
-        home: "/tmp/iter8-home",
+        home,
         pool: [3990, 3991, 3992, 3993],
         overlay: "present",
         owner: owner ? owners.pairing(owner, PairingGeneration.parse(0), listener(owner)) : null,
@@ -121,6 +125,8 @@ function setup() {
   const exits: number[] = []
   const connections: { start: boolean }[] = []
   const requests: { path: string; search: string; body: unknown }[] = []
+  const responses: { path: string; body: string }[] = []
+  let statusFailure: "disconnected" | "refused" | "invalid" | null = null
   const client = hc<ControlApp>("http://iter8", {
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input))
@@ -129,7 +135,15 @@ function setup() {
         search: url.search,
         body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
       })
-      return app.request(`${url.pathname}${url.search}`, init)
+      if (url.pathname === "/status" && statusFailure !== null) {
+        if (statusFailure === "disconnected") throw new Error("Control connection lost")
+        return statusFailure === "refused"
+          ? new Response("Service unavailable", { status: 503 })
+          : Response.json({})
+      }
+      const response = await app.request(`${url.pathname}${url.search}`, init)
+      responses.push({ path: url.pathname, body: await response.clone().text() })
+      return response
     },
   })
   const deps: CliDeps = {
@@ -153,6 +167,10 @@ function setup() {
     exits.length = 0
     connections.length = 0
     requests.length = 0
+    responses.length = 0
+  }
+  function failStatus(kind: NonNullable<typeof statusFailure>) {
+    statusFailure = kind
   }
   async function run(name: string, rawArgs: string[] = []) {
     const commands = cliCommands(deps)
@@ -221,6 +239,7 @@ function setup() {
     client,
     app,
     run,
+    failStatus,
     clear,
     start,
     openPage,
@@ -231,12 +250,14 @@ function setup() {
     exits,
     connections,
     requests,
+    responses,
     pages,
     inbox,
     screenshots,
     owners,
     waiters,
     machineId,
+    home,
     pid,
   }
 }
@@ -253,11 +274,42 @@ async function resolved<T>(value: T | Promise<T> | (() => T | Promise<T>)): Prom
   return typeof value === "function" ? await (value as () => T | Promise<T>)() : await value
 }
 
+type State = Awaited<ReturnType<typeof setup>>
+
+async function leaveStaleSocket(socketPath: string) {
+  const creating = `${socketPath}.creating`
+  const server = Bun.listen({ unix: creating, socket: { data() {} } })
+  try {
+    await rename(creating, socketPath)
+  } finally {
+    server.stop(true)
+  }
+  expect((await stat(socketPath)).isSocket()).toBe(true)
+}
+
+function servedOpen(state: State): unknown {
+  return JSON.parse(state.responses.find((response) => response.path === "/open")?.body ?? "")
+}
+
+const connectHint = () =>
+  `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).`
+
 describe("command surface", () => {
   test("derives every owned command, positional and flag from CLI_SURFACE", async () => {
-    const commands = cliCommands(setup().deps)
+    const commands = cliCommands((await setup()).deps)
     expect(Object.keys(commands).sort()).toEqual(
-      ["open", "attach", "rounds", "show", "done", "note", "status", "version", "hook"].sort(),
+      [
+        "open",
+        "connect",
+        "attach",
+        "rounds",
+        "show",
+        "done",
+        "note",
+        "status",
+        "version",
+        "hook",
+      ].sort(),
     )
     for (const [name, spec] of Object.entries(CLI_SURFACE)) {
       if (name === "serve") continue
@@ -287,6 +339,124 @@ describe("command surface", () => {
     }
   })
 
+  test("connect takes one HOST and no flags, prints no protocol result, and its command has exactly HOST and json", async () => {
+    const { positionals, flags, output } = CLI_SURFACE.connect
+    expect(positionals).toEqual(["HOST"])
+    expect(flags).toEqual([])
+    expect(output).toBeNull()
+    expect(Object.keys(commandArgs("connect")).sort()).toEqual(["HOST", "json"])
+    const command = cliCommands((await setup()).deps).connect
+    expect(Object.keys(await resolved(command?.args ?? {})).sort()).toEqual(["HOST", "json"])
+  })
+
+  test("connect without a host exits usage before reaching the system", async () => {
+    const state = await setup()
+    const spawn = spyOn(Bun, "spawn").mockImplementation(() => {
+      throw new Error("connect must not spawn without a host")
+    })
+    try {
+      await state.run("connect")
+      expect(state.exits).toEqual([ExitCode.usage])
+      expect(state.stdout).toEqual([])
+      expect(state.connections).toEqual([])
+      expect(spawn).not.toHaveBeenCalled()
+    } finally {
+      spawn.mockRestore()
+    }
+  })
+
+  test.each([
+    { rawArgs: ["-oProxyCommand=x"] },
+    { rawArgs: ["--", "-oProxyCommand=x"] },
+    { rawArgs: ["-"] },
+    { rawArgs: ["--", "-"] },
+    { rawArgs: [""] },
+    { rawArgs: ["dev box"] },
+    { rawArgs: ["dev\u0007box"] },
+  ])("connect rejects invalid host arguments %j without spawning", async ({ rawArgs }) => {
+    const state = await setup()
+    const spawned: string[][] = []
+    const fakeSystem: ConnectSystem = {
+      spawn: (argv) => {
+        spawned.push(argv)
+        throw new Error("invalid hosts must not spawn")
+      },
+      clock: {
+        now: () => 0,
+        setTimeout: () => {
+          throw new Error("invalid hosts must not schedule timers")
+        },
+        clearTimeout() {},
+      },
+      platform: "linux",
+      laptopName: "laptop",
+      home: state.home,
+      forwardAddress: null,
+      tailscale: () => null,
+      localPool: async () => null,
+      nonce: () => "01234567",
+      out: (line) => state.deps.stdout(`${line}\n`),
+      onInterrupt() {
+        throw new Error("invalid hosts must not register interrupts")
+      },
+    }
+    await runCommand(connect(state.deps, fakeSystem), { rawArgs: [...rawArgs] })
+    expect(state.exits).toEqual([ExitCode.usage])
+    expect(state.stdout).toEqual([])
+    expect(state.connections).toEqual([])
+    expect(spawned).toEqual([])
+  })
+
+  test("connect runs the host it was given and exits with what the run ends with", async () => {
+    const state = await setup()
+    const spawned: string[][] = []
+    const finished = (code: number, output: { stdout?: string; stderr?: string } = {}) => {
+      const stream = (text: string) =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(text))
+            controller.close()
+          },
+        })
+      return {
+        exited: Promise.resolve(code),
+        exitCode: code,
+        stdout: stream(output.stdout ?? ""),
+        stderr: stream(output.stderr ?? ""),
+        kill() {},
+      }
+    }
+    const fakeSystem: ConnectSystem = {
+      spawn: (argv) => {
+        spawned.push(argv)
+        return argv[1] === "-G"
+          ? finished(0, { stdout: "host devbox-1\nhostname devbox-1.example\n" })
+          : finished(255, { stderr: "devbox-1: Permission denied (publickey).\n" })
+      },
+      clock: { now: Date.now, setTimeout, clearTimeout },
+      platform: "linux",
+      laptopName: "laptop",
+      home: state.home,
+      forwardAddress: null,
+      tailscale: () => null,
+      localPool: async () => null,
+      nonce: () => "01234567",
+      out: (line) => state.deps.stdout(`${line}\n`),
+      onInterrupt() {},
+    }
+    await runCommand(connect(state.deps, fakeSystem), { rawArgs: ["devbox-1"] })
+    expect(spawned.length).toBeGreaterThanOrEqual(2)
+    for (const argv of spawned) expect(argv[argv.indexOf("--") + 1]).toBe("devbox-1")
+    expect(spawned[0]?.slice(0, 4)).toEqual(["ssh", "-G", "--", "devbox-1"])
+    expect(state.stdout).toEqual([
+      "Connecting to devbox-1 over SSH…\n",
+      "SSH to devbox-1 needs a password or a host-key confirmation. Run ssh devbox-1 once, then retry.\n",
+    ])
+    expect(state.stderr).toEqual([])
+    expect(state.exits).toEqual([ExitCode.failure])
+    expect(state.connections).toEqual([])
+  })
+
   test("every missing required flag and invalid enum value exits usage", async () => {
     for (const [name, spec] of Object.entries(CLI_SURFACE)) {
       if (name === "serve") continue
@@ -305,7 +475,7 @@ describe("command surface", () => {
       )
       for (const flag of spec.flags) {
         if (!flag.required && !Array.isArray(flag.value)) continue
-        const state = setup()
+        const state = await setup()
         const args = [...(child ? [child] : []), ...spec.positionals.map(() => "page"), ...valid]
         const offset = args.indexOf(`--${flag.name}`)
         if (flag.required) args.splice(offset, 2)
@@ -316,7 +486,7 @@ describe("command surface", () => {
         expect(state.connections).toEqual([])
       }
       for (const flag of spec.flags.filter((flag) => Array.isArray(flag.value))) {
-        const state = setup()
+        const state = await setup()
         const args = [...(child ? [child] : []), ...spec.positionals.map(() => "page"), ...valid]
         args[args.indexOf(`--${flag.name}`) + 1] = "invalid"
         await state.run(root, args)
@@ -336,7 +506,7 @@ describe("command surface", () => {
       ["show", []],
       ["note", ["page", "--intent", "fix", "--body", "x", "--at"]],
     ] as const) {
-      const state = setup()
+      const state = await setup()
       await state.run(command, [...args])
       expect(state.exits).toEqual([ExitCode.usage])
       expect(state.connections).toEqual([])
@@ -348,7 +518,7 @@ describe("hook commands", () => {
   test.each(["claude", undefined])(
     "start preserves agent %s and sends process identity",
     async (agent) => {
-      const state = setup()
+      const state = await setup()
       await state.run("hook", [
         "start",
         "--pid",
@@ -374,7 +544,7 @@ describe("hook commands", () => {
   )
 
   test.each(["start", "prompt"])("%s prints only unannounced pointers", async (command) => {
-    const state = setup()
+    const state = await setup()
     await state.start("claude")
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -399,7 +569,7 @@ describe("hook commands", () => {
   test.each(["start", "prompt"])(
     "%s prints one pointer line per unannounced round, in order",
     async (command) => {
-      const state = setup()
+      const state = await setup()
       await state.start("claude")
       const page = await state.openPage()
       const rounds = [
@@ -427,7 +597,7 @@ describe("hook commands", () => {
   )
 
   test("prompt, stop and end update the registered owner without extra output", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     await state.run("hook", ["prompt", "--pid", "9001", "--json"])
     expect(state.owners.state(pairing.owner).status).toBe("busy")
@@ -454,7 +624,7 @@ describe("hook commands", () => {
   })
 
   test("wait wakes with pointer lines on stderr and exit wake", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     const page = await state.openPage()
     const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "600"])
@@ -471,7 +641,7 @@ describe("hook commands", () => {
   })
 
   test("wait woken by two rounds writes one pointer line each to stderr", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     const page = await state.openPage()
     const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "600"])
@@ -493,7 +663,7 @@ describe("hook commands", () => {
   test.each(["600", "2147483"])(
     "wait sends the pid, its start time and the full timeout %s",
     async (timeout) => {
-      const state = setup()
+      const state = await setup()
       const pairing = await state.start()
       const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", timeout])
       await armed(state.waiters, pairing.owner)
@@ -510,7 +680,7 @@ describe("hook commands", () => {
   )
 
   test("wait times out with silent success", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     await state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "0", "--json"])
     expect(state.exits).toEqual([ExitCode.ok])
@@ -519,7 +689,7 @@ describe("hook commands", () => {
   })
 
   test.each(["replaced", "cancelled"])("wait %s ends with silent success", async (outcome) => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "600"])
     await armed(state.waiters, pairing.owner)
@@ -534,7 +704,7 @@ describe("hook commands", () => {
   })
 
   test.each(["null", "throw"])("wait with connect %s exits unavailable once", async (mode) => {
-    const state = setup()
+    const state = await setup()
     state.deps.connect = async (options) => {
       state.connections.push(options)
       if (mode === "throw") throw new Error("Start failed")
@@ -549,7 +719,7 @@ describe("hook commands", () => {
   })
 
   test("lost fetch after the wait request was sent exits unavailable without reconnecting", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     let pending: Promise<Response> | Response | undefined
     const broken = hc<ControlApp>("http://iter8", {
@@ -577,7 +747,7 @@ describe("hook commands", () => {
 
 describe("agent commands", () => {
   test("open lists localhost URLs and the full pool forward hint", async () => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", [
       "http://localhost:5173/view",
       "--upstream",
@@ -587,7 +757,7 @@ describe("agent commands", () => {
     expect(state.exits).toEqual([ExitCode.ok])
     expect(state.stdout.join("")).toMatch(/http:\/\/[a-z][a-z0-9-]*\.localhost:3990\//)
     expect(state.stdout.join("")).toContain(
-      "Browser on another machine? Forward the pool once: ssh -N -o ExitOnForwardFailure=yes",
+      `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
     )
     for (const port of [3990, 3991, 3992, 3993])
       expect(state.stdout.join("")).toContain(`-L ${port}:localhost:${port}`)
@@ -601,7 +771,7 @@ describe("agent commands", () => {
     const directory = await tempDir()
     const path = join(directory, "a file.html")
     await writeFile(path, "<h1>Hello</h1>")
-    const state = setup()
+    const state = await setup()
     for (const target of [path, directory]) {
       await state.run("open", [target, "--json"])
       expect(state.exits).toEqual([ExitCode.ok])
@@ -620,14 +790,14 @@ describe("agent commands", () => {
     "http://127.evil.com",
     "http://user:password@localhost",
   ])("open rejects %s before connecting", async (target) => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", [target])
     expect(state.exits).toEqual([ExitCode.usage])
     expect(state.connections).toEqual([])
   })
 
   test("attach, rounds, note, show, done and status emit their protocol JSON results", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start("claude")
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -676,7 +846,7 @@ describe("agent commands", () => {
   test.each([false, true])(
     "show json=%s claims the round and writes each captured PNG",
     async (json) => {
-      const state = setup()
+      const state = await setup()
       await state.start()
       const page = await state.openPage()
       const png = Uint8Array.from([
@@ -707,7 +877,7 @@ describe("agent commands", () => {
   )
 
   test("show writes each note's own screenshot under its own name and skips notes without one", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const pngOf = (width: number) =>
@@ -775,7 +945,7 @@ describe("agent commands", () => {
   })
 
   test("each show run writes into its own fresh directory and leaves earlier runs' files intact", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const pngOf = (width: number) =>
@@ -852,7 +1022,7 @@ describe("agent commands", () => {
   })
 
   test("done prints done or answered and unknown note exits notFound", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     for (const reply of [undefined, "Changed"]) {
@@ -870,7 +1040,7 @@ describe("agent commands", () => {
   })
 
   test("resolved wrong owner refuses show and done", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -887,7 +1057,7 @@ describe("agent commands", () => {
   })
 
   test("agent text results are readable and diagnostics stay off stdout", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start("claude")
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -911,7 +1081,7 @@ describe("agent commands", () => {
   })
 
   test("service-side bad request maps to usage", async () => {
-    const state = setup()
+    const state = await setup()
     const directory = await tempDir()
     await state.run("open", [directory, "--upstream", "http://localhost:5173"])
     expect(state.exits).toEqual([ExitCode.usage])
@@ -920,7 +1090,7 @@ describe("agent commands", () => {
   })
 
   test("status with no running service exits unavailable without starting", async () => {
-    const state = setup()
+    const state = await setup()
     state.deps.connect = async (options) => {
       state.connections.push(options)
       return null
@@ -933,7 +1103,7 @@ describe("agent commands", () => {
   })
 
   test("version has the protocol version and never connects", async () => {
-    const state = setup()
+    const state = await setup()
     await state.run("version", ["--json"])
     expect(VersionReport.parse(JSON.parse(state.stdout.join("")))).toEqual({
       version: "0.1.0",
@@ -998,7 +1168,7 @@ describe("control client", () => {
 
 describe("show text output", () => {
   test("names the round, the page and every note's authored body, as the protocol data has them", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const round = state.sendMany(page.id, [
@@ -1040,7 +1210,7 @@ describe("hook wait response failures", () => {
         ),
     ],
   ])("%s exits unavailable, once, without reconnecting", async (_name, reply) => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     state.clear()
     const sent: string[] = []
@@ -1065,7 +1235,7 @@ describe("hook wait response failures", () => {
 
 describe("note and done requests", () => {
   test("note sends exactly the given intent, body, every hop and the optional fields it was given", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start("claude")
     const page = await state.openPage()
     await state.run("note", [
@@ -1107,7 +1277,7 @@ describe("note and done requests", () => {
   })
 
   test("note leaves omitted optional fields out of the request", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start("claude")
     const page = await state.openPage()
     await state.run("note", [page.id, "--intent", "fix", "--body", "Plain", "--at", "h1"])
@@ -1135,7 +1305,7 @@ describe("note and done requests", () => {
   })
 
   test("done --reply sends the exact reply text and the service stores it", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -1179,7 +1349,7 @@ describe("flag validation", () => {
     args.map((arg, index) => (args[index - 1] === `--${flag}` ? value : arg))
 
   async function fresh() {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     return { state, page }
@@ -1290,7 +1460,7 @@ describe("flag validation", () => {
 
 describe("hook commands for another process", () => {
   test("prompt, stop and end act on the owner of the given --pid, not the CLI's own, and start the service", async () => {
-    const state = setup()
+    const state = await setup()
     const own = await state.start("claude", 9001)
     const other = await state.start("claude", 9002)
     const stateOf = (owner: typeof own.owner) => state.owners.state(owner).status
@@ -1331,6 +1501,245 @@ describe("hook commands for another process", () => {
 })
 
 describe("open targets", () => {
+  test.each([false, true])("hands the page to a connected laptop with json=%s", async (json) => {
+    const state = await setup()
+    const received: LaptopOpen[] = []
+    const listener = await listenForPages({
+      socketPath: join(state.home, "laptop-mac-0000abcd.sock"),
+      accept(message) {
+        received.push(message)
+        return true
+      },
+    })
+    try {
+      await state.run("open", ["http://localhost:5173", ...(json ? ["--json"] : [])])
+      const served = JSON.parse(
+        state.responses.find((response) => response.path === "/open")?.body ?? "",
+      )
+      const opened = OpenResult.parse(served)
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(received).toEqual([{ machineId: state.machineId, url: opened.url }])
+      expect(state.requests[1]).toMatchObject({
+        path: "/status",
+        body: { owner: null, identities: [{ pid: 9001, startedAt: "linux:1:9001" }] },
+      })
+      expect(state.stdout).toHaveLength(1)
+      if (json) expect(JSON.parse(state.stdout[0] ?? "")).toEqual(served)
+      else {
+        expect(state.stdout).toEqual([
+          `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
+        ])
+      }
+    } finally {
+      await listener.close()
+    }
+  })
+
+  test("--json prints exactly the open result the service returned when no laptop is connected", async () => {
+    const state = await setup()
+    await state.run("open", ["http://localhost:5173", "--json"])
+    const served = JSON.parse(
+      state.responses.find((response) => response.path === "/open")?.body ?? "",
+    )
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.stdout).toHaveLength(1)
+    expect(JSON.parse(state.stdout[0] ?? "")).toEqual(served)
+  })
+
+  test("names every laptop that accepted the page, joined with a comma and a space", async () => {
+    const state = await setup()
+    await state.run("open", ["http://localhost:5173", "--json"])
+    const opened = OpenResult.parse(JSON.parse(state.stdout.join("")))
+    state.clear()
+    const received: LaptopOpen[][] = [[], []]
+    const listeners = await Promise.all(
+      ["alpha", "beta"].map((name, index) =>
+        listenForPages({
+          socketPath: join(state.home, `laptop-${name}-0000abcd.sock`),
+          accept(message) {
+            received[index]?.push(message)
+            return true
+          },
+        }),
+      ),
+    )
+    try {
+      await state.run("open", ["http://localhost:5173"])
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(received).toEqual([
+        [{ machineId: state.machineId, url: opened.url }],
+        [{ machineId: state.machineId, url: opened.url }],
+      ])
+      expect(state.stdout).toEqual([
+        `${opened.url}\n${opened.landingUrl}\nOpened in the browser on alpha, beta.\n`,
+      ])
+    } finally {
+      for (const listener of listeners) await listener.close()
+    }
+  })
+
+  test("hands the page to the accepting laptop when another refuses and a third is stale", async () => {
+    const state = await setup()
+    const offered: LaptopOpen[] = []
+    const received: LaptopOpen[] = []
+    const refusing = join(state.home, "laptop-alpha-0000abcd.sock")
+    const accepting = join(state.home, "laptop-mac-0000abcd.sock")
+    const stale = join(state.home, "laptop-zulu-0000abcd.sock")
+    await leaveStaleSocket(stale)
+    const listeners = [
+      await listenForPages({
+        socketPath: refusing,
+        accept(message) {
+          offered.push(message)
+          return false
+        },
+      }),
+      await listenForPages({
+        socketPath: accepting,
+        accept(message) {
+          received.push(message)
+          return true
+        },
+      }),
+    ]
+    try {
+      await state.run("open", ["http://localhost:5173"])
+      const opened = OpenResult.parse(servedOpen(state))
+      const message = { machineId: state.machineId, url: opened.url }
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(received).toEqual([message])
+      expect(offered).toEqual([message])
+      expect(state.stdout).toEqual([
+        `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
+      ])
+      await expect(stat(stale)).rejects.toMatchObject({ code: "ENOENT" })
+      expect((await stat(refusing)).isSocket()).toBe(true)
+      expect((await stat(accepting)).isSocket()).toBe(true)
+    } finally {
+      for (const listener of listeners) await listener.close()
+    }
+  })
+
+  test("each open announces its own url to the connected laptop", async () => {
+    const directory = await tempDir()
+    const file = join(directory, "a file.html")
+    await writeFile(file, "<h1>Hello</h1>")
+    const state = await setup()
+    const received: LaptopOpen[] = []
+    const listener = await listenForPages({
+      socketPath: join(state.home, "laptop-mac-0000abcd.sock"),
+      accept(message) {
+        received.push(message)
+        return true
+      },
+    })
+    try {
+      const served: OpenResult[] = []
+      for (const target of [file, "http://localhost:5173/view?q=1", directory]) {
+        await state.run("open", [target])
+        expect(state.exits).toEqual([ExitCode.ok])
+        const opened = OpenResult.parse(servedOpen(state))
+        served.push(opened)
+        expect(state.stdout).toEqual([
+          `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
+        ])
+        state.clear()
+      }
+      expect(new Set(served.map((opened) => opened.url)).size).toBe(3)
+      expect(new URL(served[0]?.url ?? "").pathname).toBe("/a%20file.html")
+      expect(received).toEqual(
+        served.map((opened) => ({ machineId: state.machineId, url: opened.url })),
+      )
+    } finally {
+      await listener.close()
+    }
+  })
+
+  const fallbacks: Record<
+    string,
+    (state: State) => Promise<{ verify(): Promise<void>; close(): Promise<void> }>
+  > = {
+    "a laptop refuses the page": async (state) => {
+      const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
+      const offered: LaptopOpen[] = []
+      const listener = await listenForPages({
+        socketPath,
+        accept(message) {
+          offered.push(message)
+          return false
+        },
+      })
+      return {
+        async verify() {
+          expect(offered).toHaveLength(1)
+          expect((await stat(socketPath)).isSocket()).toBe(true)
+        },
+        close: () => listener.close(),
+      }
+    },
+    "a laptop socket is stale": async (state) => {
+      const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
+      await leaveStaleSocket(socketPath)
+      return {
+        async verify() {
+          await expect(stat(socketPath)).rejects.toMatchObject({ code: "ENOENT" })
+        },
+        close: async () => {},
+      }
+    },
+    "the status call loses its connection": async (state) => {
+      state.failStatus("disconnected")
+      return { verify: async () => {}, close: async () => {} }
+    },
+    "the status call is refused": async (state) => {
+      state.failStatus("refused")
+      return { verify: async () => {}, close: async () => {} }
+    },
+    "the status reply is invalid": async (state) => {
+      state.failStatus("invalid")
+      return { verify: async () => {}, close: async () => {} }
+    },
+  }
+
+  test.each(Object.keys(fallbacks).flatMap((name) => [false, true].map((json) => [name, json])))(
+    "when %s, open succeeds with its own urls and the connection hint, json=%s",
+    async (name, json) => {
+      const state = await setup()
+      const arranged = await fallbacks[name as string]?.(state)
+      if (!arranged) throw new Error(`Unknown branch ${name}`)
+      try {
+        await state.run("open", ["http://localhost:5173", ...(json ? ["--json"] : [])])
+        const served = servedOpen(state)
+        const opened = OpenResult.parse(served)
+        expect(state.exits).toEqual([ExitCode.ok])
+        expect(state.stderr).toEqual([])
+        expect(state.stdout).toHaveLength(1)
+        if (json) expect(JSON.parse(state.stdout[0] ?? "")).toEqual(served)
+        else {
+          expect(state.stdout).toEqual([`${opened.url}\n${opened.landingUrl}\n${connectHint()}\n`])
+        }
+        await arranged.verify()
+      } finally {
+        await arranged.close()
+      }
+    },
+  )
+
+  test("the status request carries the owner given with --owner", async () => {
+    const state = await setup()
+    const pairing = await state.start("claude")
+    await state.run("open", ["http://localhost:5173", "--owner", pairing.owner])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.requests.map((request) => request.path)).toEqual(["/open", "/status"])
+    expect(state.requests[0]?.body).toMatchObject({ owner: pairing.owner })
+    expect(state.requests[1]?.body).toEqual({
+      owner: pairing.owner,
+      identities: state.deps.ancestry(),
+    })
+  })
+
   test.each([
     "https://localhost:5173",
     "http://[::1]:5173",
@@ -1339,7 +1748,7 @@ describe("open targets", () => {
     "http://app.localhost:5173",
     "http://a.b.localhost:5173/x?y=1",
   ])("accepts %s as a primary target", async (target) => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", [target, "--json"])
     expect(state.exits).toEqual([ExitCode.ok])
     expect(state.requests[0]?.body).toMatchObject({
@@ -1353,7 +1762,7 @@ describe("open targets", () => {
   })
 
   test("prints the exact page url, landing url and forward hint", async () => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", ["http://localhost:5173", "--json"])
     const page = OpenResult.parse(JSON.parse(state.stdout.join(""))).page
     state.clear()
@@ -1362,11 +1771,8 @@ describe("open targets", () => {
     expect(state.exits).toEqual([ExitCode.ok])
     const token = state.pages.get(page.id)?.token ?? ""
     const fragment = new URLSearchParams({ m: state.machineId, p: page.id, t: token })
-    const forwards = [3990, 3991, 3992, 3993]
-      .map((port) => `-L ${port}:localhost:${port}`)
-      .join(" ")
     expect(state.stdout).toEqual([
-      `${page.origin}/\n${page.origin}${LANDING_PATH}#${fragment}\nBrowser on another machine? Forward the pool once: ssh -N -o ExitOnForwardFailure=yes ${forwards} ${hostname()}. If the landing page shows anything but iter8, that port is taken on your laptop.\n`,
+      `${page.origin}/\n${page.origin}${LANDING_PATH}#${fragment}\nBrowser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
     ])
     expect(page.origin).toMatch(/^http:\/\/[a-z][a-z0-9-]*\.localhost:3990$/)
   })

@@ -11,6 +11,26 @@ export type SourceBuild = z.infer<typeof SourceBuild>
 
 const OneBased = z.number().int().min(1)
 
+/** 256 steps of about 30 bytes each keep a request near 8 KB; the HTML parser nests at most 512 elements. */
+export const MAX_MARKUP_STEPS = 256
+/** The identity text is this many characters of the collapsed text content. */
+export const MARKUP_TEXT_LENGTH = 64
+
+const MarkupStep = z.object({ tag: z.string().min(1), index: z.number().int().min(0) })
+
+/** Where a framework-less element sits in its page's markup, for a folder page's service to locate. */
+export const MarkupPath = z.object({
+  url: z.string().min(1),
+  steps: z.array(MarkupStep).max(MAX_MARKUP_STEPS),
+  id: z.string().nullable(),
+  className: z.string().nullable(),
+  text: z.string().max(MARKUP_TEXT_LENGTH),
+  onPickedElement: z.boolean(),
+})
+export type MarkupPath = z.infer<typeof MarkupPath>
+
+const ResolvedFramework = z.enum([...SourceFramework.options, "html"])
+
 export const SourceFrame = z.object({
   kind: z.enum(["generated", "source"]),
   /** A generated frame keeps the URL exactly as the page saw it; the service maps it back. */
@@ -23,7 +43,7 @@ export type SourceFrame = z.infer<typeof SourceFrame>
 
 /** What the page bundle finds; the service symbolicates it into a {@link ResolvedSourceLead}. */
 export const SourceLead = z.discriminatedUnion("confidence", [
-  z.object({ confidence: z.literal("none") }),
+  z.object({ confidence: z.literal("none"), markup: MarkupPath.optional() }),
   z.object({
     confidence: SourceConfidence.exclude(["none"]),
     framework: SourceFramework,
@@ -47,7 +67,7 @@ export const ResolvedSourceLead = z.discriminatedUnion("confidence", [
   }),
   z.object({
     confidence: SourceConfidence.extract(["exact", "approximate"]),
-    framework: SourceFramework,
+    framework: ResolvedFramework,
     component: z.string().nullable(),
     file: ProjectPath,
     line: OneBased.optional(),
@@ -55,7 +75,7 @@ export const ResolvedSourceLead = z.discriminatedUnion("confidence", [
   }),
   z.object({
     confidence: z.literal("file-only"),
-    framework: SourceFramework,
+    framework: ResolvedFramework,
     component: z.string().nullable(),
     file: ProjectPath,
     line: z.never().optional(),

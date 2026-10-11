@@ -16,3 +16,9 @@ bun run check
 The settled design lives in [docs/design/README.md](docs/design/README.md). Testing conventions live in [.claude/docs/TESTING.md](.claude/docs/TESTING.md).
 
 `bun run release` builds the linux-x64 and darwin-arm64 releases.
+
+## Browser on another machine
+
+Run `iter8 connect <devbox>` on the laptop. It forwards the devbox's iter8 pool over Tailscale when both machines are on the tailnet, otherwise over SSH, and reconnects after sleep and network changes. Pages opened with `iter8 open` on the devbox open in the laptop's browser.
+
+If both machines run iter8 with the same pool, give one a different `pool` in its `config.json`.
