@@ -96,7 +96,10 @@
 .ring .wtag,
 .ring .htag {
   position: absolute;
-  font: 500 10px / 1 var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--on-accent);
   background: var(--cobalt);
   padding: 3px 5px;
@@ -145,7 +148,10 @@
   color: var(--on-accent);
   display: grid;
   place-items: center;
-  font: 600 10px / 1 var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   box-shadow: 0 2px 0 var(--cobalt-d);
 }
 .chip .hints .count {

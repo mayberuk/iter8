@@ -75,7 +75,9 @@
   left: 0;
   top: 0;
   visibility: hidden;
-  font: 500 10.5px var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   color: var(--on-accent);
 }
 
@@ -113,9 +115,10 @@
 .mk-h b {
   font-weight: 600;
 }
-.mk-h .mono {
+.mk-h .dims {
   color: var(--mute);
   font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 .mk-h .seg {
   margin: 0 0 0 auto;

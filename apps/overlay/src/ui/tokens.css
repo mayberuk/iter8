@@ -6,53 +6,53 @@
 }
 .root {
   color-scheme: light;
-  --paper: #fcfbf6;
-  --paper-2: #f5f3eb;
-  --well: #ece9de;
-  --line: #dedacd;
-  --line-2: #cbc6b6;
-  --edge: #c2bcaa;
-  --edge-2: #a39c88;
-  --base-2: #cbc6b6;
+  --paper: #fbfbfb;
+  --paper-2: #f3f3f3;
+  --well: #e9e9e9;
+  --line: #dadada;
+  --line-2: #c6c6c6;
+  --edge: #bcbcbc;
+  --edge-2: #9c9c9c;
+  --base-2: #c6c6c6;
   --raised: #fff;
   --field: #fff;
   --hairlight: #fff;
   --top: 0 0 0 transparent;
   --sel: #f6dfa6;
-  --veil: rgba(58, 46, 22, 0.075);
-  --scrim: rgba(58, 46, 22, 0.12);
-  --ink: #221f19;
-  --ink-2: #403b32;
-  --ink-d: #0d0c09;
-  --mute: #6f695b;
-  --faint: #9c9688;
+  --veil: rgba(48, 48, 48, 0.075);
+  --scrim: rgba(48, 48, 48, 0.12);
+  --ink: #1f1f1f;
+  --ink-2: #3c3c3c;
+  --ink-d: #0c0c0c;
+  --mute: #696969;
+  --faint: #969696;
   --on-accent: #fff;
-  --solid: #221f19;
-  --solid-d: #0d0c09;
-  --on-solid: #fcfbf6;
-  --solid-key: #3a362d;
-  --solid-key-d: #14120e;
-  --solid-key-ink: #eee9dc;
-  --inv: #221f19;
-  --inv-d: #0d0c09;
-  --inv-border: #0d0c09;
-  --inv-ink: #f4f1e8;
+  --solid: #1f1f1f;
+  --solid-d: #0c0c0c;
+  --on-solid: #fbfbfb;
+  --solid-key: #363636;
+  --solid-key-d: #121212;
+  --solid-key-ink: #e9e9e9;
+  --inv: #1f1f1f;
+  --inv-d: #0c0c0c;
+  --inv-border: #0c0c0c;
+  --inv-ink: #f1f1f1;
   --inv-head: #fff;
-  --inv-body: #cfc9ba;
-  --inv-mute: #afa898;
-  --inv-mute-2: #a39c8c;
-  --inv-key: #3a362d;
-  --inv-key-d: #14120e;
-  --inv-key-ink: #eee9dc;
-  --inv-key-hover: #46413a;
-  --inv-well: #36322a;
-  --inv-line: #4a4539;
-  --inv-btn: #fcfbf6;
-  --inv-btn-ink: #221f19;
-  --inv-btn-d: #a39c8c;
-  --film: #221f19;
-  --film-d: #0d0c09;
-  --film-frame: #2e2b24;
+  --inv-body: #c9c9c9;
+  --inv-mute: #a8a8a8;
+  --inv-mute-2: #9c9c9c;
+  --inv-key: #363636;
+  --inv-key-d: #121212;
+  --inv-key-ink: #e9e9e9;
+  --inv-key-hover: #424242;
+  --inv-well: #323232;
+  --inv-line: #454545;
+  --inv-btn: #fbfbfb;
+  --inv-btn-ink: #1f1f1f;
+  --inv-btn-d: #9c9c9c;
+  --film: #1f1f1f;
+  --film-d: #0c0c0c;
+  --film-frame: #2b2b2b;
   --cobalt: #3160e4;
   --cobalt-d: #1c3e9e;
   --cobalt-t: #1c3e9e;
@@ -91,10 +91,10 @@
   --claude-tint: #fff8f2;
   --claude-tint-line: #f0dccd;
   --agent-card: #fffbf7;
-  --reply-bg: #fffcf8;
-  --codex: #3b382f;
-  --codex-d: #16140f;
-  --codex-ink: #f1eee4;
+  --reply-bg: #fcfcfc;
+  --codex: #383838;
+  --codex-d: #141414;
+  --codex-ink: #eeeeee;
   --ring: rgba(49, 96, 228, 0.4);
   --ring-hatch: rgba(49, 96, 228, 0.08);
   --mark-arrow: #2f5bff;
@@ -314,9 +314,6 @@
 .root ::selection {
   background: var(--sel);
 }
-.mono {
-  font-family: var(--mono);
-}
 button {
   font: inherit;
   color: inherit;
@@ -403,16 +400,19 @@ kbd {
   white-space: nowrap;
 }
 .chip .comp {
-  font: 600 12.5px var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--cobalt-d);
 }
 .chip .in {
-  font: 400 11.5px var(--mono);
+  font-size: 12px;
   color: var(--mute);
 }
 .chip .dim {
   margin-left: auto;
-  font: 500 11px var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   color: var(--ink-2);
   background: var(--well);
   padding: 2px 6px;
@@ -428,7 +428,7 @@ kbd {
 }
 .chip .path {
   margin-top: 6px;
-  font: 400 11px var(--mono);
+  font-size: 11.5px;
   color: var(--faint);
   white-space: nowrap;
   overflow: hidden;
@@ -452,7 +452,7 @@ kbd {
   align-items: center;
   gap: 6px;
   color: var(--mute);
-  font: 400 11.5px var(--mono);
+  font-size: 12px;
   white-space: nowrap;
 }
 .chip .src b {
@@ -763,10 +763,6 @@ kbd {
   width: 18px;
   height: 18px;
 }
-.toast .mono {
-  color: var(--inv-mute);
-  font-size: 11.5px;
-}
 .toast button {
   height: 26px;
   padding: 0 10px;
@@ -1003,7 +999,8 @@ kbd {
   height: 22px;
   padding: 0 8px 0 4px;
   border-radius: 6px;
-  font: 500 10.5px var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
   white-space: nowrap;
   background: var(--paper);
   box-shadow:
@@ -1253,9 +1250,9 @@ kbd {
   border: 1px solid var(--codex-d);
   box-shadow: 0 2px 0 var(--codex-d);
   color: var(--codex-ink);
-  font: 600 calc(var(--s, 20px) * 0.42) / 1 var(--mono);
-  letter-spacing: -0.04em;
-  text-transform: lowercase;
+  font-size: calc(var(--s, 20px) * 0.46);
+  font-weight: 600;
+  line-height: 1;
 }
 .av.agent span {
   transform: translateY(-0.5px);

@@ -326,7 +326,7 @@ describe("sending a round", () => {
     await until("the draft to empty", async () => (await draftCount(overlay)) === "0")
     expect(mock.rounds().map((round) => round.notes.map((note) => note.id))).toEqual([[DRAFT.id]])
     expect(mock.draft()).toEqual([])
-    expect(await dock(overlay).locator(".counter .rl").innerText()).toBe("ROUND 2")
+    expect(await dock(overlay).locator(".counter .rl").innerText()).toBe("Round 2")
     const delivered = overlay
       .getByRole("status")
       .filter({ hasText: /^Round 1 delivered to larkspur/ })
@@ -714,7 +714,7 @@ describe("rounds that change after the page loaded", () => {
       liveSessions: [OTHER],
       pageState: { drafts: [], rounds: [QUEUED], agentNotes: [] },
     })
-    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 14")
+    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("Round 14")
     const notice = o.overlay.getByRole("status").filter({ hasText: "Round 13 wasn't delivered" })
     expect(await notice.count()).toBe(0)
     await socketOpen(o)
@@ -726,7 +726,7 @@ describe("rounds that change after the page loaded", () => {
         .filter({ hasText: /^Round 13 not delivered/ })
         .isVisible(),
     )
-    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("ROUND 14")
+    expect(await dock(o.overlay).locator(".counter .rl").innerText()).toBe("Round 14")
     expect(await notice.count()).toBe(1)
   }, 30_000)
 })

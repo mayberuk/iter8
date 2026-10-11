@@ -42,11 +42,15 @@ function between(text: string, from: string, to: string): string {
 
 type Rgba = { r: number; g: number; b: number; a: number }
 
+const COLOR_LITERAL =
+  /#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})\b|rgba?\(([^)]+)\)|\btransparent\b/gi
+
 function parseColors(text: string): Rgba[] {
   const found: Rgba[] = []
-  const literal = /#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})\b|rgba?\(([^)]+)\)/gi
-  for (const match of text.matchAll(literal)) {
-    if (match[1]) {
+  for (const match of text.matchAll(COLOR_LITERAL)) {
+    if (match[0].toLowerCase() === "transparent") {
+      found.push({ r: 0, g: 0, b: 0, a: 0 })
+    } else if (match[1]) {
       const hex = match[1].length < 6 ? Array.from(match[1], (c) => c + c).join("") : match[1]
       const byte = (at: number) => Number.parseInt(hex.slice(at, at + 2), 16)
       found.push({ r: byte(0), g: byte(2), b: byte(4), a: hex.length === 8 ? byte(6) / 255 : 1 })
@@ -128,6 +132,35 @@ function same(value: string): string {
     .replace(/(?<!\d)0\./g, ".")
 }
 
+const withoutColors = (value: string) => same(value.replace(COLOR_LITERAL, "#"))
+
+function resolveVars(value: string, known: Map<string, string>): string {
+  return value.replace(/var\((--[\w-]+)\)/g, (_, name: string) =>
+    resolveVars(known.get(name) ?? "", known),
+  )
+}
+
+function greyFailures(label: string, actual: string, original: string): string[] {
+  const got = parseColors(actual)
+  const warm = parseColors(original)
+  if (got.length !== warm.length || warm.length === 0)
+    return [`${label}: expected ${warm.length} colour(s), got ${got.length}`]
+  const failures: string[] = []
+  if (withoutColors(actual) !== withoutColors(original))
+    failures.push(`${label}: ${actual} does not keep the shape of ${original}`)
+  warm.forEach((was, at) => {
+    const now = got[at]
+    if (!now) return
+    if (now.r !== now.g || now.g !== now.b)
+      failures.push(`${label}: not grey (${now.r}, ${now.g}, ${now.b})`)
+    const drift = Math.abs(lightness(now) - lightness(was))
+    if (was.a > 0 && !(drift <= LIGHTNESS_TOLERANCE))
+      failures.push(`${label}: lightness drifts by ${drift.toFixed(4)}`)
+    if (Math.abs(now.a - was.a) > 1e-9) failures.push(`${label}: alpha ${now.a} is not ${was.a}`)
+  })
+  return failures
+}
+
 let browser: Browser
 let page: Page
 let close: () => Promise<void>
@@ -193,6 +226,9 @@ function expectValues(actual: Record<string, string>, expected: Map<string, stri
 }
 
 const darkNames = () => Array.from(expectedDark.keys())
+const sketchLightResolved = (name: string) => resolveVars(sketchLight.get(name) ?? "", sketchLight)
+const lightNames = () =>
+  Array.from(sketchLight.keys()).filter((name) => parseColors(sketchLightResolved(name)).length > 0)
 
 test("a dark root applies the sketch's dark values, with the neutral fixture's greys for its tokens", async () => {
   const { colorScheme, values } = await tokens("dark", "light", darkNames())
@@ -206,30 +242,12 @@ test("a dark root applies the same dark values when the system is dark too", asy
   expectValues(values, expectedDark)
 })
 
-test("a light root applies the sketch's light values even when the system is dark", async () => {
-  const lightOfDark = new Map(
-    Array.from(expectedDark.keys(), (name) => [name, sketchLight.get(name)] as const).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  )
-  expect(lightOfDark.size).toBeGreaterThan(50)
-  const { colorScheme, values } = await tokens("light", "dark", darkNames())
-  expect(colorScheme).toBe("light")
-  expectValues(values, lightOfDark)
-})
-
 test("an auto root follows the system colour scheme", async () => {
   const dark = await tokens("auto", "dark", darkNames())
   expect(dark.colorScheme).toBe("dark")
   expectValues(dark.values, expectedDark)
 
-  const light = await tokens("auto", "light", ["--paper", "--ink", "--fix"])
-  expect(light.colorScheme).toBe("light")
-  expect(light.values).toEqual({
-    "--paper": sketchLight.get("--paper")?.toLowerCase() ?? "missing",
-    "--ink": sketchLight.get("--ink")?.toLowerCase() ?? "missing",
-    "--fix": sketchLight.get("--fix")?.toLowerCase() ?? "missing",
-  })
+  expect((await tokens("auto", "light", [])).colorScheme).toBe("light")
 })
 
 test("the named tokens exist in every theme and the font stacks lead with the iter8 families", async () => {
@@ -255,25 +273,40 @@ test("every neutral dark token is grey at the sketch's lightness", async () => {
     ["auto", "dark"],
   ] as const) {
     const { values } = await tokens(theme, scheme, names)
-    for (const name of names) {
-      const got = parseColors(values[name] ?? "")
-      const warm = parseColors(sketchDark.get(name) ?? "")
-      const [color, original] = [got[0], warm[0]]
-      if (got.length !== 1 || warm.length !== 1 || !color || !original) {
-        failures.push(
-          `${name} in ${theme}: expected one colour, got ${got.length} and ${warm.length}`,
-        )
-        continue
+    for (const name of names)
+      failures.push(
+        ...greyFailures(`${name} in ${theme}`, values[name] ?? "", sketchDark.get(name) ?? ""),
+      )
+  }
+  expect(failures).toEqual([])
+})
+
+test("every neutral light token is grey at the sketch's lightness and every semantic one is the sketch's", async () => {
+  const failures: string[] = []
+  let neutral = 0
+  let semantic = 0
+  for (const [theme, scheme] of [
+    ["light", "light"],
+    ["light", "dark"],
+    ["auto", "light"],
+  ] as const) {
+    const { colorScheme, values } = await tokens(theme, scheme, lightNames())
+    expect(colorScheme).toBe("light")
+    for (const name of lightNames()) {
+      const original = sketchLightResolved(name)
+      const label = `${name} in ${theme} under ${scheme}`
+      if (SEMANTIC_TOKEN.test(name)) {
+        semantic++
+        if (same(values[name] ?? "") !== same(original))
+          failures.push(`${label}: ${values[name]} is not ${original}`)
+      } else {
+        neutral++
+        failures.push(...greyFailures(label, values[name] ?? "", original))
       }
-      if (color.r !== color.g || color.g !== color.b)
-        failures.push(`${name} in ${theme}: not grey (${color.r}, ${color.g}, ${color.b})`)
-      const drift = Math.abs(lightness(color) - lightness(original))
-      if (!(drift <= LIGHTNESS_TOLERANCE))
-        failures.push(`${name} in ${theme}: lightness drifts by ${drift.toFixed(4)}`)
-      if (Math.abs(color.a - original.a) > 1e-9)
-        failures.push(`${name} in ${theme}: alpha ${color.a} is not ${original.a}`)
     }
   }
+  expect(neutral).toBeGreaterThan(40 * 3)
+  expect(semantic).toBeGreaterThan(30 * 3)
   expect(failures).toEqual([])
 })
 
@@ -293,19 +326,21 @@ test("no warm colour literal remains in the overlay's CSS", async () => {
   expect(semantic.size).toBeGreaterThan(10)
 
   const warm: string[] = []
+  const visited = new Set<string>()
   let scanned = 0
   for (const { file, decls } of parsed) {
     for (const decl of decls) {
       if (SEMANTIC_TOKEN.test(decl.property)) continue
-      if (file === "tokens.css" && decl.selector === ".root" && decl.depth === 1) continue
-      if (decl.selector.includes(".ic-d")) continue
       for (const c of parseColors(decl.value)) {
         scanned++
+        visited.add(`${file} ${decl.selector} ${decl.property}`)
         if (chroma(c) > GREY_CHROMA_CEILING && !semantic.has(`${c.r},${c.g},${c.b}`))
           warm.push(`${file} ${decl.selector} { ${decl.property}: ${decl.value} }`)
       }
     }
   }
   expect(scanned).toBeGreaterThan(100)
+  expect(visited).toContain("tokens.css .root --veil")
+  expect(visited).toContain("tokens.css svg.ic-fill .ic-d fill")
   expect(warm).toEqual([])
 })

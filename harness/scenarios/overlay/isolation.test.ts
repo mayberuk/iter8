@@ -23,7 +23,7 @@ import { buildOverlay, openOverlay, withSourceBundle } from "./support"
 const STATIC = fixtureDir("static")
 const LIVE = Pairing.parse(pairingJson)
 /** The dock's `--paper` in the light token set. */
-const LIGHT_PAPER = "rgb(252, 251, 246)"
+const LIGHT_PAPER = "rgb(251, 251, 251)"
 
 let browser: Browser
 let overlayBuild: Scratch
