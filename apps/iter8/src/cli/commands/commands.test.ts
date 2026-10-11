@@ -39,7 +39,7 @@ import { type ControlApp, createControlApi } from "../../service/control-api"
 import { createLiveHub } from "../../service/live"
 import { createWaiters, type Waiters } from "../../service/waiters"
 import { openStore, readOrCreateMachineId } from "../../store/db"
-import { type CliDeps, controlClientFor } from "../client"
+import { type CliDeps, commandArgs, controlClientFor } from "../client"
 import { connect } from "./connect"
 import { cliCommands } from "./index"
 
@@ -337,6 +337,16 @@ describe("command surface", () => {
         expect(args[flag.name]?.description).toBe(flag.repeatable ? "Repeatable" : "")
       }
     }
+  })
+
+  test("connect takes one HOST and no flags, prints no protocol result, and its command has exactly HOST and json", async () => {
+    const { positionals, flags, output } = CLI_SURFACE.connect
+    expect(positionals).toEqual(["HOST"])
+    expect(flags).toEqual([])
+    expect(output).toBeNull()
+    expect(Object.keys(commandArgs("connect")).sort()).toEqual(["HOST", "json"])
+    const command = cliCommands((await setup()).deps).connect
+    expect(Object.keys(await resolved(command?.args ?? {})).sort()).toEqual(["HOST", "json"])
   })
 
   test("connect without a host exits usage before reaching the system", async () => {
