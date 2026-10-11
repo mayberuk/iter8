@@ -1,4 +1,5 @@
 import { Intent, type NoteTarget, type ResolvedSourceLead } from "@iter8/protocol"
+import { useComputed } from "@preact/signals"
 import type { JSX, RefObject } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import composerCss from "./composer.css" with { type: "text" }
@@ -122,7 +123,15 @@ export function Composer({
   const { model, connection } = useOverlay()
   const textRef = useRef<HTMLTextAreaElement>(null)
   const [on, setOn] = useState(false)
-  const composer = model.composer.value
+  // Each field is its own computed, and the body binds straight to the textarea, so a keystroke
+  // replacing the composer object does not re-render the panel.
+  const target = useComputed(() => model.composer.value?.target).value
+  const intent = useComputed(() => model.composer.value?.intent ?? "fix").value
+  const editing = useComputed(() => model.composer.value?.editing ?? null).value
+  const saving = useComputed(() => model.composer.value?.saving ?? false).value
+  const shot = useComputed(() => (model.composer.value?.shot ?? null) !== null).value
+  const bodyError = useComputed(() => model.composer.value?.bodyError ?? false).value
+  const body = useComputed(() => model.composer.value?.body ?? "")
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setOn(true))
@@ -136,16 +145,13 @@ export function Composer({
     if (on) textRef.current?.focus()
   }, [on])
 
-  const bodyError = composer?.bodyError ?? false
   useEffect(() => {
     if (!bodyError) return
     shake(panelRef.current)
     textRef.current?.focus()
   }, [bodyError, panelRef])
 
-  if (!composer) return null
-  const { target, intent, editing, saving } = composer
-  const shot = composer.shot !== null
+  if (!target) return null
   const head = header(target, shot, lead)
 
   async function save() {
@@ -237,7 +243,7 @@ export function Composer({
           aria-invalid={bodyError}
           aria-describedby="iter8-cmp-err"
           placeholder={INTENT_COPY[intent].placeholder}
-          value={composer.body}
+          value={body}
           onInput={(event) => {
             model.setBody(event.currentTarget.value)
             onInput()

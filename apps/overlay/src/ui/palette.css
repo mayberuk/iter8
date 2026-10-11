@@ -268,9 +268,7 @@
   font-size: 12.5px;
   box-shadow: 0 3px 0 var(--inv-btn-d);
   margin-bottom: 3px;
-  transition:
-    transform 0.09s var(--press),
-    box-shadow 0.09s var(--press);
+  transition: transform 0.09s var(--press);
 }
 .coach .next:active {
   transform: translateY(3px);

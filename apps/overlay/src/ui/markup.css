@@ -38,36 +38,45 @@
 }
 .shotlayer .xh {
   position: fixed;
+  left: 0;
+  top: 0;
   background: rgba(49, 96, 228, 0.4);
 }
 .shotlayer .xh.h {
-  left: 0;
   right: 0;
-  top: -4px;
   height: 1px;
+  translate: 0 -4px;
 }
 .shotlayer .xh.v {
-  top: 0;
   bottom: 0;
-  left: -4px;
   width: 1px;
+  translate: -4px 0;
 }
 .shotlayer .xsel {
   position: fixed;
-  display: none;
-  border: 1.5px solid var(--cobalt);
+  left: 0;
+  top: 0;
+  visibility: hidden;
+}
+.shotlayer .xsel i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  transform-origin: 0 0;
+  background: var(--cobalt);
+}
+.shotlayer .xsel .fill {
   background: rgba(49, 96, 228, 0.1);
-  border-radius: 2px;
 }
 .shotlayer .coords {
   position: fixed;
-  display: none;
+  left: 0;
+  top: 0;
+  visibility: hidden;
   font: 500 10.5px var(--mono);
   color: var(--on-accent);
-  background: var(--cobalt);
-  padding: 2px 5px;
-  border-radius: 4px;
-  box-shadow: 0 2px 0 var(--cobalt-d);
 }
 
 .markup {

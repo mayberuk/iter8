@@ -11,7 +11,7 @@ import {
   Round,
   TOKEN_HEADER,
 } from "@iter8/protocol"
-import type { Browser, Locator, Route } from "playwright"
+import type { Browser, Locator, Page, Route } from "playwright"
 import liveSessionJson from "../../../packages/protocol/fixtures/LiveSession.json"
 import noteJson from "../../../packages/protocol/fixtures/Note.json"
 import goneJson from "../../../packages/protocol/fixtures/Pairing.gone.json"
@@ -95,7 +95,24 @@ async function open(mock: Parameters<typeof openOverlay>[0]["mock"] = {}) {
   await until("the dock to be ready", () =>
     opened ? opened.overlay.getByRole("button", { name: "Pick element" }).isVisible() : false,
   )
+  await dockAtRest(opened.page)
   return opened
+}
+
+/** Playwright's stability check passes on the first frames of a compositor animation, which still show the old box. */
+function dockAtRest(page: Page) {
+  return waitFor(
+    "the dock to come to rest",
+    () =>
+      page.evaluate(() => {
+        const root = document.querySelector("iter8-overlay")?.shadowRoot
+        const moving = [root?.querySelector(".dock"), root?.querySelector(".iter8btn")].some(
+          (el) => !el || el.getAnimations().some((a) => a.playState !== "finished"),
+        )
+        return moving ? null : true
+      }),
+    { timeoutMs: 5000, everyMs: 100 },
+  )
 }
 
 async function until(label: string, check: () => Promise<boolean> | boolean, timeoutMs = 5000) {
@@ -161,6 +178,7 @@ describe("dock session states", () => {
       async () => (await sendButton(o.overlay).innerText()) === "Queue",
     )
     expect(await dock(o.overlay).locator(".stword").innerText()).toBe("busy")
+    await dockAtRest(o.page)
     await sendButton(o.overlay).hover()
     const tip = o.overlay.getByRole("tooltip")
     await until("the queue tooltip", () => tip.isVisible())

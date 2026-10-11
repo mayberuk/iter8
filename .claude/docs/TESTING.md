@@ -30,11 +30,21 @@ Import each module by path; there are no barrels.
   because macOS temp paths push a control socket past the 104-byte `sun_path` limit.
 - `harness/rig/browser.ts` — `launchChromium({ args })` (headless, no flags of its own), `newPage`.
 - `harness/rig/long-task.ts` — `startLongTaskProbe(page)`; `.stop()` reports the longest main-thread
-  task after start. The typing budget is ≤ 250 ms. A test asserting any wall-clock budget lives in
+  task after start. Run it beside `startFrameProbe`: the Long Tasks API reports rendering-only
+  tasks only while a requestAnimationFrame loop runs. A test asserting any wall-clock budget lives in
   a `*.budget.test.ts` file, which `bun run test` runs alone after the parallel run: a long task is
   wall time, and on CI's 4-core runner three other Chromiums sharing the CPU turned one into 480 ms.
   The parallel run is capped at 16 workers (`--parallel=16`): on a 32-core host 32 workers gave e2e
   timing failures, two 16-worker runs gave none, at about 16 s slower (77 s against 61 s).
+- `harness/rig/frames.ts` — `startFrameProbe(page)`; `.stop()` gives the frame intervals, the late
+  count (a frame over 1.5 × the display interval) and the worst frame. `summarizeFrames` is the pure part.
+- `harness/rig/layout.ts` — `startLayoutProbe(page)`; `.stop()` counts layouts in the window, for the "at most 2 layouts per move" bounds.
+- `harness/rig/throttle.ts` — `calibrateThrottle(browser)` gives the CPU throttle rate that makes this
+  host match the 4× reference; `throttleCpu(page, rate)` applies it and returns a restorer.
+- Overlay budgets: no main-thread task over 50 ms at normal speed; hover and pick drop no frame,
+  except a hover sweep may drop ⌈3%⌉. At the calibrated 4× throttle each window is compared with a
+  page-alone window of the same span: longest task ≤ max(50 ms, 1.3 × page alone), count over 50 ms
+  ≤ page alone + max(2, ⌈10%⌉), and a sweep's late frames ≤ pointer-still + max(2, ⌈10% of frames⌉).
 - `harness/rig/cli.ts` — `runCli(env, args)`, `cliCommand(binary?)`: a given binary, else
   `ITER8_TEST_BINARY`, else `bun apps/iter8/src/main.ts`.
 - `harness/rig/reap.ts` — `reapWithParent(child, { group? })`: kills a spawned service, agent stub

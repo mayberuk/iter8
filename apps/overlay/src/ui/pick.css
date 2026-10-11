@@ -1,12 +1,47 @@
+/* A relayout boundary, so the ring, tags and chip re-lay-out without walking the page. The layer
+   is fixed at the viewport, so it stays the viewport for the fixed lens inside it. */
+.layer.pick {
+  contain: strict;
+}
 .veil {
   position: fixed;
   inset: 0;
-  background: var(--veil);
   opacity: 0;
   transition: opacity 0.18s var(--out);
 }
 .veil.on {
   opacity: 1;
+}
+.veil i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--veil);
+  transform-origin: 0 0;
+  will-change: transform;
+}
+/* The corner fillets are drawn at the hole radius, 6 px, and scaled down for a smaller hole. */
+.veil i.tl,
+.veil i.tr,
+.veil i.bl,
+.veil i.br {
+  width: 6px;
+  height: 6px;
+  background: radial-gradient(circle at var(--at), transparent 5.5px, var(--veil) 6px);
+}
+.veil i.tl {
+  --at: 100% 100%;
+}
+.veil i.tr {
+  --at: 0 100%;
+}
+.veil i.bl {
+  --at: 100% 0;
+}
+.veil i.br {
+  --at: 0 0;
 }
 .ring {
   position: fixed;

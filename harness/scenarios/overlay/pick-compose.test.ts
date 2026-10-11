@@ -1693,17 +1693,28 @@ describe("the outline ring", () => {
         o.overlay.locator(".veil").evaluate((veil) => {
           const style = veil.getAttribute("style") ?? ""
           const corner = 6
-          return [...style.matchAll(/M ([-\d.]+) ([-\d.]+) H ([-\d.]+) A [^V]*V ([-\d.]+)/g)].map(
-            (match) => {
-              const [mx, my, hx, vy] = match.slice(1).map(Number)
-              return {
-                x: (mx ?? 0) - corner,
-                y: my ?? 0,
-                w: (hx ?? 0) - (mx ?? 0) + 2 * corner,
-                h: (vy ?? 0) - (my ?? 0) + corner,
-              }
-            },
+          const marked = [
+            ...style.matchAll(/M ([-\d.]+) ([-\d.]+) H ([-\d.]+) A [^V]*V ([-\d.]+)/g),
+          ].map((match) => {
+            const [mx, my, hx, vy] = match.slice(1).map(Number)
+            return {
+              x: (mx ?? 0) - corner,
+              y: my ?? 0,
+              w: (hx ?? 0) - (mx ?? 0) + 2 * corner,
+              h: (vy ?? 0) - (my ?? 0) + corner,
+            }
+          })
+          const [top, bottom, left, right] = [...veil.querySelectorAll("i")].map((band) =>
+            band.getBoundingClientRect(),
           )
+          if (!top || !bottom || !left || !right) return marked
+          const hovered = {
+            x: left.right,
+            y: top.bottom,
+            w: right.left - left.right,
+            h: bottom.top - top.bottom,
+          }
+          return hovered.w > 0 && hovered.h > 0 ? [hovered, ...marked] : marked
         })
       await until("three holes", async () => (await holes()).length === 3)
       const expected = [

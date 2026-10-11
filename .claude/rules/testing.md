@@ -30,8 +30,10 @@ commands.
 - Remove every temp dir and stop every process a test started, in the test or the rig helper that
   created it (`scratchDir` returns a disposer). `file-safety.md`'s "leave scratch in place" is for
   an agent's own shell work, not for test code: one day of leaked test scratch filled a 16 GB `/tmp`.
-- Prove the typing budget with the rig's long-task probe: longest main-thread task ≤ 250 ms while
-  typing in the composer on the heavy fixture with enrichment running.
+- Prove the overlay's budgets with the rig's long-task and frame probes, run together: no
+  main-thread task over 50 ms at normal speed while hovering, picking and typing on the heavy
+  fixture with enrichment running, and the page-relative bounds at the calibrated 4× throttle
+  (`.claude/docs/TESTING.md` lists them).
 - Start the cheapest fixture that proves the behaviour: the static folder or the Vite + React
   app. Next, SvelteKit, Vue and Astro run only where the framework is the thing under test
   (source lookup, proxy compatibility, the end-to-end matrix).

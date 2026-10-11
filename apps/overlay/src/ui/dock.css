@@ -15,11 +15,9 @@
     0 4px 0 var(--edge),
     var(--top);
   transition:
-    left 0.38s var(--spring),
-    top 0.38s var(--spring),
+    translate 0.38s var(--spring),
     opacity 0.16s,
     transform 0.22s var(--spring);
-  will-change: left, top;
 }
 .dock.dragging {
   transition: none;
@@ -118,7 +116,6 @@
   height: 40px;
   padding: 0 6px 0 10px;
   border-radius: 10px;
-  transition: background 0.12s;
 }
 .counter:hover {
   background: var(--paper-2);
@@ -162,10 +159,7 @@
   font-weight: 600;
   border: 1px solid var(--cobalt-d);
   box-shadow: 0 3px 0 var(--cobalt-d);
-  transition:
-    transform 0.09s var(--press),
-    box-shadow 0.09s var(--press),
-    background 0.12s;
+  transition: transform 0.09s var(--press);
 }
 .send:hover {
   transform: translateY(-1px);
@@ -208,11 +202,9 @@
     0 4px 0 var(--edge),
     var(--top);
   transition:
-    left 0.38s var(--spring),
-    top 0.38s var(--spring),
+    translate 0.38s var(--spring),
     opacity 0.16s,
-    transform 0.26s var(--spring),
-    box-shadow 0.09s;
+    transform 0.26s var(--spring);
 }
 .iter8btn:hover {
   transform: translateY(-1px);
@@ -250,9 +242,9 @@
   background: var(--paper);
   border: 1.5px solid var(--edge-2);
   box-shadow: 0 2px 0 var(--edge);
-  transition:
-    transform 0.16s var(--spring),
-    background 0.16s;
+  /* Going between none and a transform re-lays out the page; scale to scale does not. */
+  transform: scale(1);
+  transition: transform 0.16s var(--spring);
 }
 .anchors i.near {
   transform: scale(1.5);

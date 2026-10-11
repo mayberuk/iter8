@@ -96,11 +96,7 @@
   --c: var(--fix);
   --cd: var(--fix-d);
   --ct: var(--fix-t);
-  transition:
-    background 0.12s,
-    border-color 0.12s,
-    box-shadow 0.12s,
-    opacity 0.12s;
+  transition: opacity 0.12s;
 }
 .sheet .note.fix,
 .sheet .hn.fix {
@@ -556,9 +552,7 @@
   overflow: hidden;
   background: var(--film-frame);
   cursor: pointer;
-  transition:
-    transform 0.14s var(--spring),
-    box-shadow 0.14s;
+  transition: transform 0.14s var(--spring);
 }
 .sheet .sframe:hover {
   transform: translateY(-2px);
@@ -731,10 +725,7 @@
     0 2px 0 var(--edge),
     var(--top);
   margin-bottom: 2px;
-  transition:
-    transform 0.09s var(--press),
-    box-shadow 0.09s var(--press),
-    background 0.12s;
+  transition: transform 0.09s var(--press);
 }
 .sheet .chipbtn:hover {
   background: var(--raised);

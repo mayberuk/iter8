@@ -197,6 +197,12 @@ function withOutcome(
 }
 
 const SWALLOWED = ["mousedown", "mouseup", "click", "dblclick", "auxclick"] as const
+const SELECTION_EDGE = 1.5
+/** Wide enough for "9999 × 9999" in the badge's mono font. */
+const BADGE_WIDTH = 100
+const BADGE_HEIGHT = 20
+const BADGE_PILL = 17
+const BADGE_PAD = 5
 
 function ShotLayer(): JSX.Element {
   const { model, host } = useOverlay()
@@ -204,8 +210,9 @@ function ShotLayer(): JSX.Element {
   const layer = useRef<HTMLDivElement>(null)
   const horizontal = useRef<HTMLDivElement>(null)
   const vertical = useRef<HTMLDivElement>(null)
-  const badge = useRef<HTMLDivElement>(null)
+  const badge = useRef<HTMLCanvasElement>(null)
   const selection = useRef<HTMLDivElement>(null)
+  const ratio = window.devicePixelRatio || 1
 
   // The layer is driven from window capture listeners rather than its own handlers: an event
   // delivered to the layer would first pass the page's capture-phase handlers on document.
@@ -214,6 +221,9 @@ function ShotLayer(): JSX.Element {
     const surface = layer.current
     if (!surface) return
     let drag: { x0: number; y0: number; moved: boolean } | null = null
+    let point: { x: number; y: number } | null = null
+    let frame = 0
+    let ink: { fill: string; shadow: string; text: string; font: string } | null = null
 
     function overlayControl(event: Event): boolean {
       const path = event.composedPath()
@@ -239,34 +249,84 @@ function ShotLayer(): JSX.Element {
     }
 
     function hideSelection() {
-      if (selection.current) selection.current.style.display = "none"
+      if (selection.current) selection.current.style.visibility = "hidden"
+    }
+
+    function placeSelection(box: HTMLElement, r: NonNullable<ReturnType<typeof rectTo>>) {
+      const parts = [
+        [r.x, r.y, r.width, r.height],
+        [r.x, r.y, r.width, SELECTION_EDGE],
+        [r.x + r.width - SELECTION_EDGE, r.y, SELECTION_EDGE, r.height],
+        [r.x, r.y + r.height - SELECTION_EDGE, r.width, SELECTION_EDGE],
+        [r.x, r.y, SELECTION_EDGE, r.height],
+      ]
+      parts.forEach(([x, y, width, height], i) => {
+        const part = box.children[i]
+        if (!(part instanceof HTMLElement)) return
+        part.style.translate = `${x}px ${y}px`
+        part.style.scale = `${width} ${height}`
+      })
+      box.style.visibility = "visible"
+    }
+
+    // Drawn rather than set as text: a text change lays out the page on every pointer move.
+    function drawBadge(canvas: HTMLCanvasElement, text: string) {
+      const context = canvas.getContext("2d")
+      if (!context) return
+      if (!ink) {
+        const style = getComputedStyle(canvas)
+        ink = {
+          fill: style.getPropertyValue("--cobalt").trim(),
+          shadow: style.getPropertyValue("--cobalt-d").trim(),
+          text: style.color,
+          font: style.font,
+        }
+      }
+      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+      context.clearRect(0, 0, BADGE_WIDTH, BADGE_HEIGHT)
+      context.font = ink.font
+      const width = Math.min(
+        BADGE_WIDTH,
+        Math.ceil(context.measureText(text).width) + BADGE_PAD * 2,
+      )
+      context.fillStyle = ink.shadow
+      context.beginPath()
+      context.roundRect(0, 2, width, BADGE_PILL, 4)
+      context.fill()
+      context.fillStyle = ink.fill
+      context.beginPath()
+      context.roundRect(0, 0, width, BADGE_PILL, 4)
+      context.fill()
+      context.fillStyle = ink.text
+      context.textBaseline = "middle"
+      context.fillText(text, BADGE_PAD, BADGE_PILL / 2)
+    }
+
+    function paint() {
+      frame = 0
+      if (!point) return
+      const { x, y } = point
+      if (horizontal.current) horizontal.current.style.translate = `0 ${y}px`
+      if (vertical.current) vertical.current.style.translate = `${x}px 0`
+      const rect = drag?.moved ? rectTo(x, y) : null
+      if (badge.current) {
+        badge.current.style.visibility = "visible"
+        badge.current.style.translate = `${x + 12}px ${y + 12}px`
+        drawBadge(
+          badge.current,
+          rect ? `${Math.round(rect.width)} × ${Math.round(rect.height)}` : `${x}, ${y}`,
+        )
+      }
+      if (selection.current && rect) placeSelection(selection.current, rect)
     }
 
     function onMove(event: PointerEvent) {
       if (drag === null && overlayControl(event)) return
       const { clientX, clientY } = event
-      if (horizontal.current) horizontal.current.style.top = `${clientY}px`
-      if (vertical.current) vertical.current.style.left = `${clientX}px`
+      point = { x: clientX, y: clientY }
       if (drag && !drag.moved && Math.hypot(clientX - drag.x0, clientY - drag.y0) > DRAG_START)
         drag.moved = true
-      const rect = drag?.moved ? rectTo(clientX, clientY) : null
-      if (badge.current) {
-        badge.current.style.display = "block"
-        badge.current.style.left = `${clientX + 12}px`
-        badge.current.style.top = `${clientY + 12}px`
-        badge.current.textContent = rect
-          ? `${Math.round(rect.width)} × ${Math.round(rect.height)}`
-          : `${clientX}, ${clientY}`
-      }
-      if (selection.current && rect) {
-        Object.assign(selection.current.style, {
-          display: "block",
-          left: `${rect.x}px`,
-          top: `${rect.y}px`,
-          width: `${rect.width}px`,
-          height: `${rect.height}px`,
-        })
-      }
+      if (!frame) frame = requestAnimationFrame(paint)
     }
 
     function onDown(event: PointerEvent) {
@@ -302,20 +362,33 @@ function ShotLayer(): JSX.Element {
     window.addEventListener("pointercancel", onCancel, { capture: true, passive: true })
     for (const type of SWALLOWED) window.addEventListener(type, onOther, { capture: true })
     return () => {
+      cancelAnimationFrame(frame)
       window.removeEventListener("pointermove", onMove, { capture: true })
       window.removeEventListener("pointerdown", onDown, { capture: true })
       window.removeEventListener("pointerup", onUp, { capture: true })
       window.removeEventListener("pointercancel", onCancel, { capture: true })
       for (const type of SWALLOWED) window.removeEventListener(type, onOther, { capture: true })
     }
-  }, [model, host])
+  }, [model, host, ratio])
 
   return (
     <div class={entered ? "layer shotlayer on" : "layer shotlayer"} ref={layer}>
       <div class="xh h" ref={horizontal} />
       <div class="xh v" ref={vertical} />
-      <div class="xsel" ref={selection} />
-      <div class="coords" ref={badge} />
+      <div class="xsel" ref={selection}>
+        <i class="fill" />
+        <i />
+        <i />
+        <i />
+        <i />
+      </div>
+      <canvas
+        class="coords"
+        ref={badge}
+        width={BADGE_WIDTH * ratio}
+        height={BADGE_HEIGHT * ratio}
+        style={{ width: `${BADGE_WIDTH}px`, height: `${BADGE_HEIGHT}px` }}
+      />
       <div class="hintbar">
         <span>
           <Icon name="shot" size={14} /> Drag a region

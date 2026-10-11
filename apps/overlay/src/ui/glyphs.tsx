@@ -281,8 +281,10 @@ const STATUS_GLYPHS = {
   ),
   working: () => (
     <>
-      <path class="d trail" transform="translate(0 1)" d="M2 13q2.25-3 4.5 0t4.5 0" />
-      <path class="f trail" d="M2 13q2.25-3 4.5 0t4.5 0" />
+      <g class="trail">
+        <path class="d" transform="translate(0 1)" d="M2 13q2.25-3 4.5 0t4.5 0" />
+        <path class="f" d="M2 13q2.25-3 4.5 0t4.5 0" />
+      </g>
       <g class="nib">
         <path class="paper" d="M11 13l1.2-4.2 3.6-3.6a1.3 1.3 0 0 1 1.8 1.8l-3.6 3.6z" />
         <path
@@ -366,12 +368,15 @@ export function Meter({
   ]
   return (
     <svg class={classes.filter(Boolean).join(" ")} viewBox="0 0 23 15" aria-hidden="true">
-      {METER_BAR_X.map((x) => (
-        <g key={x}>
-          <rect class="md" x={x + 0.7} y="1.2" width="2.8" height="13.8" rx=".8" />
-          <rect class="mf" x={x} y="0" width="2.8" height="13.8" rx=".8" />
-        </g>
-      ))}
+      {/* Scaling an SVG-internal element lays out the page every frame; HTML inside foreignObject composites. */}
+      <foreignObject width="23" height="15">
+        {METER_BAR_X.map((x) => (
+          <span key={x} class="mb" style={{ left: `${x}px` }}>
+            <i class="md" />
+            <i class="mf" />
+          </span>
+        ))}
+      </foreignObject>
     </svg>
   )
 }
