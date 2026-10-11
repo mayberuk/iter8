@@ -1,5 +1,11 @@
 import { chmod, rm } from "node:fs/promises"
-import { ClientMessage, LIVE_PATH, OVERLAY_PREFIX, type PageId } from "@iter8/protocol"
+import {
+  ClientMessage,
+  LIVE_PATH,
+  OVERLAY_PREFIX,
+  type PageId,
+  ServerMessage,
+} from "@iter8/protocol"
 import type { Server, ServerWebSocket } from "bun"
 import type { PageRecord } from "../pages/pages"
 import { failurePage, proxyHttp, withoutHopByHop } from "../proxy/forward"
@@ -7,7 +13,13 @@ import { injectBoot } from "../proxy/inject"
 import { type BridgeSocketData, bridgeHandlers, upgradeBridged } from "../proxy/ws-bridge"
 import { serveFolder, watchFolder as watchFolderFiles } from "../static/folder"
 import type { ControlApp } from "./control-api"
-import { authorizeLive, bootFor, type OverlayApiDeps, type OverlayApp } from "./overlay-api"
+import {
+  authorizeLive,
+  bootFor,
+  type OverlayApiDeps,
+  type OverlayApp,
+  pagePairing,
+} from "./overlay-api"
 
 export type ServerDeps = {
   overlayApp: OverlayApp
@@ -149,10 +161,25 @@ export async function startServer(deps: ServerDeps): Promise<RunningServer> {
     open(ws: ServerWebSocket<SocketData>) {
       if (isBridge(ws)) return bridgeHandlers.open(ws)
       if (ws.data.kind !== "live") return
-      ws.data.detach = live.attach(ws.data.pageId, {
+      const { pageId } = ws.data
+      ws.data.detach = live.attach(pageId, {
         send: (data) => ws.send(data),
         close: (code, reason) => ws.close(code, reason),
       })
+      // The overlay's hello snapshot precedes this attach, so a change pushed in between reached
+      // no socket. This handler is synchronous: nothing can be pushed between attach and replay.
+      // A pairing is only ever set, never cleared, so an unpaired page has nothing to replay.
+      const record = pages.get(pageId)
+      if (record) {
+        const replay: ServerMessage[] = []
+        const pairing = pagePairing(overlay, record)
+        if (pairing) replay.push({ type: "pairing", pairing })
+        for (const summary of overlay.inbox.summaries({ pageId })) {
+          const round = overlay.inbox.round(summary.id)
+          if (round) replay.push({ type: "round", round })
+        }
+        for (const message of replay) ws.send(JSON.stringify(ServerMessage.parse(message)))
+      }
     },
     message(ws: ServerWebSocket<SocketData>, message: string | Buffer) {
       if (isBridge(ws)) return bridgeHandlers.message(ws, message)
