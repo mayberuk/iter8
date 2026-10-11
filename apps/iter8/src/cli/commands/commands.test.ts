@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -28,6 +28,7 @@ import {
 } from "@iter8/protocol"
 import { type ArgsDef, type CommandDef, runCommand } from "citty"
 import { hc } from "hono/client"
+import { type LaptopOpen, listenForPages } from "../../connect/page-channel"
 import { createAgentNotes } from "../../pages/agent-notes"
 import { createPages } from "../../pages/pages"
 import { createScreenshots } from "../../pages/screenshots"
@@ -58,7 +59,8 @@ async function tempDir() {
   return path
 }
 
-function setup() {
+async function setup() {
+  const home = await tempDir()
   const db = openStore(":memory:")
   databases.push(db)
   const cwd = "/tmp/iter8-project"
@@ -110,7 +112,7 @@ function setup() {
         machineId,
         machineName: "workstation",
         pid,
-        home: "/tmp/iter8-home",
+        home,
         pool: [3990, 3991, 3992, 3993],
         overlay: "present",
         owner: owner ? owners.pairing(owner, PairingGeneration.parse(0), listener(owner)) : null,
@@ -237,6 +239,7 @@ function setup() {
     owners,
     waiters,
     machineId,
+    home,
     pid,
   }
 }
@@ -255,7 +258,7 @@ async function resolved<T>(value: T | Promise<T> | (() => T | Promise<T>)): Prom
 
 describe("command surface", () => {
   test("derives every owned command, positional and flag from CLI_SURFACE", async () => {
-    const commands = cliCommands(setup().deps)
+    const commands = cliCommands((await setup()).deps)
     expect(Object.keys(commands).sort()).toEqual(
       ["open", "attach", "rounds", "show", "done", "note", "status", "version", "hook"].sort(),
     )
@@ -305,7 +308,7 @@ describe("command surface", () => {
       )
       for (const flag of spec.flags) {
         if (!flag.required && !Array.isArray(flag.value)) continue
-        const state = setup()
+        const state = await setup()
         const args = [...(child ? [child] : []), ...spec.positionals.map(() => "page"), ...valid]
         const offset = args.indexOf(`--${flag.name}`)
         if (flag.required) args.splice(offset, 2)
@@ -316,7 +319,7 @@ describe("command surface", () => {
         expect(state.connections).toEqual([])
       }
       for (const flag of spec.flags.filter((flag) => Array.isArray(flag.value))) {
-        const state = setup()
+        const state = await setup()
         const args = [...(child ? [child] : []), ...spec.positionals.map(() => "page"), ...valid]
         args[args.indexOf(`--${flag.name}`) + 1] = "invalid"
         await state.run(root, args)
@@ -336,7 +339,7 @@ describe("command surface", () => {
       ["show", []],
       ["note", ["page", "--intent", "fix", "--body", "x", "--at"]],
     ] as const) {
-      const state = setup()
+      const state = await setup()
       await state.run(command, [...args])
       expect(state.exits).toEqual([ExitCode.usage])
       expect(state.connections).toEqual([])
@@ -348,7 +351,7 @@ describe("hook commands", () => {
   test.each(["claude", undefined])(
     "start preserves agent %s and sends process identity",
     async (agent) => {
-      const state = setup()
+      const state = await setup()
       await state.run("hook", [
         "start",
         "--pid",
@@ -374,7 +377,7 @@ describe("hook commands", () => {
   )
 
   test.each(["start", "prompt"])("%s prints only unannounced pointers", async (command) => {
-    const state = setup()
+    const state = await setup()
     await state.start("claude")
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -399,7 +402,7 @@ describe("hook commands", () => {
   test.each(["start", "prompt"])(
     "%s prints one pointer line per unannounced round, in order",
     async (command) => {
-      const state = setup()
+      const state = await setup()
       await state.start("claude")
       const page = await state.openPage()
       const rounds = [
@@ -427,7 +430,7 @@ describe("hook commands", () => {
   )
 
   test("prompt, stop and end update the registered owner without extra output", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     await state.run("hook", ["prompt", "--pid", "9001", "--json"])
     expect(state.owners.state(pairing.owner).status).toBe("busy")
@@ -454,7 +457,7 @@ describe("hook commands", () => {
   })
 
   test("wait wakes with pointer lines on stderr and exit wake", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     const page = await state.openPage()
     const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "600"])
@@ -471,7 +474,7 @@ describe("hook commands", () => {
   })
 
   test("wait woken by two rounds writes one pointer line each to stderr", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     const page = await state.openPage()
     const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "600"])
@@ -493,7 +496,7 @@ describe("hook commands", () => {
   test.each(["600", "2147483"])(
     "wait sends the pid, its start time and the full timeout %s",
     async (timeout) => {
-      const state = setup()
+      const state = await setup()
       const pairing = await state.start()
       const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", timeout])
       await armed(state.waiters, pairing.owner)
@@ -510,7 +513,7 @@ describe("hook commands", () => {
   )
 
   test("wait times out with silent success", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     await state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "0", "--json"])
     expect(state.exits).toEqual([ExitCode.ok])
@@ -519,7 +522,7 @@ describe("hook commands", () => {
   })
 
   test.each(["replaced", "cancelled"])("wait %s ends with silent success", async (outcome) => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     const pending = state.run("hook", ["wait", "--pid", "9001", "--timeout-seconds", "600"])
     await armed(state.waiters, pairing.owner)
@@ -534,7 +537,7 @@ describe("hook commands", () => {
   })
 
   test.each(["null", "throw"])("wait with connect %s exits unavailable once", async (mode) => {
-    const state = setup()
+    const state = await setup()
     state.deps.connect = async (options) => {
       state.connections.push(options)
       if (mode === "throw") throw new Error("Start failed")
@@ -549,7 +552,7 @@ describe("hook commands", () => {
   })
 
   test("lost fetch after the wait request was sent exits unavailable without reconnecting", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start()
     let pending: Promise<Response> | Response | undefined
     const broken = hc<ControlApp>("http://iter8", {
@@ -577,7 +580,7 @@ describe("hook commands", () => {
 
 describe("agent commands", () => {
   test("open lists localhost URLs and the full pool forward hint", async () => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", [
       "http://localhost:5173/view",
       "--upstream",
@@ -587,7 +590,7 @@ describe("agent commands", () => {
     expect(state.exits).toEqual([ExitCode.ok])
     expect(state.stdout.join("")).toMatch(/http:\/\/[a-z][a-z0-9-]*\.localhost:3990\//)
     expect(state.stdout.join("")).toContain(
-      "Browser on another machine? Forward the pool once: ssh -N -o ExitOnForwardFailure=yes",
+      `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
     )
     for (const port of [3990, 3991, 3992, 3993])
       expect(state.stdout.join("")).toContain(`-L ${port}:localhost:${port}`)
@@ -601,7 +604,7 @@ describe("agent commands", () => {
     const directory = await tempDir()
     const path = join(directory, "a file.html")
     await writeFile(path, "<h1>Hello</h1>")
-    const state = setup()
+    const state = await setup()
     for (const target of [path, directory]) {
       await state.run("open", [target, "--json"])
       expect(state.exits).toEqual([ExitCode.ok])
@@ -620,14 +623,14 @@ describe("agent commands", () => {
     "http://127.evil.com",
     "http://user:password@localhost",
   ])("open rejects %s before connecting", async (target) => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", [target])
     expect(state.exits).toEqual([ExitCode.usage])
     expect(state.connections).toEqual([])
   })
 
   test("attach, rounds, note, show, done and status emit their protocol JSON results", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start("claude")
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -676,7 +679,7 @@ describe("agent commands", () => {
   test.each([false, true])(
     "show json=%s claims the round and writes each captured PNG",
     async (json) => {
-      const state = setup()
+      const state = await setup()
       await state.start()
       const page = await state.openPage()
       const png = Uint8Array.from([
@@ -707,7 +710,7 @@ describe("agent commands", () => {
   )
 
   test("show writes each note's own screenshot under its own name and skips notes without one", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const pngOf = (width: number) =>
@@ -775,7 +778,7 @@ describe("agent commands", () => {
   })
 
   test("each show run writes into its own fresh directory and leaves earlier runs' files intact", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const pngOf = (width: number) =>
@@ -852,7 +855,7 @@ describe("agent commands", () => {
   })
 
   test("done prints done or answered and unknown note exits notFound", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     for (const reply of [undefined, "Changed"]) {
@@ -870,7 +873,7 @@ describe("agent commands", () => {
   })
 
   test("resolved wrong owner refuses show and done", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -887,7 +890,7 @@ describe("agent commands", () => {
   })
 
   test("agent text results are readable and diagnostics stay off stdout", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start("claude")
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -911,7 +914,7 @@ describe("agent commands", () => {
   })
 
   test("service-side bad request maps to usage", async () => {
-    const state = setup()
+    const state = await setup()
     const directory = await tempDir()
     await state.run("open", [directory, "--upstream", "http://localhost:5173"])
     expect(state.exits).toEqual([ExitCode.usage])
@@ -920,7 +923,7 @@ describe("agent commands", () => {
   })
 
   test("status with no running service exits unavailable without starting", async () => {
-    const state = setup()
+    const state = await setup()
     state.deps.connect = async (options) => {
       state.connections.push(options)
       return null
@@ -933,7 +936,7 @@ describe("agent commands", () => {
   })
 
   test("version has the protocol version and never connects", async () => {
-    const state = setup()
+    const state = await setup()
     await state.run("version", ["--json"])
     expect(VersionReport.parse(JSON.parse(state.stdout.join("")))).toEqual({
       version: "0.1.0",
@@ -998,7 +1001,7 @@ describe("control client", () => {
 
 describe("show text output", () => {
   test("names the round, the page and every note's authored body, as the protocol data has them", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const round = state.sendMany(page.id, [
@@ -1040,7 +1043,7 @@ describe("hook wait response failures", () => {
         ),
     ],
   ])("%s exits unavailable, once, without reconnecting", async (_name, reply) => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     state.clear()
     const sent: string[] = []
@@ -1065,7 +1068,7 @@ describe("hook wait response failures", () => {
 
 describe("note and done requests", () => {
   test("note sends exactly the given intent, body, every hop and the optional fields it was given", async () => {
-    const state = setup()
+    const state = await setup()
     const pairing = await state.start("claude")
     const page = await state.openPage()
     await state.run("note", [
@@ -1107,7 +1110,7 @@ describe("note and done requests", () => {
   })
 
   test("note leaves omitted optional fields out of the request", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start("claude")
     const page = await state.openPage()
     await state.run("note", [page.id, "--intent", "fix", "--body", "Plain", "--at", "h1"])
@@ -1135,7 +1138,7 @@ describe("note and done requests", () => {
   })
 
   test("done --reply sends the exact reply text and the service stores it", async () => {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     const round = state.send(page.id)
@@ -1179,7 +1182,7 @@ describe("flag validation", () => {
     args.map((arg, index) => (args[index - 1] === `--${flag}` ? value : arg))
 
   async function fresh() {
-    const state = setup()
+    const state = await setup()
     await state.start()
     const page = await state.openPage()
     return { state, page }
@@ -1290,7 +1293,7 @@ describe("flag validation", () => {
 
 describe("hook commands for another process", () => {
   test("prompt, stop and end act on the owner of the given --pid, not the CLI's own, and start the service", async () => {
-    const state = setup()
+    const state = await setup()
     const own = await state.start("claude", 9001)
     const other = await state.start("claude", 9002)
     const stateOf = (owner: typeof own.owner) => state.owners.state(owner).status
@@ -1331,6 +1334,135 @@ describe("hook commands for another process", () => {
 })
 
 describe("open targets", () => {
+  test.each([false, true])("hands the page to a connected laptop with json=%s", async (json) => {
+    const state = await setup()
+    await state.run("open", ["http://localhost:5173", "--json"])
+    const original = state.stdout.join("")
+    const opened = OpenResult.parse(JSON.parse(original))
+    state.clear()
+    const received: LaptopOpen[] = []
+    const listener = await listenForPages({
+      socketPath: join(state.home, "laptop-mac-0000abcd.sock"),
+      accept(message) {
+        received.push(message)
+        return true
+      },
+    })
+    try {
+      await state.run("open", ["http://localhost:5173", ...(json ? ["--json"] : [])])
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(received).toEqual([{ machineId: state.machineId, url: opened.url }])
+      expect(state.requests[1]).toMatchObject({
+        path: "/status",
+        body: { owner: null, identities: [{ pid: 9001, startedAt: "linux:1:9001" }] },
+      })
+      expect(state.stdout).toEqual([
+        json ? original : `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
+      ])
+    } finally {
+      await listener.close()
+    }
+  })
+
+  test("names every laptop that accepted the page, joined with a comma and a space", async () => {
+    const state = await setup()
+    await state.run("open", ["http://localhost:5173", "--json"])
+    const opened = OpenResult.parse(JSON.parse(state.stdout.join("")))
+    state.clear()
+    const received: LaptopOpen[][] = [[], []]
+    const listeners = await Promise.all(
+      ["alpha", "beta"].map((name, index) =>
+        listenForPages({
+          socketPath: join(state.home, `laptop-${name}-0000abcd.sock`),
+          accept(message) {
+            received[index]?.push(message)
+            return true
+          },
+        }),
+      ),
+    )
+    try {
+      await state.run("open", ["http://localhost:5173"])
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(received).toEqual([
+        [{ machineId: state.machineId, url: opened.url }],
+        [{ machineId: state.machineId, url: opened.url }],
+      ])
+      expect(state.stdout).toEqual([
+        `${opened.url}\n${opened.landingUrl}\nOpened in the browser on alpha, beta.\n`,
+      ])
+    } finally {
+      for (const listener of listeners) await listener.close()
+    }
+  })
+
+  test("removes a stale laptop socket and prints the connection hint", async () => {
+    const state = await setup()
+    const originalPath = join(state.home, "creating.sock")
+    const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
+    const stale = Bun.listen({ unix: originalPath, socket: { data() {} } })
+    try {
+      await rename(originalPath, socketPath)
+    } finally {
+      stale.stop(true)
+    }
+    expect((await stat(socketPath)).isSocket()).toBe(true)
+
+    await state.run("open", ["http://localhost:5173"])
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.stderr).toEqual([])
+    expect(state.stdout.join("")).toContain(
+      `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
+    )
+    await expect(stat(socketPath)).rejects.toMatchObject({ code: "ENOENT" })
+  })
+
+  test("prints the connection hint when a laptop refuses the page", async () => {
+    const state = await setup()
+    const socketPath = join(state.home, "laptop-mac-0000abcd.sock")
+    const listener = await listenForPages({ socketPath, accept: () => false })
+    try {
+      await state.run("open", ["http://localhost:5173"])
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(state.stdout.join("")).toContain(
+        `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
+      )
+      expect((await stat(socketPath)).isSocket()).toBe(true)
+    } finally {
+      await listener.close()
+    }
+  })
+
+  test.each(["disconnected", "refused", "invalid"])(
+    "a status failure (%s) does not fail open",
+    async (failure) => {
+      const state = await setup()
+      state.deps.connect = async () =>
+        hc<ControlApp>("http://iter8", {
+          fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = new URL(String(input))
+            if (url.pathname === "/status") {
+              if (failure === "disconnected") throw new Error("Control connection lost")
+              return failure === "refused"
+                ? new Response("Service unavailable", { status: 503 })
+                : Response.json({})
+            }
+            return state.app.request(`${url.pathname}${url.search}`, init)
+          },
+        })
+
+      await state.run("open", ["http://localhost:5173"])
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(state.stdout.join("").trim().split("\n")).toHaveLength(3)
+      expect(state.stdout.join("")).toContain(
+        `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
+      )
+    },
+  )
+
   test.each([
     "https://localhost:5173",
     "http://[::1]:5173",
@@ -1339,7 +1471,7 @@ describe("open targets", () => {
     "http://app.localhost:5173",
     "http://a.b.localhost:5173/x?y=1",
   ])("accepts %s as a primary target", async (target) => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", [target, "--json"])
     expect(state.exits).toEqual([ExitCode.ok])
     expect(state.requests[0]?.body).toMatchObject({
@@ -1353,7 +1485,7 @@ describe("open targets", () => {
   })
 
   test("prints the exact page url, landing url and forward hint", async () => {
-    const state = setup()
+    const state = await setup()
     await state.run("open", ["http://localhost:5173", "--json"])
     const page = OpenResult.parse(JSON.parse(state.stdout.join(""))).page
     state.clear()
@@ -1362,11 +1494,8 @@ describe("open targets", () => {
     expect(state.exits).toEqual([ExitCode.ok])
     const token = state.pages.get(page.id)?.token ?? ""
     const fragment = new URLSearchParams({ m: state.machineId, p: page.id, t: token })
-    const forwards = [3990, 3991, 3992, 3993]
-      .map((port) => `-L ${port}:localhost:${port}`)
-      .join(" ")
     expect(state.stdout).toEqual([
-      `${page.origin}/\n${page.origin}${LANDING_PATH}#${fragment}\nBrowser on another machine? Forward the pool once: ssh -N -o ExitOnForwardFailure=yes ${forwards} ${hostname()}. If the landing page shows anything but iter8, that port is taken on your laptop.\n`,
+      `${page.origin}/\n${page.origin}${LANDING_PATH}#${fragment}\nBrowser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N -o ExitOnForwardFailure=yes -L 3990:localhost:3990 -L 3991:localhost:3991 -L 3992:localhost:3992 -L 3993:localhost:3993 ${hostname()}).\n`,
     ])
     expect(page.origin).toMatch(/^http:\/\/[a-z][a-z0-9-]*\.localhost:3990$/)
   })
