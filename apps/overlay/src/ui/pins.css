@@ -68,6 +68,7 @@
   outline-offset: 3px;
 }
 .pin.pulse {
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: pinhop 0.5s var(--spring);
 }
 @keyframes pinhop {

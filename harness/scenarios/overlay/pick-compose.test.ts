@@ -71,8 +71,20 @@ async function composeOn(o: Opened, target: Locator) {
   await until("the composer to open", () => noteBox(o).isVisible())
 }
 
-async function borderStyle(locator: Locator): Promise<string> {
-  return locator.evaluate((el) => getComputedStyle(el).borderTopStyle)
+/** The token a confidence label is coloured with: `--cobalt-d` marks a certain lead, `--mute` any other. */
+async function confidenceTone(locator: Locator): Promise<string> {
+  return locator.evaluate((el) => {
+    const own = getComputedStyle(el).color
+    for (const token of ["--cobalt-d", "--mute"]) {
+      const probe = document.createElement("i")
+      probe.style.color = `var(${token})`
+      el.append(probe)
+      const color = getComputedStyle(probe).color
+      probe.remove()
+      if (color === own) return token
+    }
+    return own
+  })
 }
 
 describe("pick mode", () => {
@@ -306,7 +318,7 @@ describe("the composer", () => {
       const text = (await dialog(o).textContent()) ?? ""
       expect(text).toContain("<Card>")
       expect(text).toContain("src/Card.jsx:3")
-      expect(await borderStyle(confidence(o))).toBe("solid")
+      expect(await confidenceTone(confidence(o))).toBe("--cobalt-d")
       expect(requestsTo(o, "POST", OVERLAY_ROUTES.symbolicate.path)).toHaveLength(1)
     },
     TEST_MS,
@@ -323,7 +335,7 @@ describe("the composer", () => {
           (await confidence(o).isVisible()) && (await confidence(o).textContent()) === "none",
         10_000,
       )
-      expect(await borderStyle(confidence(o))).toBe("dashed")
+      expect(await confidenceTone(confidence(o))).toBe("--mute")
       expect(requestsTo(o, "GET", SOURCE_BUNDLE_PATH).length).toBeGreaterThan(0)
       expect(requestsTo(o, "POST", OVERLAY_ROUTES.symbolicate.path)).toHaveLength(0)
     },
@@ -1221,7 +1233,7 @@ describe("the source lead", () => {
         await until(`the ${level} label`, async () => (await confidence(o).textContent()) === level)
         const uncertain = o.overlay.locator(".cmp-src")
         expect(await uncertain.getAttribute("class")).toContain("uncertain")
-        expect(await borderStyle(confidence(o))).toBe("dashed")
+        expect(await confidenceTone(confidence(o))).toBe("--mute")
         expect(await fileColor(uncertain)).not.toBe(certain)
       },
       TEST_MS,

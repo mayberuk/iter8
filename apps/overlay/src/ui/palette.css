@@ -18,6 +18,7 @@
   border-radius: 12px;
   box-shadow: 4px 5px 0 var(--edge);
   overflow: hidden;
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: palette-in 0.22s var(--spring);
 }
 .pal-in {
@@ -136,6 +137,7 @@
   border-radius: 12px;
   box-shadow: 4px 5px 0 var(--edge);
   padding: 20px 24px 22px;
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: keysheet-in 0.22s var(--spring);
 }
 .keysheet h2 {

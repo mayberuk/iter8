@@ -67,13 +67,9 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--mute);
-  background: var(--well);
-  border-radius: 4px;
-  padding: 1px 5px;
 }
 .sheet .tab[aria-selected="true"] .ct {
-  background: var(--solid);
-  color: var(--on-solid);
+  color: var(--ink-2);
 }
 .sheet .sh-b {
   flex: 1;

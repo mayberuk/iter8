@@ -107,6 +107,7 @@
   --r2: 10px;
   --r3: 999px;
   --lift: 3px 4px 0 var(--edge), var(--top);
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   --spring: cubic-bezier(0.32, 1.42, 0.52, 1);
   --out: cubic-bezier(0.16, 1, 0.3, 1);
   --press: cubic-bezier(0.3, 0.7, 0.4, 1);
@@ -414,9 +415,6 @@ kbd {
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--ink-2);
-  background: var(--well);
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 .chip .nm {
   margin-top: 4px;
@@ -738,6 +736,7 @@ kbd {
   font-size: 12.5px;
   border: 1px solid var(--inv-border);
   box-shadow: 0 4px 0 var(--inv-d);
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: tin 0.26s var(--spring);
 }
 .toast.out {
@@ -831,6 +830,7 @@ kbd {
   transform-origin: 10px 10px;
 }
 .intent[aria-checked="true"] .g-fix .mv {
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: stick 0.46s var(--spring);
 }
 @keyframes stick {
@@ -862,6 +862,7 @@ kbd {
   }
 }
 .intent[aria-checked="true"] .g-question .mv {
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: bob 0.5s var(--spring);
 }
 @keyframes bob {
@@ -880,6 +881,7 @@ kbd {
   transform-origin: 50% 50%;
 }
 .intent[aria-checked="true"] .g-keep .dt {
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: pop 0.34s var(--spring) both;
 }
 .intent[aria-checked="true"] .g-keep .dt:nth-of-type(2) {
@@ -997,58 +999,24 @@ kbd {
   gap: 5px;
   flex: none;
   height: 22px;
-  padding: 0 8px 0 4px;
-  border-radius: 6px;
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
-  background: var(--paper);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    0 2px 0 var(--base-2);
   color: var(--mute);
 }
-.st-chip.queued {
+.st-chip.queued,
+.st-chip.working {
   color: var(--amber-t);
-  background: var(--amber-w);
-  box-shadow:
-    inset 0 0 0 1px var(--amber-line),
-    0 2px 0 var(--amber-base);
 }
 .st-chip.delivered {
   color: var(--cobalt-t);
-  background: var(--cobalt-wash);
-  box-shadow:
-    inset 0 0 0 1px var(--cobalt-line),
-    0 2px 0 var(--cobalt-base);
 }
-.st-chip.working {
-  color: var(--amber-t);
-  background: var(--amber-w);
-  box-shadow:
-    inset 0 0 0 1px var(--amber-line),
-    0 2px 0 var(--amber-base);
-}
-.st-chip.done {
-  color: var(--keep-t);
-  background: var(--keep-w);
-  box-shadow:
-    inset 0 0 0 1px var(--keep-line),
-    0 2px 0 var(--keep-base);
-}
+.st-chip.done,
 .st-chip.answered {
   color: var(--keep-t);
-  background: var(--keep-w);
-  box-shadow:
-    inset 0 0 0 1px var(--keep-line),
-    0 2px 0 var(--keep-base);
 }
 .st-chip.failed {
   color: var(--fix-t);
-  background: var(--fix-w);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--fix) 30%, var(--paper)),
-    0 2px 0 color-mix(in srgb, var(--fix) 45%, var(--paper));
 }
 .sg-failed {
   color: var(--fix);
