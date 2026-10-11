@@ -67,6 +67,11 @@ const EXTRA_DEV_ARGS: Partial<Record<FixtureName, string[]>> = { astro: ["--igno
 // start gets its own distDir, which fixtures/next-*/next.config.mjs reads from this variable.
 const NEXT_DIST_DIR_ENV = "ITER8_NEXT_DIST_DIR"
 
+// A second `vite dev` rewrites the shared `.svelte-kit/generated/dev` files and the first server
+// then reloads its open page, so each start gets its own outDir, which fixtures/sveltekit/vite.config.js
+// reads from this variable.
+const SVELTEKIT_OUT_DIR_ENV = "ITER8_SVELTEKIT_OUT_DIR"
+
 export type RunningFixture = {
   name: FixtureName
   dir: string
@@ -82,7 +87,7 @@ export type StartFixtureOptions = {
   readyTimeoutMs?: number
 }
 
-/** Resolves once `readyPath` has answered 200; `stop` also removes the fixture's log directory and, for Next, its distDir. */
+/** Resolves once `readyPath` has answered 200; `stop` also removes the fixture's log directory and, for Next and SvelteKit, its per-start build folder. */
 export async function startFixture(
   name: FixtureName,
   options: StartFixtureOptions = {},
@@ -99,12 +104,16 @@ export async function startFixture(
   }
 
   const logs = await scratchDir(`${SCRATCH_ROOT}${name}-`)
-  const distDir = name.startsWith("next-") ? `.next-p${process.pid}-${port}` : null
+  const buildDir = name.startsWith("next-")
+    ? { env: NEXT_DIST_DIR_ENV, path: `.next-p${process.pid}-${port}` }
+    : name === "sveltekit"
+      ? { env: SVELTEKIT_OUT_DIR_ENV, path: `.svelte-kit-p${process.pid}-${port}` }
+      : null
   const dispose = async () => {
     try {
       await logs.dispose()
     } finally {
-      if (distDir !== null) await rm(join(dir, distDir), { recursive: true, force: true })
+      if (buildDir !== null) await rm(join(dir, buildDir.path), { recursive: true, force: true })
     }
   }
   const log = { out: join(logs.path, "stdout.log"), err: join(logs.path, "stderr.log") }
@@ -121,7 +130,7 @@ export async function startFixture(
       env: {
         ...process.env,
         ...entry.env,
-        ...(distDir === null ? {} : { [NEXT_DIST_DIR_ENV]: distDir }),
+        ...(buildDir === null ? {} : { [buildDir.env]: buildDir.path }),
       },
       detached: true,
       stdin: "ignore",

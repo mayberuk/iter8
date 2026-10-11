@@ -23,4 +23,5 @@ playwright-report/
 .next/
 .next-*/
 .svelte-kit/
+.svelte-kit-*/
 .astro/
