@@ -110,8 +110,8 @@
   --spring: cubic-bezier(0.32, 1.42, 0.52, 1);
   --out: cubic-bezier(0.16, 1, 0.3, 1);
   --press: cubic-bezier(0.3, 0.7, 0.4, 1);
-  --sans: "iter8 Figtree", ui-sans-serif, system-ui, sans-serif;
-  --mono: "iter8 Spline Sans Mono", ui-monospace, monospace;
+  --sans: "iter8 Reddit Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono: "iter8 JetBrains Mono", ui-monospace, monospace;
   font-family: var(--sans);
   font-size: 13px;
   line-height: 1.4;
@@ -121,53 +121,53 @@
 /* --toast-* and --coach-step sit on the inverted surface, which stays dark in both themes, so they are not redeclared. */
 .root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #2a2824;
-  --paper-2: #312e2a;
-  --well: #1e1c19;
-  --line: #3c3832;
-  --line-2: #4c4740;
-  --edge: #141211;
-  --edge-2: #6b665d;
-  --base-2: #171513;
-  --raised: #37342f;
-  --field: #201e1b;
-  --hairlight: rgba(255, 244, 225, 0.05);
-  --top: inset 0 1px 0 rgba(255, 244, 225, 0.07);
+  --paper: #282828;
+  --paper-2: #2e2e2e;
+  --well: #1c1c1c;
+  --line: #393939;
+  --line-2: #484848;
+  --edge: #121212;
+  --edge-2: #676767;
+  --base-2: #151515;
+  --raised: #343434;
+  --field: #1e1e1e;
+  --hairlight: rgba(245, 245, 245, 0.05);
+  --top: inset 0 1px 0 rgba(245, 245, 245, 0.07);
   --sel: #5e4a1f;
-  --veil: rgba(10, 8, 5, 0.22);
-  --scrim: rgba(10, 8, 5, 0.45);
-  --ink: #ece5d5;
-  --ink-2: #cbc3b2;
-  --ink-d: #0a0907;
-  --mute: #9d9584;
-  --faint: #777062;
+  --veil: rgba(8, 8, 8, 0.22);
+  --scrim: rgba(8, 8, 8, 0.45);
+  --ink: #e5e5e5;
+  --ink-2: #c4c4c4;
+  --ink-d: #090909;
+  --mute: #969696;
+  --faint: #717171;
   --on-accent: #fff;
-  --solid: #e6dfce;
-  --solid-d: #9a917d;
-  --on-solid: #1e1b17;
-  --solid-key: #cfc7b4;
-  --solid-key-d: #8f8672;
-  --solid-key-ink: #26231e;
-  --inv: #3c3933;
-  --inv-d: #121010;
-  --inv-border: #514c45;
-  --inv-ink: #efe8d8;
+  --solid: #dfdfdf;
+  --solid-d: #929292;
+  --on-solid: #1b1b1b;
+  --solid-key: #c7c7c7;
+  --solid-key-d: #878787;
+  --solid-key-ink: #232323;
+  --inv: #393939;
+  --inv-d: #111111;
+  --inv-border: #4d4d4d;
+  --inv-ink: #e8e8e8;
   --inv-head: #fff;
-  --inv-body: #d2cbbb;
-  --inv-mute: #ada593;
-  --inv-mute-2: #a39b88;
-  --inv-key: #4e4942;
-  --inv-key-d: #1a1815;
-  --inv-key-ink: #eee9dc;
-  --inv-key-hover: #58534b;
-  --inv-well: #2d2a26;
-  --inv-line: #5a554c;
-  --inv-btn: #efe8d8;
-  --inv-btn-ink: #221f19;
-  --inv-btn-d: #8f8774;
-  --film: #151310;
-  --film-d: #0a0908;
-  --film-frame: #23211d;
+  --inv-body: #cbcbcb;
+  --inv-mute: #a6a6a6;
+  --inv-mute-2: #9b9b9b;
+  --inv-key: #4a4a4a;
+  --inv-key-d: #181818;
+  --inv-key-ink: #e9e9e9;
+  --inv-key-hover: #545454;
+  --inv-well: #2a2a2a;
+  --inv-line: #565656;
+  --inv-btn: #e8e8e8;
+  --inv-btn-ink: #1f1f1f;
+  --inv-btn-d: #878787;
+  --film: #131313;
+  --film-d: #090909;
+  --film-frame: #212121;
   --cobalt: #4f78ee;
   --cobalt-d: #1f3784;
   --cobalt-t: #a3b8ff;
@@ -205,10 +205,10 @@
   --claude-tint: #30271f;
   --claude-tint-line: #4b3529;
   --agent-card: #302821;
-  --reply-bg: #2f2b25;
-  --codex: #4e493f;
-  --codex-d: #15130f;
-  --codex-ink: #f1eee4;
+  --reply-bg: #2c2c2c;
+  --codex: #494949;
+  --codex-d: #131313;
+  --codex-ink: #eeeeee;
   --ring: rgba(79, 120, 238, 0.4);
   --ring-hatch: rgba(79, 120, 238, 0.12);
   --mark-arrow: #5b80ff;
@@ -217,53 +217,53 @@
 @media (prefers-color-scheme: dark) {
   .root[data-theme="auto"] {
     color-scheme: dark;
-    --paper: #2a2824;
-    --paper-2: #312e2a;
-    --well: #1e1c19;
-    --line: #3c3832;
-    --line-2: #4c4740;
-    --edge: #141211;
-    --edge-2: #6b665d;
-    --base-2: #171513;
-    --raised: #37342f;
-    --field: #201e1b;
-    --hairlight: rgba(255, 244, 225, 0.05);
-    --top: inset 0 1px 0 rgba(255, 244, 225, 0.07);
+    --paper: #282828;
+    --paper-2: #2e2e2e;
+    --well: #1c1c1c;
+    --line: #393939;
+    --line-2: #484848;
+    --edge: #121212;
+    --edge-2: #676767;
+    --base-2: #151515;
+    --raised: #343434;
+    --field: #1e1e1e;
+    --hairlight: rgba(245, 245, 245, 0.05);
+    --top: inset 0 1px 0 rgba(245, 245, 245, 0.07);
     --sel: #5e4a1f;
-    --veil: rgba(10, 8, 5, 0.22);
-    --scrim: rgba(10, 8, 5, 0.45);
-    --ink: #ece5d5;
-    --ink-2: #cbc3b2;
-    --ink-d: #0a0907;
-    --mute: #9d9584;
-    --faint: #777062;
+    --veil: rgba(8, 8, 8, 0.22);
+    --scrim: rgba(8, 8, 8, 0.45);
+    --ink: #e5e5e5;
+    --ink-2: #c4c4c4;
+    --ink-d: #090909;
+    --mute: #969696;
+    --faint: #717171;
     --on-accent: #fff;
-    --solid: #e6dfce;
-    --solid-d: #9a917d;
-    --on-solid: #1e1b17;
-    --solid-key: #cfc7b4;
-    --solid-key-d: #8f8672;
-    --solid-key-ink: #26231e;
-    --inv: #3c3933;
-    --inv-d: #121010;
-    --inv-border: #514c45;
-    --inv-ink: #efe8d8;
+    --solid: #dfdfdf;
+    --solid-d: #929292;
+    --on-solid: #1b1b1b;
+    --solid-key: #c7c7c7;
+    --solid-key-d: #878787;
+    --solid-key-ink: #232323;
+    --inv: #393939;
+    --inv-d: #111111;
+    --inv-border: #4d4d4d;
+    --inv-ink: #e8e8e8;
     --inv-head: #fff;
-    --inv-body: #d2cbbb;
-    --inv-mute: #ada593;
-    --inv-mute-2: #a39b88;
-    --inv-key: #4e4942;
-    --inv-key-d: #1a1815;
-    --inv-key-ink: #eee9dc;
-    --inv-key-hover: #58534b;
-    --inv-well: #2d2a26;
-    --inv-line: #5a554c;
-    --inv-btn: #efe8d8;
-    --inv-btn-ink: #221f19;
-    --inv-btn-d: #8f8774;
-    --film: #151310;
-    --film-d: #0a0908;
-    --film-frame: #23211d;
+    --inv-body: #cbcbcb;
+    --inv-mute: #a6a6a6;
+    --inv-mute-2: #9b9b9b;
+    --inv-key: #4a4a4a;
+    --inv-key-d: #181818;
+    --inv-key-ink: #e9e9e9;
+    --inv-key-hover: #545454;
+    --inv-well: #2a2a2a;
+    --inv-line: #565656;
+    --inv-btn: #e8e8e8;
+    --inv-btn-ink: #1f1f1f;
+    --inv-btn-d: #878787;
+    --film: #131313;
+    --film-d: #090909;
+    --film-frame: #212121;
     --cobalt: #4f78ee;
     --cobalt-d: #1f3784;
     --cobalt-t: #a3b8ff;
@@ -301,10 +301,10 @@
     --claude-tint: #30271f;
     --claude-tint-line: #4b3529;
     --agent-card: #302821;
-    --reply-bg: #2f2b25;
-    --codex: #4e493f;
-    --codex-d: #15130f;
-    --codex-ink: #f1eee4;
+    --reply-bg: #2c2c2c;
+    --codex: #494949;
+    --codex-d: #131313;
+    --codex-ink: #eeeeee;
     --ring: rgba(79, 120, 238, 0.4);
     --ring-hatch: rgba(79, 120, 238, 0.12);
     --mark-arrow: #5b80ff;
@@ -334,8 +334,11 @@ input:focus-visible,
   outline: 2px solid var(--cobalt);
   outline-offset: 2px;
 }
-svg .ic-d {
-  stroke: color-mix(in srgb, currentColor 52%, #1b160c);
+svg.ic-fill .ic-d {
+  fill: color-mix(in srgb, currentColor 52%, #171717);
+}
+svg.ic-stroke .ic-d {
+  stroke: color-mix(in srgb, currentColor 52%, #171717);
 }
 svg .ic-d * {
   opacity: 0.55;
@@ -513,7 +516,10 @@ kbd {
   transform: translateY(2px);
   box-shadow: 0 0 0 var(--cobalt-d);
 }
-.seg button[aria-pressed="true"] .ic-d {
+.seg button[aria-pressed="true"] svg.ic-fill .ic-d {
+  fill: var(--cobalt-d);
+}
+.seg button[aria-pressed="true"] svg.ic-stroke .ic-d {
   stroke: var(--cobalt-d);
 }
 .seg button[aria-pressed="true"] .ic-d * {
@@ -911,7 +917,7 @@ kbd {
 }
 .sg .d {
   fill: none;
-  stroke: color-mix(in srgb, currentColor 50%, #1b160c);
+  stroke: color-mix(in srgb, currentColor 50%, #171717);
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;

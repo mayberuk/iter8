@@ -533,7 +533,7 @@
   background: repeating-linear-gradient(
     90deg,
     transparent 0 6px,
-    rgba(255, 250, 235, 0.14) 6px 10px
+    rgba(250, 250, 250, 0.14) 6px 10px
   );
 }
 .sheet .strip::before {
@@ -556,7 +556,7 @@
 }
 .sheet .sframe:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 0 1.5px #fcfbf6;
+  box-shadow: 0 0 0 1.5px #fbfbfb;
 }
 .sheet .sframe img {
   display: block;
@@ -571,7 +571,7 @@
   bottom: 3px;
   font: 600 9.5px / 1 var(--mono);
   color: #fff;
-  background: rgba(34, 31, 25, 0.8);
+  background: rgba(31, 31, 31, 0.8);
   padding: 2px 3px;
   border-radius: 3px;
 }

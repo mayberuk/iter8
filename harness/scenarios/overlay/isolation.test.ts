@@ -509,9 +509,9 @@ describe("styles and fonts", () => {
     await until("the overlay font", () =>
       page.evaluate(() => {
         const face = [...document.fonts].find(
-          (candidate) => candidate.family.replaceAll('"', "") === "iter8 Figtree",
+          (candidate) => candidate.family.replaceAll('"', "") === "iter8 Reddit Sans",
         )
-        return face?.status === "loaded" && document.fonts.check('13px "iter8 Figtree"')
+        return face?.status === "loaded" && document.fonts.check('13px "iter8 Reddit Sans"')
       }),
     )
     const fonts = mock.requests().filter((request) => request.path.endsWith(".woff2"))

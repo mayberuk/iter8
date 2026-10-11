@@ -1,10 +1,10 @@
-import figtree from "../../assets/fonts/Figtree-Variable.woff2"
-import splineSansMono from "../../assets/fonts/SplineSansMono-Variable.woff2"
+import jetbrainsMono from "../../assets/fonts/JetBrainsMono-Variable.woff2"
+import redditSans from "../../assets/fonts/RedditSans-Variable.woff2"
 
 export function registerFonts(): void {
   const faces = [
-    new FontFace("iter8 Figtree", `url(${figtree})`, { weight: "400 800" }),
-    new FontFace("iter8 Spline Sans Mono", `url(${splineSansMono})`, { weight: "400 600" }),
+    new FontFace("iter8 Reddit Sans", `url(${redditSans})`, { weight: "200 900" }),
+    new FontFace("iter8 JetBrains Mono", `url(${jetbrainsMono})`, { weight: "100 800" }),
   ]
   for (const face of faces) {
     document.fonts.add(face)

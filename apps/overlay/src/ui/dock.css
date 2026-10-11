@@ -169,7 +169,10 @@
   transform: translateY(3px);
   box-shadow: 0 0 0 var(--cobalt-d);
 }
-.send .ic-d {
+.send svg.ic-fill .ic-d {
+  fill: var(--cobalt-d);
+}
+.send svg.ic-stroke .ic-d {
   stroke: var(--cobalt-d);
 }
 .send .ic-d * {
@@ -183,7 +186,10 @@
   cursor: not-allowed;
   transform: none;
 }
-.send:disabled .ic-d {
+.send:disabled svg.ic-fill .ic-d {
+  fill: var(--line-2);
+}
+.send:disabled svg.ic-stroke .ic-d {
   stroke: var(--line-2);
 }
 .iter8btn {
