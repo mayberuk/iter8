@@ -111,6 +111,23 @@ const selected = (o: Opened) =>
   palette(o.overlay)
     .locator('.pal-i[aria-current="true"] .lb')
     .evaluate((el) => el.firstChild?.textContent)
+const groupAndIcon = (o: Opened) =>
+  palette(o.overlay)
+    .locator(".pal-i")
+    .evaluateAll((els) =>
+      els.map((el) => {
+        let heading = el.previousElementSibling
+        while (heading && !heading.classList.contains("pal-g"))
+          heading = heading.previousElementSibling
+        return {
+          label: el.querySelector(".lb")?.firstChild?.textContent ?? "",
+          group: heading?.textContent ?? "",
+          icon: [...el.querySelectorAll("svg path")]
+            .map((path) => path.getAttribute("d"))
+            .join("|"),
+        }
+      }),
+    )
 const groupsOf = (o: Opened) =>
   palette(o.overlay)
     .locator(".pal-g")
@@ -376,6 +393,7 @@ describe("command palette: rows", () => {
       { label: "Take a screenshot", keys: ["S"] },
       { label: "Open round sheet", keys: ["R"] },
       { label: "Show history", keys: [] },
+      { label: "Show conversation", keys: [] },
       { label: "Send round 1", keys: [] },
       { label: "Hide pins", keys: ["P"] },
       { label: "Collapse dock", keys: [] },
@@ -386,6 +404,21 @@ describe("command palette: rows", () => {
       { label: `01 ${DRAFT.body}`, keys: [] },
       { label: "Attach to orchid", keys: [] },
     ])
+  }, 30_000)
+
+  test("Show conversation sits in the same group as Show history and carries the history icon", async () => {
+    const o = await open({ pairing: LIVE, pageState: seed([DRAFT]), prefs: TOUR_DONE })
+    await openPalette(o)
+    const all = await groupAndIcon(o)
+    const named = (label: string) => all.find((row) => row.label === label)
+    const history = named("Show history")
+    const conversation = named("Show conversation")
+    const roundSheet = named("Open round sheet")
+    expect(history?.group).toBe("Actions")
+    expect(history?.icon).not.toBe("")
+    expect(roundSheet?.icon).not.toBe(history?.icon)
+    expect(conversation?.group).toBe(history?.group)
+    expect(conversation?.icon).toBe(history?.icon)
   }, 30_000)
 
   test("rows that cannot run are hidden: Send with no notes, a session that ended, the one attached", async () => {
@@ -548,7 +581,7 @@ describe("command palette: filtering and keys", () => {
 })
 
 describe("command palette: commands do what their keys do", () => {
-  test("Take a screenshot, Draw a region, Open round sheet, Show history, Collapse and Expand dock", async () => {
+  test("Take a screenshot, Draw a region, Open round sheet, Show history, Show conversation, Collapse and Expand dock", async () => {
     const o = await open({ pairing: LIVE, pageState: seed([DRAFT]), prefs: TOUR_DONE })
     const shot = o.overlay.getByRole("button", { name: "Screenshot" })
     const region = o.overlay.getByRole("button", { name: "Draw region" })
@@ -584,6 +617,13 @@ describe("command palette: commands do what their keys do", () => {
       "the History tab",
       async () =>
         (await sheet.getByRole("tab", { name: /^History/ }).getAttribute("aria-selected")) ===
+        "true",
+    )
+    await runCommand(o, "show conversation")
+    await until(
+      "the Conversation tab",
+      async () =>
+        (await sheet.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")) ===
         "true",
     )
 

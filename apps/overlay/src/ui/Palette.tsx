@@ -167,6 +167,12 @@ function useCommands(sendRound: SendRound): Command[] {
       run: () => openSheet("round"),
     },
     { group: "Actions", icon: "history", label: "Show history", run: () => openSheet("history") },
+    {
+      group: "Actions",
+      icon: "history",
+      label: "Show conversation",
+      run: () => openSheet("conversation"),
+    },
   ]
   if (sendRound.blocked === null)
     commands.push({

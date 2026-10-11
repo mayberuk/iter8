@@ -14,9 +14,11 @@ import {
   displayNoteState,
   nextRoundNumber,
   roundOutcome,
+  type SheetTab,
   sessionName,
 } from "../model"
 import { resolveAnchor } from "../pick/anchor"
+import { Conversation } from "./Conversation"
 import { useOverlay, useSheet } from "./context"
 import { SessionRows, useSendRound } from "./Dock"
 import { Avatar, Icon, IntentGlyph, Meter, StatusGlyph } from "./glyphs"
@@ -30,6 +32,12 @@ const INTENT_LABEL = {
   question: "Question",
   keep: "Keep",
 } as const satisfies Record<Intent, string>
+
+const TAB_LABEL = {
+  round: "This round",
+  conversation: "Conversation",
+  history: "History",
+} as const satisfies Record<SheetTab, string>
 
 const TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 
@@ -579,7 +587,7 @@ function HistoryRound({ round }: { round: Round }) {
   const sent = round.state.stage === "draft" ? undefined : clock(round.state.queuedAt)
 
   return (
-    <section class="round" aria-label={`Round ${round.id.slice(1)}`}>
+    <section class="round" id={`round-${round.id}`} aria-label={`Round ${round.id.slice(1)}`}>
       <header class="rh">
         <div class="rh1">
           <h3>Round {round.id.slice(1)}</h3>
@@ -649,7 +657,7 @@ function Sheet({ sending }: { sending: Sending }) {
   const pairing = model.pairing.value
   const sentNotes = model.rounds.value.reduce((sum, round) => sum + round.notes.length, 0)
 
-  function pickTab(next: "round" | "history") {
+  function pickTab(next: SheetTab) {
     model.sheet.value = { ...model.sheet.value, tab: next }
     model.focus.value = -1
   }
@@ -698,14 +706,29 @@ function Sheet({ sending }: { sending: Sending }) {
           type="button"
           class="tab"
           role="tab"
+          aria-selected={tab === "conversation"}
+          onClick={() => pickTab("conversation")}
+        >
+          Conversation
+        </button>
+        <button
+          type="button"
+          class="tab"
+          role="tab"
           aria-selected={tab === "history"}
           onClick={() => pickTab("history")}
         >
           History <span class="ct">{sentNotes}</span>
         </button>
       </div>
-      <div class="sh-b" role="tabpanel" aria-label={tab === "round" ? "This round" : "History"}>
-        {tab === "round" ? <RoundTab /> : <HistoryTab />}
+      <div
+        class={tab === "conversation" ? "sh-b conv" : "sh-b"}
+        role="tabpanel"
+        aria-label={TAB_LABEL[tab]}
+      >
+        {tab === "round" ? <RoundTab /> : null}
+        {tab === "conversation" ? <Conversation /> : null}
+        {tab === "history" ? <HistoryTab /> : null}
       </div>
       {tab === "round" ? <Footer sending={sending} /> : null}
     </aside>
