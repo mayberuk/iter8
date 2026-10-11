@@ -603,7 +603,7 @@ function HistoryRound({ round }: { round: Round }) {
           <Avatar agent={owner?.agent ?? "agent"} size={16} />
           <b>{agentName}</b>
           {owner ? <span>in {ownerName}</span> : null}
-          {sent ? <span class="mono">· {sent}</span> : null}
+          {sent ? <span class="sent">· {sent}</span> : null}
         </div>
       </header>
       {round.state.stage === "orphaned" ? (
@@ -666,7 +666,7 @@ function Sheet({ sending }: { sending: Sending }) {
                 <span>to</span>
                 <Avatar agent={pairing.agent} size={16} />
                 <b>{model.name.value}</b>
-                <span class="mono">{model.where.value}</span>
+                <span class="host">{model.where.value}</span>
               </>
             ) : (
               <span>Not attached</span>

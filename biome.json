@@ -7,6 +7,7 @@
       "!.claude",
       "!docs",
       "!fixtures",
+      "!harness/scenarios/overlay/dark-neutral-tokens.css",
       "!**/dist",
       "!**/node_modules",
       "!**/test-results",

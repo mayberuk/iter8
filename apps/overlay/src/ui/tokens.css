@@ -6,53 +6,53 @@
 }
 .root {
   color-scheme: light;
-  --paper: #fcfbf6;
-  --paper-2: #f5f3eb;
-  --well: #ece9de;
-  --line: #dedacd;
-  --line-2: #cbc6b6;
-  --edge: #c2bcaa;
-  --edge-2: #a39c88;
-  --base-2: #cbc6b6;
+  --paper: #fbfbfb;
+  --paper-2: #f3f3f3;
+  --well: #e9e9e9;
+  --line: #dadada;
+  --line-2: #c6c6c6;
+  --edge: #bcbcbc;
+  --edge-2: #9c9c9c;
+  --base-2: #c6c6c6;
   --raised: #fff;
   --field: #fff;
   --hairlight: #fff;
   --top: 0 0 0 transparent;
   --sel: #f6dfa6;
-  --veil: rgba(58, 46, 22, 0.075);
-  --scrim: rgba(58, 46, 22, 0.12);
-  --ink: #221f19;
-  --ink-2: #403b32;
-  --ink-d: #0d0c09;
-  --mute: #6f695b;
-  --faint: #9c9688;
+  --veil: rgba(48, 48, 48, 0.075);
+  --scrim: rgba(48, 48, 48, 0.12);
+  --ink: #1f1f1f;
+  --ink-2: #3c3c3c;
+  --ink-d: #0c0c0c;
+  --mute: #696969;
+  --faint: #969696;
   --on-accent: #fff;
-  --solid: #221f19;
-  --solid-d: #0d0c09;
-  --on-solid: #fcfbf6;
-  --solid-key: #3a362d;
-  --solid-key-d: #14120e;
-  --solid-key-ink: #eee9dc;
-  --inv: #221f19;
-  --inv-d: #0d0c09;
-  --inv-border: #0d0c09;
-  --inv-ink: #f4f1e8;
+  --solid: #1f1f1f;
+  --solid-d: #0c0c0c;
+  --on-solid: #fbfbfb;
+  --solid-key: #363636;
+  --solid-key-d: #121212;
+  --solid-key-ink: #e9e9e9;
+  --inv: #1f1f1f;
+  --inv-d: #0c0c0c;
+  --inv-border: #0c0c0c;
+  --inv-ink: #f1f1f1;
   --inv-head: #fff;
-  --inv-body: #cfc9ba;
-  --inv-mute: #afa898;
-  --inv-mute-2: #a39c8c;
-  --inv-key: #3a362d;
-  --inv-key-d: #14120e;
-  --inv-key-ink: #eee9dc;
-  --inv-key-hover: #46413a;
-  --inv-well: #36322a;
-  --inv-line: #4a4539;
-  --inv-btn: #fcfbf6;
-  --inv-btn-ink: #221f19;
-  --inv-btn-d: #a39c8c;
-  --film: #221f19;
-  --film-d: #0d0c09;
-  --film-frame: #2e2b24;
+  --inv-body: #c9c9c9;
+  --inv-mute: #a8a8a8;
+  --inv-mute-2: #9c9c9c;
+  --inv-key: #363636;
+  --inv-key-d: #121212;
+  --inv-key-ink: #e9e9e9;
+  --inv-key-hover: #424242;
+  --inv-well: #323232;
+  --inv-line: #454545;
+  --inv-btn: #fbfbfb;
+  --inv-btn-ink: #1f1f1f;
+  --inv-btn-d: #9c9c9c;
+  --film: #1f1f1f;
+  --film-d: #0c0c0c;
+  --film-frame: #2b2b2b;
   --cobalt: #3160e4;
   --cobalt-d: #1c3e9e;
   --cobalt-t: #1c3e9e;
@@ -91,10 +91,10 @@
   --claude-tint: #fff8f2;
   --claude-tint-line: #f0dccd;
   --agent-card: #fffbf7;
-  --reply-bg: #fffcf8;
-  --codex: #3b382f;
-  --codex-d: #16140f;
-  --codex-ink: #f1eee4;
+  --reply-bg: #fcfcfc;
+  --codex: #383838;
+  --codex-d: #141414;
+  --codex-ink: #eeeeee;
   --ring: rgba(49, 96, 228, 0.4);
   --ring-hatch: rgba(49, 96, 228, 0.08);
   --mark-arrow: #2f5bff;
@@ -107,11 +107,12 @@
   --r2: 10px;
   --r3: 999px;
   --lift: 3px 4px 0 var(--edge), var(--top);
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   --spring: cubic-bezier(0.32, 1.42, 0.52, 1);
   --out: cubic-bezier(0.16, 1, 0.3, 1);
   --press: cubic-bezier(0.3, 0.7, 0.4, 1);
-  --sans: "iter8 Figtree", ui-sans-serif, system-ui, sans-serif;
-  --mono: "iter8 Spline Sans Mono", ui-monospace, monospace;
+  --sans: "iter8 Reddit Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono: "iter8 JetBrains Mono", ui-monospace, monospace;
   font-family: var(--sans);
   font-size: 13px;
   line-height: 1.4;
@@ -121,53 +122,53 @@
 /* --toast-* and --coach-step sit on the inverted surface, which stays dark in both themes, so they are not redeclared. */
 .root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #2a2824;
-  --paper-2: #312e2a;
-  --well: #1e1c19;
-  --line: #3c3832;
-  --line-2: #4c4740;
-  --edge: #141211;
-  --edge-2: #6b665d;
-  --base-2: #171513;
-  --raised: #37342f;
-  --field: #201e1b;
-  --hairlight: rgba(255, 244, 225, 0.05);
-  --top: inset 0 1px 0 rgba(255, 244, 225, 0.07);
+  --paper: #282828;
+  --paper-2: #2e2e2e;
+  --well: #1c1c1c;
+  --line: #393939;
+  --line-2: #484848;
+  --edge: #121212;
+  --edge-2: #676767;
+  --base-2: #151515;
+  --raised: #343434;
+  --field: #1e1e1e;
+  --hairlight: rgba(245, 245, 245, 0.05);
+  --top: inset 0 1px 0 rgba(245, 245, 245, 0.07);
   --sel: #5e4a1f;
-  --veil: rgba(10, 8, 5, 0.22);
-  --scrim: rgba(10, 8, 5, 0.45);
-  --ink: #ece5d5;
-  --ink-2: #cbc3b2;
-  --ink-d: #0a0907;
-  --mute: #9d9584;
-  --faint: #777062;
+  --veil: rgba(8, 8, 8, 0.22);
+  --scrim: rgba(8, 8, 8, 0.45);
+  --ink: #e5e5e5;
+  --ink-2: #c4c4c4;
+  --ink-d: #090909;
+  --mute: #969696;
+  --faint: #717171;
   --on-accent: #fff;
-  --solid: #e6dfce;
-  --solid-d: #9a917d;
-  --on-solid: #1e1b17;
-  --solid-key: #cfc7b4;
-  --solid-key-d: #8f8672;
-  --solid-key-ink: #26231e;
-  --inv: #3c3933;
-  --inv-d: #121010;
-  --inv-border: #514c45;
-  --inv-ink: #efe8d8;
+  --solid: #dfdfdf;
+  --solid-d: #929292;
+  --on-solid: #1b1b1b;
+  --solid-key: #c7c7c7;
+  --solid-key-d: #878787;
+  --solid-key-ink: #232323;
+  --inv: #393939;
+  --inv-d: #111111;
+  --inv-border: #4d4d4d;
+  --inv-ink: #e8e8e8;
   --inv-head: #fff;
-  --inv-body: #d2cbbb;
-  --inv-mute: #ada593;
-  --inv-mute-2: #a39b88;
-  --inv-key: #4e4942;
-  --inv-key-d: #1a1815;
-  --inv-key-ink: #eee9dc;
-  --inv-key-hover: #58534b;
-  --inv-well: #2d2a26;
-  --inv-line: #5a554c;
-  --inv-btn: #efe8d8;
-  --inv-btn-ink: #221f19;
-  --inv-btn-d: #8f8774;
-  --film: #151310;
-  --film-d: #0a0908;
-  --film-frame: #23211d;
+  --inv-body: #cbcbcb;
+  --inv-mute: #a6a6a6;
+  --inv-mute-2: #9b9b9b;
+  --inv-key: #4a4a4a;
+  --inv-key-d: #181818;
+  --inv-key-ink: #e9e9e9;
+  --inv-key-hover: #545454;
+  --inv-well: #2a2a2a;
+  --inv-line: #565656;
+  --inv-btn: #e8e8e8;
+  --inv-btn-ink: #1f1f1f;
+  --inv-btn-d: #878787;
+  --film: #131313;
+  --film-d: #090909;
+  --film-frame: #212121;
   --cobalt: #4f78ee;
   --cobalt-d: #1f3784;
   --cobalt-t: #a3b8ff;
@@ -205,10 +206,10 @@
   --claude-tint: #30271f;
   --claude-tint-line: #4b3529;
   --agent-card: #302821;
-  --reply-bg: #2f2b25;
-  --codex: #4e493f;
-  --codex-d: #15130f;
-  --codex-ink: #f1eee4;
+  --reply-bg: #2c2c2c;
+  --codex: #494949;
+  --codex-d: #131313;
+  --codex-ink: #eeeeee;
   --ring: rgba(79, 120, 238, 0.4);
   --ring-hatch: rgba(79, 120, 238, 0.12);
   --mark-arrow: #5b80ff;
@@ -217,53 +218,53 @@
 @media (prefers-color-scheme: dark) {
   .root[data-theme="auto"] {
     color-scheme: dark;
-    --paper: #2a2824;
-    --paper-2: #312e2a;
-    --well: #1e1c19;
-    --line: #3c3832;
-    --line-2: #4c4740;
-    --edge: #141211;
-    --edge-2: #6b665d;
-    --base-2: #171513;
-    --raised: #37342f;
-    --field: #201e1b;
-    --hairlight: rgba(255, 244, 225, 0.05);
-    --top: inset 0 1px 0 rgba(255, 244, 225, 0.07);
+    --paper: #282828;
+    --paper-2: #2e2e2e;
+    --well: #1c1c1c;
+    --line: #393939;
+    --line-2: #484848;
+    --edge: #121212;
+    --edge-2: #676767;
+    --base-2: #151515;
+    --raised: #343434;
+    --field: #1e1e1e;
+    --hairlight: rgba(245, 245, 245, 0.05);
+    --top: inset 0 1px 0 rgba(245, 245, 245, 0.07);
     --sel: #5e4a1f;
-    --veil: rgba(10, 8, 5, 0.22);
-    --scrim: rgba(10, 8, 5, 0.45);
-    --ink: #ece5d5;
-    --ink-2: #cbc3b2;
-    --ink-d: #0a0907;
-    --mute: #9d9584;
-    --faint: #777062;
+    --veil: rgba(8, 8, 8, 0.22);
+    --scrim: rgba(8, 8, 8, 0.45);
+    --ink: #e5e5e5;
+    --ink-2: #c4c4c4;
+    --ink-d: #090909;
+    --mute: #969696;
+    --faint: #717171;
     --on-accent: #fff;
-    --solid: #e6dfce;
-    --solid-d: #9a917d;
-    --on-solid: #1e1b17;
-    --solid-key: #cfc7b4;
-    --solid-key-d: #8f8672;
-    --solid-key-ink: #26231e;
-    --inv: #3c3933;
-    --inv-d: #121010;
-    --inv-border: #514c45;
-    --inv-ink: #efe8d8;
+    --solid: #dfdfdf;
+    --solid-d: #929292;
+    --on-solid: #1b1b1b;
+    --solid-key: #c7c7c7;
+    --solid-key-d: #878787;
+    --solid-key-ink: #232323;
+    --inv: #393939;
+    --inv-d: #111111;
+    --inv-border: #4d4d4d;
+    --inv-ink: #e8e8e8;
     --inv-head: #fff;
-    --inv-body: #d2cbbb;
-    --inv-mute: #ada593;
-    --inv-mute-2: #a39b88;
-    --inv-key: #4e4942;
-    --inv-key-d: #1a1815;
-    --inv-key-ink: #eee9dc;
-    --inv-key-hover: #58534b;
-    --inv-well: #2d2a26;
-    --inv-line: #5a554c;
-    --inv-btn: #efe8d8;
-    --inv-btn-ink: #221f19;
-    --inv-btn-d: #8f8774;
-    --film: #151310;
-    --film-d: #0a0908;
-    --film-frame: #23211d;
+    --inv-body: #cbcbcb;
+    --inv-mute: #a6a6a6;
+    --inv-mute-2: #9b9b9b;
+    --inv-key: #4a4a4a;
+    --inv-key-d: #181818;
+    --inv-key-ink: #e9e9e9;
+    --inv-key-hover: #545454;
+    --inv-well: #2a2a2a;
+    --inv-line: #565656;
+    --inv-btn: #e8e8e8;
+    --inv-btn-ink: #1f1f1f;
+    --inv-btn-d: #878787;
+    --film: #131313;
+    --film-d: #090909;
+    --film-frame: #212121;
     --cobalt: #4f78ee;
     --cobalt-d: #1f3784;
     --cobalt-t: #a3b8ff;
@@ -301,10 +302,10 @@
     --claude-tint: #30271f;
     --claude-tint-line: #4b3529;
     --agent-card: #302821;
-    --reply-bg: #2f2b25;
-    --codex: #4e493f;
-    --codex-d: #15130f;
-    --codex-ink: #f1eee4;
+    --reply-bg: #2c2c2c;
+    --codex: #494949;
+    --codex-d: #131313;
+    --codex-ink: #eeeeee;
     --ring: rgba(79, 120, 238, 0.4);
     --ring-hatch: rgba(79, 120, 238, 0.12);
     --mark-arrow: #5b80ff;
@@ -313,9 +314,6 @@
 }
 .root ::selection {
   background: var(--sel);
-}
-.mono {
-  font-family: var(--mono);
 }
 button {
   font: inherit;
@@ -334,8 +332,11 @@ input:focus-visible,
   outline: 2px solid var(--cobalt);
   outline-offset: 2px;
 }
-svg .ic-d {
-  stroke: color-mix(in srgb, currentColor 52%, #1b160c);
+svg.ic-fill .ic-d {
+  fill: color-mix(in srgb, currentColor 52%, #171717);
+}
+svg.ic-stroke .ic-d {
+  stroke: color-mix(in srgb, currentColor 52%, #171717);
 }
 svg .ic-d * {
   opacity: 0.55;
@@ -400,20 +401,20 @@ kbd {
   white-space: nowrap;
 }
 .chip .comp {
-  font: 600 12.5px var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--cobalt-d);
 }
 .chip .in {
-  font: 400 11.5px var(--mono);
+  font-size: 12px;
   color: var(--mute);
 }
 .chip .dim {
   margin-left: auto;
-  font: 500 11px var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   color: var(--ink-2);
-  background: var(--well);
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 .chip .nm {
   margin-top: 4px;
@@ -425,7 +426,7 @@ kbd {
 }
 .chip .path {
   margin-top: 6px;
-  font: 400 11px var(--mono);
+  font-size: 11.5px;
   color: var(--faint);
   white-space: nowrap;
   overflow: hidden;
@@ -449,7 +450,7 @@ kbd {
   align-items: center;
   gap: 6px;
   color: var(--mute);
-  font: 400 11.5px var(--mono);
+  font-size: 12px;
   white-space: nowrap;
 }
 .chip .src b {
@@ -513,7 +514,10 @@ kbd {
   transform: translateY(2px);
   box-shadow: 0 0 0 var(--cobalt-d);
 }
-.seg button[aria-pressed="true"] .ic-d {
+.seg button[aria-pressed="true"] svg.ic-fill .ic-d {
+  fill: var(--cobalt-d);
+}
+.seg button[aria-pressed="true"] svg.ic-stroke .ic-d {
   stroke: var(--cobalt-d);
 }
 .seg button[aria-pressed="true"] .ic-d * {
@@ -732,6 +736,7 @@ kbd {
   font-size: 12.5px;
   border: 1px solid var(--inv-border);
   box-shadow: 0 4px 0 var(--inv-d);
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: tin 0.26s var(--spring);
 }
 .toast.out {
@@ -756,10 +761,6 @@ kbd {
 .toast .ok .sg {
   width: 18px;
   height: 18px;
-}
-.toast .mono {
-  color: var(--inv-mute);
-  font-size: 11.5px;
 }
 .toast button {
   height: 26px;
@@ -829,6 +830,7 @@ kbd {
   transform-origin: 10px 10px;
 }
 .intent[aria-checked="true"] .g-fix .mv {
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: stick 0.46s var(--spring);
 }
 @keyframes stick {
@@ -860,6 +862,7 @@ kbd {
   }
 }
 .intent[aria-checked="true"] .g-question .mv {
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: bob 0.5s var(--spring);
 }
 @keyframes bob {
@@ -878,6 +881,7 @@ kbd {
   transform-origin: 50% 50%;
 }
 .intent[aria-checked="true"] .g-keep .dt {
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: pop 0.34s var(--spring) both;
 }
 .intent[aria-checked="true"] .g-keep .dt:nth-of-type(2) {
@@ -911,7 +915,7 @@ kbd {
 }
 .sg .d {
   fill: none;
-  stroke: color-mix(in srgb, currentColor 50%, #1b160c);
+  stroke: color-mix(in srgb, currentColor 50%, #171717);
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -995,57 +999,24 @@ kbd {
   gap: 5px;
   flex: none;
   height: 22px;
-  padding: 0 8px 0 4px;
-  border-radius: 6px;
-  font: 500 10.5px var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
   white-space: nowrap;
-  background: var(--paper);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    0 2px 0 var(--base-2);
   color: var(--mute);
 }
-.st-chip.queued {
+.st-chip.queued,
+.st-chip.working {
   color: var(--amber-t);
-  background: var(--amber-w);
-  box-shadow:
-    inset 0 0 0 1px var(--amber-line),
-    0 2px 0 var(--amber-base);
 }
 .st-chip.delivered {
   color: var(--cobalt-t);
-  background: var(--cobalt-wash);
-  box-shadow:
-    inset 0 0 0 1px var(--cobalt-line),
-    0 2px 0 var(--cobalt-base);
 }
-.st-chip.working {
-  color: var(--amber-t);
-  background: var(--amber-w);
-  box-shadow:
-    inset 0 0 0 1px var(--amber-line),
-    0 2px 0 var(--amber-base);
-}
-.st-chip.done {
-  color: var(--keep-t);
-  background: var(--keep-w);
-  box-shadow:
-    inset 0 0 0 1px var(--keep-line),
-    0 2px 0 var(--keep-base);
-}
+.st-chip.done,
 .st-chip.answered {
   color: var(--keep-t);
-  background: var(--keep-w);
-  box-shadow:
-    inset 0 0 0 1px var(--keep-line),
-    0 2px 0 var(--keep-base);
 }
 .st-chip.failed {
   color: var(--fix-t);
-  background: var(--fix-w);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--fix) 30%, var(--paper)),
-    0 2px 0 color-mix(in srgb, var(--fix) 45%, var(--paper));
 }
 .sg-failed {
   color: var(--fix);
@@ -1247,9 +1218,9 @@ kbd {
   border: 1px solid var(--codex-d);
   box-shadow: 0 2px 0 var(--codex-d);
   color: var(--codex-ink);
-  font: 600 calc(var(--s, 20px) * 0.42) / 1 var(--mono);
-  letter-spacing: -0.04em;
-  text-transform: lowercase;
+  font-size: calc(var(--s, 20px) * 0.46);
+  font-weight: 600;
+  line-height: 1;
 }
 .av.agent span {
   transform: translateY(-0.5px);

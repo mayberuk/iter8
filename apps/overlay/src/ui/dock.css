@@ -71,13 +71,13 @@
   text-decoration-thickness: 1.5px;
 }
 .where {
-  font: 400 11.5px var(--mono);
+  font-size: 12px;
   color: var(--mute);
+  font-variant-numeric: tabular-nums;
 }
 .stword {
-  font: 500 11px var(--mono);
-  padding: 2px 7px 2px 4px;
-  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -87,20 +87,14 @@
   height: 16px;
 }
 .s-busy .stword {
-  background: var(--busy-w);
   color: var(--busy-t);
-  box-shadow: inset 0 0 0 1px var(--busy-line);
 }
 .s-gone .stword,
 .s-unattached .stword {
-  background: var(--well);
   color: var(--mute);
-  box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .s-delivered .stword {
-  background: var(--cobalt-wash);
   color: var(--cobalt-t);
-  box-shadow: inset 0 0 0 1px var(--cobalt-line);
 }
 .vr {
   width: 1px;
@@ -121,27 +115,26 @@
   background: var(--paper-2);
 }
 .counter .rl {
-  font: 500 10.5px var(--mono);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--mute);
-  letter-spacing: 0.04em;
+  padding-right: 10px;
+  border-right: 1px solid var(--line-2);
 }
 .counter .n {
-  min-width: 26px;
+  min-width: 20px;
   height: 24px;
-  padding: 0 6px;
-  border-radius: 6px;
+  padding: 0 2px;
   display: grid;
   place-items: center;
-  background: var(--solid);
-  color: var(--on-solid);
-  font: 600 12px var(--mono);
-  box-shadow: 0 2px 0 var(--solid-d);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   transition: transform 0.2s var(--spring);
 }
 .counter .n.zero {
-  background: var(--well);
   color: var(--mute);
-  box-shadow: 0 2px 0 var(--base-2);
 }
 .counter .n.bump {
   transform: translateY(-3px) rotate(-4deg);
@@ -169,7 +162,10 @@
   transform: translateY(3px);
   box-shadow: 0 0 0 var(--cobalt-d);
 }
-.send .ic-d {
+.send svg.ic-fill .ic-d {
+  fill: var(--cobalt-d);
+}
+.send svg.ic-stroke .ic-d {
   stroke: var(--cobalt-d);
 }
 .send .ic-d * {
@@ -183,7 +179,10 @@
   cursor: not-allowed;
   transform: none;
 }
-.send:disabled .ic-d {
+.send:disabled svg.ic-fill .ic-d {
+  fill: var(--line-2);
+}
+.send:disabled svg.ic-stroke .ic-d {
   stroke: var(--line-2);
 }
 .iter8btn {
@@ -229,7 +228,10 @@
   border-radius: 6px;
   background: var(--solid);
   color: var(--on-solid);
-  font: 600 10.5px / 20px var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
   text-align: center;
   box-shadow: 0 2px 0 var(--solid-d);
 }
@@ -323,7 +325,7 @@
   font-weight: 600;
 }
 .srow .wh {
-  font: 400 11.5px var(--mono);
+  font-size: 12px;
   color: var(--mute);
   margin-left: auto;
   max-width: 120px;

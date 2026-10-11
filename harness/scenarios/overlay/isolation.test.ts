@@ -23,7 +23,7 @@ import { buildOverlay, openOverlay, withSourceBundle } from "./support"
 const STATIC = fixtureDir("static")
 const LIVE = Pairing.parse(pairingJson)
 /** The dock's `--paper` in the light token set. */
-const LIGHT_PAPER = "rgb(252, 251, 246)"
+const LIGHT_PAPER = "rgb(251, 251, 251)"
 
 let browser: Browser
 let overlayBuild: Scratch
@@ -504,14 +504,24 @@ describe("styles and fonts", () => {
     expect(errors.filter((error) => error.includes("Content Security Policy"))).toEqual([])
   }, 30_000)
 
+  test("the production overlay build emits exactly the two hashed variable fonts beside its bundles", async () => {
+    const emitted = (await readdir(overlayBuild.path)).sort()
+    const fonts = emitted.filter((name) => name.endsWith(".woff2"))
+    expect(fonts.map((name) => name.replace(/-[0-9a-z]{8}\.woff2$/, "")).sort()).toEqual([
+      "JetBrainsMono-Variable",
+      "RedditSans-Variable",
+    ])
+    expect(emitted.filter((name) => !fonts.includes(name))).toEqual(["overlay.js", "source.js"])
+  })
+
   test("fonts load from the overlay's asset path", async () => {
     const { page, mock } = await open()
     await until("the overlay font", () =>
       page.evaluate(() => {
         const face = [...document.fonts].find(
-          (candidate) => candidate.family.replaceAll('"', "") === "iter8 Figtree",
+          (candidate) => candidate.family.replaceAll('"', "") === "iter8 Reddit Sans",
         )
-        return face?.status === "loaded" && document.fonts.check('13px "iter8 Figtree"')
+        return face?.status === "loaded" && document.fonts.check('13px "iter8 Reddit Sans"')
       }),
     )
     const fonts = mock.requests().filter((request) => request.path.endsWith(".woff2"))

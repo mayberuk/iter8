@@ -691,7 +691,7 @@ describe("round sheet: header, summary and rows", () => {
       true,
     )
     expect(await sheet.innerText()).toContain("Nothing in round 13 yet")
-    expect(await o.overlay.locator(".dock .rl").innerText()).toBe("ROUND 13")
+    expect(await o.overlay.locator(".dock .rl").innerText()).toBe("Round 13")
     expect(await sheet.innerText()).toContain("No notes yet")
     expect(await sheet.getByRole("button", { name: "Send round" }).isDisabled()).toBe(true)
   }, 30_000)
@@ -1010,10 +1010,10 @@ describe("round sheet: history in detail", () => {
         outcome: el.querySelector(".out")?.getAttribute("aria-label"),
         ticks: [...el.querySelectorAll(".ticks i")].map((tick) => tick.className),
         name: el.querySelector(".rh2 b")?.textContent,
-        where: [...el.querySelectorAll(".rh2 > span:not(.av):not(.mono)")].map(
+        where: [...el.querySelectorAll(".rh2 > span:not(.av):not(.sent)")].map(
           (span) => span.textContent,
         ),
-        time: el.querySelector(".rh2 .mono")?.textContent,
+        time: el.querySelector(".rh2 .sent")?.textContent,
         avatar: el.querySelector(".rh2 .av")?.className,
       })),
     )

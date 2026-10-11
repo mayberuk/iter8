@@ -198,7 +198,7 @@ function withOutcome(
 
 const SWALLOWED = ["mousedown", "mouseup", "click", "dblclick", "auxclick"] as const
 const SELECTION_EDGE = 1.5
-/** Wide enough for "9999 × 9999" in the badge's mono font. */
+/** Wide enough for "9999 × 9999" in the badge's font. */
 const BADGE_WIDTH = 100
 const BADGE_HEIGHT = 20
 const BADGE_PILL = 17
@@ -514,7 +514,7 @@ function MarkupDialog({ view }: { view: Signal<View> }): JSX.Element | null {
   const header = (
     <div class="mk-h">
       <b>Mark up</b>
-      <span class="mono">
+      <span class="dims">
         {Math.round(region.width)} × {Math.round(region.height)}
       </span>
       {markup && (

@@ -779,7 +779,7 @@ export function Dock() {
           data-kbd="R"
           onClick={() => model.toggleSheet("round")}
         >
-          <span class="rl">ROUND {roundNumber}</span>
+          <span class="rl">Round {roundNumber}</span>
           <span class={["n", count ? "" : "zero", bump ? "bump" : ""].filter(Boolean).join(" ")}>
             {count}
           </span>

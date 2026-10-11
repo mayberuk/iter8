@@ -1,5 +1,5 @@
-Copyright 2022 The Figtree Project Authors (https://github.com/erikdkennedy/figtree)
-Copyright 2022 The Spline Sans Mono Project Authors (https://github.com/SorkinType/SplineSansMono)
+Reddit Sans: Copyright (c) 2020-2023, Reddit, Inc. (https://github.com/reddit/redditsans)
+JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 
 These Font Software files are licensed under the SIL Open Font License, Version 1.1.
 The license text is copied below, and is also available with a FAQ at:

@@ -7,6 +7,7 @@ import { ASSET_PREFIX } from "../../../scripts/build"
 import { launchChromium, newPage } from "../../rig/browser"
 import { SCRATCH_ROOT, type Scratch, scratchDir } from "../../rig/scratch"
 import { waitFor } from "../../rig/wait"
+import fixture from "./icons-mingcute-fluent.json"
 import type { Item, UiHarness } from "./ui-assets.entry"
 
 const ORIGIN = "http://engine.localhost"
@@ -42,6 +43,8 @@ const ICON_CATALOG = {
 } satisfies Record<IconName, true>
 
 const ICON_NAMES = Object.keys(ICON_CATALOG) as IconName[]
+
+const ICON_FIXTURE: Record<IconName, { viewBox?: string; inner: string }> = fixture.icons
 
 const STATUS_KEYS = ["queued", "delivered", "working", "done", "answered", "failed"] as const
 const METER_KEYS = ["live", "busy", "gone", "checking", "delivered", "unattached"] as const
@@ -168,20 +171,69 @@ function painted(page: Page): Promise<Painted[]> {
   })
 }
 
+function inspectIcons(page: Page, inners: string[]) {
+  return page.evaluate((inners) => {
+    const root = document.getElementById("stage")?.shadowRoot
+    if (!root) throw new Error("nothing was shown")
+    return Array.from(root.querySelectorAll("[data-item]"), (cell, index) => {
+      const svg = cell.querySelector("svg")
+      const groups = Array.from(svg?.querySelectorAll(":scope > g") ?? [])
+      const shade = groups[0] as SVGGraphicsElement | undefined
+      const ink = groups[1] as SVGGraphicsElement | undefined
+      if (!svg || !shade || !ink)
+        throw new Error("an icon must draw an svg with a shade and an ink group")
+      const parsed = new DOMParser().parseFromString(
+        `<svg xmlns="http://www.w3.org/2000/svg">${inners[index]}</svg>`,
+        "image/svg+xml",
+      )
+      const box = ink.getBBox()
+      return {
+        viewBox: svg.getAttribute("viewBox"),
+        ariaHidden: svg.getAttribute("aria-hidden"),
+        width: svg.getBoundingClientRect().width,
+        height: svg.getBoundingClientRect().height,
+        groups: groups.length,
+        expected: Array.from(parsed.querySelectorAll("path"), (path) => ({
+          d: path.getAttribute("d"),
+          fillRule: path.getAttribute("fill-rule") ?? "nonzero",
+        })),
+        shadePaths: Array.from(shade.querySelectorAll("path"), (path) => ({
+          d: path.getAttribute("d"),
+          fillRule: getComputedStyle(path).fillRule,
+        })),
+        ink: {
+          fill: ink.getAttribute("fill"),
+          stroke: ink.getAttribute("stroke"),
+          paths: Array.from(ink.querySelectorAll("path"), (path) => ({
+            d: path.getAttribute("d"),
+            fillRule: getComputedStyle(path).fillRule,
+          })),
+          bbox: { x: box.x, y: box.y, width: box.width, height: box.height },
+        },
+      }
+    })
+  }, inners)
+}
+
 describe("the glyph set", () => {
-  test("every IconName renders a 16px svg that paints inside its 16-unit grid", async () => {
+  test("every IconName renders a size-pixel svg that paints the fixture's paths inside its viewBox", async () => {
     const { page } = await openUi()
     await show(
       page,
       ICON_NAMES.map((name) => ({ kind: "icon", props: { name } })),
     )
-    const icons = await painted(page)
+    const icons = await inspectIcons(
+      page,
+      ICON_NAMES.map((name) => ICON_FIXTURE[name].inner),
+    )
     expect(icons).toHaveLength(ICON_NAMES.length)
     icons.forEach((icon, index) => {
-      const name = ICON_NAMES[index]
+      const name = ICON_NAMES[index] as IconName
+      const entry = ICON_FIXTURE[name]
+      const unit = (entry.viewBox ?? fixture.viewBox).split(" ")[2]
       expect({ name, viewBox: icon.viewBox, ariaHidden: icon.ariaHidden }).toEqual({
         name,
-        viewBox: "0 0 16 16",
+        viewBox: entry.viewBox ?? fixture.viewBox,
         ariaHidden: "true",
       })
       expect({ name, width: icon.width, height: icon.height }).toEqual({
@@ -189,39 +241,105 @@ describe("the glyph set", () => {
         width: 16,
         height: 16,
       })
-      expect(icon.box?.width, `${name} paints nothing`).toBeGreaterThan(0)
-      expect(icon.box?.height, `${name} paints nothing`).toBeGreaterThan(0)
-      expect(icon.box?.x).toBeGreaterThanOrEqual(0)
-      expect(icon.box?.y).toBeGreaterThanOrEqual(0)
-      expect((icon.box?.x ?? 0) + (icon.box?.width ?? 0)).toBeLessThanOrEqual(16)
-      expect((icon.box?.y ?? 0) + (icon.box?.height ?? 0)).toBeLessThanOrEqual(17)
+      expect(icon.groups, `${name} draws two copies`).toBe(2)
+      expect(icon.expected.length, `${name} has no paths in the fixture`).toBeGreaterThan(0)
+      expect({ name, paths: icon.ink.paths }).toEqual({ name, paths: icon.expected })
+      expect({ name, paths: icon.shadePaths }).toEqual({ name, paths: icon.ink.paths })
+      expect(icon.ink.bbox.width, `${name} paints nothing`).toBeGreaterThan(0)
+      expect(icon.ink.bbox.height, `${name} paints nothing`).toBeGreaterThan(0)
+      expect(icon.ink.bbox.x).toBeGreaterThanOrEqual(0)
+      expect(icon.ink.bbox.y).toBeGreaterThanOrEqual(0)
+      expect(icon.ink.bbox.x + icon.ink.bbox.width).toBeLessThanOrEqual(Number(unit))
+      expect(icon.ink.bbox.y + icon.ink.bbox.height).toBeLessThanOrEqual(Number(unit))
     })
   }, 30_000)
 
-  test("an icon draws its strokes twice, the shaded copy one pixel lower, and takes a size", async () => {
+  test("pick, region, shot and auto have a 16-unit viewBox and every other icon a 24-unit one", async () => {
     const { page } = await openUi()
-    await show(page, [
-      { kind: "icon", props: { name: "send", size: 24 } },
-      { kind: "icon", props: { name: "trash" } },
-    ])
-    const result = await page.evaluate(() => {
-      const root = document.getElementById("stage")?.shadowRoot
-      const cells = Array.from(root?.querySelectorAll("[data-item]") ?? [])
-      const sized = cells[0]?.querySelector("svg")?.getBoundingClientRect()
-      const [shade, ink] = Array.from(cells[1]?.querySelectorAll("svg > g") ?? [])
-      return {
-        size: [sized?.width, sized?.height],
-        offset: (shade?.getBoundingClientRect().top ?? 0) - (ink?.getBoundingClientRect().top ?? 0),
-        shadeShapes: shade?.children.length,
-        inkShapes: ink?.children.length,
-        inkStroke: ink?.getAttribute("stroke"),
+    await show(
+      page,
+      ICON_NAMES.map((name) => ({ kind: "icon", props: { name } })),
+    )
+    const icons = await painted(page)
+    const sixteen: IconName[] = ["pick", "region", "shot", "auto"]
+    expect(ICON_NAMES.map((name, index) => [name, icons[index]?.viewBox])).toEqual(
+      ICON_NAMES.map((name) => [name, sixteen.includes(name) ? "0 0 16 16" : "0 0 24 24"]),
+    )
+  }, 30_000)
+
+  test("pick alone is stroked; every other icon is filled with currentColor", async () => {
+    const { page } = await openUi()
+    await show(
+      page,
+      ICON_NAMES.map((name) => ({ kind: "icon", props: { name } })),
+    )
+    const icons = await inspectIcons(
+      page,
+      ICON_NAMES.map((name) => ICON_FIXTURE[name].inner),
+    )
+    icons.forEach((icon, index) => {
+      const name = ICON_NAMES[index] as IconName
+      if (name === "pick") {
+        expect({ name, fill: icon.ink.fill, stroke: icon.ink.stroke }).toEqual({
+          name,
+          fill: "none",
+          stroke: "currentColor",
+        })
+      } else {
+        expect({ name, fill: icon.ink.fill, stroke: icon.ink.stroke }).toEqual({
+          name,
+          fill: "currentColor",
+          stroke: null,
+        })
       }
     })
-    expect(result.size).toEqual([24, 24])
-    expect(result.offset).toBe(1)
-    expect(result.shadeShapes).toBeGreaterThan(0)
-    expect(result.shadeShapes).toBe(result.inkShapes ?? -1)
-    expect(result.inkStroke).toBe("currentColor")
+  }, 30_000)
+
+  test("an icon draws its shapes twice, the shaded copy exactly one CSS pixel lower, the ink in currentColor, and takes a size", async () => {
+    const { page } = await openUi()
+    const names = ["trash", "pick"] as const
+    const sizes = [8, 15, 16, 24]
+    await show(
+      page,
+      names.flatMap((name) => sizes.map((size) => ({ kind: "icon", props: { name, size } }))),
+    )
+    const results = await page.evaluate(() => {
+      const root = document.getElementById("stage")?.shadowRoot
+      return Array.from(root?.querySelectorAll("[data-item] svg") ?? [], (svg) => {
+        const chosen = "rgb(12, 34, 56)"
+        ;(svg as SVGSVGElement).style.color = chosen
+        const [shade, ink] = Array.from(svg.querySelectorAll(":scope > g"))
+        if (!shade || !ink) throw new Error("an icon must draw two groups")
+        const paint = getComputedStyle(ink)
+        const rendered = svg.getBoundingClientRect()
+        return {
+          size: [rendered.width, rendered.height],
+          offset: shade.getBoundingClientRect().top - ink.getBoundingClientRect().top,
+          shadeShapes: shade.children.length,
+          inkShapes: ink.children.length,
+          fill: paint.fill,
+          stroke: paint.stroke,
+          chosen,
+        }
+      })
+    })
+    expect(results).toHaveLength(names.length * sizes.length)
+    results.forEach((result, index) => {
+      const name = names[Math.floor(index / sizes.length)]
+      const size = sizes[index % sizes.length] as number
+      expect(result.size, `${name} at ${size}`).toEqual([size, size])
+      expect(result.offset, `${name} at ${size}`).toBeCloseTo(1, 5)
+      expect(result.shadeShapes).toBeGreaterThan(0)
+      expect(result.shadeShapes).toBe(result.inkShapes)
+      if (name === "pick") {
+        expect({ fill: result.fill, stroke: result.stroke }).toEqual({
+          fill: "none",
+          stroke: result.chosen,
+        })
+      } else {
+        expect(result.fill).toBe(result.chosen)
+      }
+    })
   }, 30_000)
 
   test("IntentGlyph renders a distinct 20px glyph for each intent, shaded from that intent's tokens", async () => {
@@ -364,19 +482,22 @@ describe("the glyph set", () => {
 
 describe("the font assets", () => {
   test("both variable fonts and the licence are committed", async () => {
-    for (const name of ["Figtree-Variable.woff2", "SplineSansMono-Variable.woff2"]) {
+    for (const name of ["RedditSans-Variable.woff2", "JetBrainsMono-Variable.woff2"]) {
       const bytes = new Uint8Array(await Bun.file(new URL(name, FONT_ROOT)).arrayBuffer())
       expect(bytes.length).toBeGreaterThan(1000)
       expect(String.fromCharCode(...bytes.slice(0, 4))).toBe("wOF2")
     }
-    expect(await Bun.file(new URL("OFL.txt", FONT_ROOT)).text()).toContain("SIL OPEN FONT LICENSE")
+    const licence = await Bun.file(new URL("OFL.txt", FONT_ROOT)).text()
+    expect(licence).toContain("SIL OPEN FONT LICENSE")
+    expect(licence).toContain("Reddit Sans")
+    expect(licence).toContain("JetBrains Mono")
   })
 
   test("the build emits both fonts as hashed files under the asset path", () => {
     const fonts = assetFiles.filter((name) => name.endsWith(".woff2"))
     expect(fonts.map((name) => name.replace(/-[0-9a-z]+\.woff2$/, "")).sort()).toEqual([
-      "Figtree-Variable",
-      "SplineSansMono-Variable",
+      "JetBrainsMono-Variable",
+      "RedditSans-Variable",
     ])
   })
 
@@ -403,16 +524,16 @@ describe("the font assets", () => {
         : null
     })
     expect(faces.sort((a, b) => a.family.localeCompare(b.family))).toEqual([
-      { family: "iter8 Figtree", weight: "400 800", status: "loaded" },
-      { family: "iter8 Spline Sans Mono", weight: "400 600", status: "loaded" },
+      { family: "iter8 JetBrains Mono", weight: "100 800", status: "loaded" },
+      { family: "iter8 Reddit Sans", weight: "200 900", status: "loaded" },
     ])
 
     expect(fontRequests).toHaveLength(2)
     for (const path of fontRequests) {
       expect(path.startsWith(ASSET_PREFIX)).toBe(true)
     }
-    expect(fontRequests.some((path) => path.includes("Figtree-Variable"))).toBe(true)
-    expect(fontRequests.some((path) => path.includes("SplineSansMono-Variable"))).toBe(true)
+    expect(fontRequests.some((path) => path.includes("RedditSans-Variable"))).toBe(true)
+    expect(fontRequests.some((path) => path.includes("JetBrainsMono-Variable"))).toBe(true)
 
     const after = await page.evaluate(() => ({
       html: document.documentElement.outerHTML,
@@ -447,13 +568,13 @@ describe("the font assets", () => {
         return measured
       }
       return {
-        figtree: width('"iter8 Figtree", sans-serif'),
+        sans: width('"iter8 Reddit Sans", sans-serif'),
         fallback: width("sans-serif"),
-        mono: width('"iter8 Spline Sans Mono", monospace'),
+        mono: width('"iter8 JetBrains Mono", monospace'),
         monoFallback: width("monospace"),
       }
     })
-    expect(widths.figtree).not.toBe(widths.fallback)
+    expect(widths.sans).not.toBe(widths.fallback)
     expect(widths.mono).not.toBe(widths.monoFallback)
   }, 30_000)
 
@@ -479,14 +600,14 @@ describe("the font assets", () => {
         return measured
       }
       return {
-        figtree: width('"iter8 Figtree", sans-serif'),
+        sans: width('"iter8 Reddit Sans", sans-serif'),
         fallback: width("sans-serif"),
-        mono: width('"iter8 Spline Sans Mono", monospace'),
+        mono: width('"iter8 JetBrains Mono", monospace'),
         monoFallback: width("monospace"),
         rejections: Reflect.get(window, "__rejections") as unknown[],
       }
     })
-    expect(result.figtree).toBe(result.fallback)
+    expect(result.sans).toBe(result.fallback)
     expect(result.mono).toBe(result.monoFallback)
     expect(result.rejections).toEqual([])
     for (const error of errors) expect(error).toContain("Failed to load resource")

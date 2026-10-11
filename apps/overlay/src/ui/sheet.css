@@ -45,8 +45,9 @@
   font-weight: 600;
   color: var(--ink-2);
 }
-.sheet .sh-h .sub .mono {
-  font-size: 11px;
+.sheet .sh-h .sub .host {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
 .sheet .sh-h .sub .meter {
@@ -62,15 +63,13 @@
   margin-top: -4px;
 }
 .sheet .tab .ct {
-  font: 500 11px var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   color: var(--mute);
-  background: var(--well);
-  border-radius: 4px;
-  padding: 1px 5px;
 }
 .sheet .tab[aria-selected="true"] .ct {
-  background: var(--solid);
-  color: var(--on-solid);
+  color: var(--ink-2);
 }
 .sheet .sh-b {
   flex: 1;
@@ -181,7 +180,10 @@
   position: absolute;
   left: 4px;
   top: 4px;
-  font: 600 10px / 1 var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--on-accent);
   background: var(--c);
   padding: 3px 4px;
@@ -200,7 +202,10 @@
   position: absolute;
   right: 4px;
   top: 4px;
-  font: 500 10px / 1 var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--ink-2);
   background: var(--paper);
   padding: 3px 4px;
@@ -219,10 +224,8 @@
   height: 15px;
 }
 .sheet .it {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--ct);
 }
 .sheet .nb {
@@ -241,7 +244,8 @@
   overflow: hidden;
 }
 .sheet .nb .tgt {
-  font: 400 11px var(--mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--mute);
   margin-top: 7px;
   white-space: nowrap;
@@ -467,8 +471,9 @@
   font-weight: 600;
   color: var(--ink-2);
 }
-.sheet .rh2 .mono {
-  font-size: 11px;
+.sheet .rh2 .sent {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
 .sheet .rh2 .av {
@@ -533,7 +538,7 @@
   background: repeating-linear-gradient(
     90deg,
     transparent 0 6px,
-    rgba(255, 250, 235, 0.14) 6px 10px
+    rgba(250, 250, 250, 0.14) 6px 10px
   );
 }
 .sheet .strip::before {
@@ -556,7 +561,7 @@
 }
 .sheet .sframe:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 0 1.5px #fcfbf6;
+  box-shadow: 0 0 0 1.5px #fbfbfb;
 }
 .sheet .sframe img {
   display: block;
@@ -569,9 +574,12 @@
   position: absolute;
   left: 3px;
   bottom: 3px;
-  font: 600 9.5px / 1 var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: #fff;
-  background: rgba(34, 31, 25, 0.8);
+  background: rgba(31, 31, 31, 0.8);
   padding: 2px 3px;
   border-radius: 3px;
 }
@@ -609,7 +617,10 @@
   border-bottom: 0;
 }
 .sheet .hn .num {
-  font: 500 10px / 1 var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--faint);
   padding-top: 2px;
   text-align: center;
@@ -643,7 +654,7 @@
   display: flex;
   gap: 6px;
   margin-top: 8px;
-  font: 400 11px var(--mono);
+  font-size: 11.5px;
   color: var(--mute);
   white-space: nowrap;
   min-width: 0;
@@ -653,6 +664,7 @@
   flex: none;
 }
 .sheet .hn .prov .fl {
+  font: 400 11px var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
@@ -662,7 +674,8 @@
 }
 .sheet .hn .when {
   margin-top: 2px;
-  font: 400 10.5px var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
 .sheet .reply {
@@ -696,7 +709,9 @@
   margin-bottom: 2px;
 }
 .sheet .reply .who span {
-  font: 400 10.5px var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
   color: var(--mute);
 }
 .sheet .reply p {
@@ -758,7 +773,7 @@
   inset: 0;
   display: grid;
   place-items: center;
-  font: 400 11px var(--mono);
+  font-size: 11.5px;
   color: var(--mute);
 }
 .sheet .compare .lay img {
@@ -776,12 +791,13 @@
 .sheet .compare .lbl {
   position: absolute;
   bottom: 8px;
-  font: 600 10px / 1 var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
   padding: 4px 6px;
   border-radius: 4px;
   background: var(--solid);
   color: var(--on-solid);
-  letter-spacing: 0.04em;
   box-shadow: 0 2px 0 var(--solid-d);
 }
 .sheet .compare .lbl.b {

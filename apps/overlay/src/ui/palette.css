@@ -18,6 +18,7 @@
   border-radius: 12px;
   box-shadow: 4px 5px 0 var(--edge);
   overflow: hidden;
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: palette-in 0.22s var(--spring);
 }
 .pal-in {
@@ -50,10 +51,9 @@
 }
 .pal-g {
   padding: 10px 10px 4px;
-  font: 500 10.5px var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--faint);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .pal-i {
   display: flex;
@@ -83,7 +83,7 @@
 }
 .pal-i .lb small {
   color: var(--mute);
-  font: 400 11.5px var(--mono);
+  font-size: 12px;
   margin-left: 8px;
 }
 .pal-i .ks {
@@ -120,7 +120,7 @@
 }
 .pal-f .ver {
   margin-left: auto;
-  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .keysheet {
@@ -137,6 +137,7 @@
   border-radius: 12px;
   box-shadow: 4px 5px 0 var(--edge);
   padding: 20px 24px 22px;
+  /* impeccable-disable-next-line bounce-easing -- the playful spring is the recorded motion, kept everywhere */
   animation: keysheet-in 0.22s var(--spring);
 }
 .keysheet h2 {
@@ -158,9 +159,8 @@
 }
 .kgrid h5 {
   margin: 12px 0 4px;
-  font: 500 10.5px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--faint);
 }
 .krow {
@@ -207,7 +207,9 @@
   border-radius: 3px 0 0 0;
 }
 .coach .stp {
-  font: 500 10.5px var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   color: var(--inv-mute-2);
   display: flex;
   gap: 4px;

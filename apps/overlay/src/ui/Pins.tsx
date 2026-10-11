@@ -627,7 +627,7 @@ export function Pins(): JSX.Element | null {
             <div class="t">
               <Avatar agent={author.agent} size={18} />
               <span class="who">{author.name}</span>
-              <span class="mono">{TIME.format(new Date(hovered.source.note.createdAt))}</span>
+              <span class="meta">{TIME.format(new Date(hovered.source.note.createdAt))}</span>
             </div>
             <p>{hovered.source.note.body}</p>
           </>
@@ -638,7 +638,7 @@ export function Pins(): JSX.Element | null {
               <IntentGlyph intent={hovered.source.note.intent} size={16} />
               <b>{INTENT_LABEL[hovered.source.note.intent]}</b>
               <span>· note {hovered.source.number}</span>
-              <span class="mono">{targetLabel(hovered.source.note)}</span>
+              <span class="meta">{targetLabel(hovered.source.note)}</span>
             </div>
             <p>{hovered.source.note.body}</p>
             <div class="f">

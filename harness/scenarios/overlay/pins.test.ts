@@ -483,6 +483,12 @@ describe("note pins", () => {
     await o.page.setViewportSize({ width: 1280, height: 300 })
     const pins = o.overlay.getByRole("button", { name: /^Note \d+, / })
     await until("both pins", async () => (await pins.count()) === 2 && pins.first().isVisible())
+    await o.page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    )
     const watched = await o.page.evaluate(() => {
       const nodes = [
         ...(document
