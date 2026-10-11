@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { Note, OVERLAY_ROUTES, OverlayPrefs, Pairing, Round } from "@iter8/protocol"
+import { Note, OVERLAY_ROUTES, OverlayPrefs, Pairing, Round, SendNowResult } from "@iter8/protocol"
 import type { Browser, Locator, Route } from "playwright"
 import noteJson from "../../../packages/protocol/fixtures/Note.json"
 import goneJson from "../../../packages/protocol/fixtures/Pairing.gone.json"
@@ -152,6 +152,16 @@ async function holdNow(o: Opened, roundId: string) {
     parked: () => parked.length,
     release: () => Promise.all(parked.splice(0).map((route) => route.continue().catch(() => {}))),
   }
+}
+
+async function answerNow(o: Opened, roundId: string, result: SendNowResult) {
+  const body = JSON.stringify(SendNowResult.parse(result))
+  const answered = { count: 0 }
+  await o.page.route(`**${nowPath(roundId)}`, (route) => {
+    answered.count += 1
+    return route.fulfill({ status: 200, contentType: "application/json", body })
+  })
+  return answered
 }
 
 async function failNowOnce(o: Opened, roundId: string) {
@@ -444,6 +454,58 @@ describe("send now: queued rounds in History", () => {
     await until("the refusal toast", () => toast(o, /already handed to the session/).isVisible())
     expect(await outcomeOf(sheet, "5").innerText()).toBe("Queued")
   }, 30_000)
+
+  test("the response's round alone marks the round sent now, with no live push", async () => {
+    const o = await open({
+      pairing: BUSY,
+      pageState: { drafts: [], rounds: [QUEUED], agentNotes: [] },
+    })
+    const answered = await answerNow(o, "R5", {
+      outcome: "accepted",
+      round: roundIn("R5", { sendNowAt: SENT_NOW_AT }),
+    })
+    const sheet = await openSheet(o, "history")
+    const button = sheet.getByRole("button", { name: "Send round 5 now" })
+    await button.click()
+    await until("the response to be applied", async () => (await button.count()) === 0)
+    expect(answered.count).toBe(1)
+    expect(await outcomeOf(sheet, "5").innerText()).toBe(SENT_NOW_LINE)
+    await until("the success toast", () => toast(o, /Round 5 sent now/).isVisible())
+    expect(nowRequests(o)).toHaveLength(0)
+    expect(o.mock.rounds()[0]?.state).toMatchObject({ stage: "queued" })
+    expect(o.mock.rounds()[0]?.state).not.toHaveProperty("sendNowAt")
+  }, 30_000)
+
+  test.each([
+    { stage: "announced", state: ANNOUNCED.state, outcome: "Delivered" },
+    { stage: "claimed", state: CLAIMED_SENT_NOW.state, outcome: "2 in progress" },
+  ])(
+    "a not-waiting refusal that reports the round as $stage shows that round and the toast",
+    async ({ state, outcome }) => {
+      const o = await open({
+        pairing: BUSY,
+        pageState: { drafts: [], rounds: [QUEUED], agentNotes: [] },
+      })
+      const answered = await answerNow(o, "R5", {
+        outcome: "refused",
+        reason: "not-waiting",
+        round: roundIn("R5", state),
+      })
+      const sheet = await openSheet(o, "history")
+      const button = sheet.getByRole("button", { name: "Send round 5 now" })
+      await button.click()
+      await until("the refusal toast", () => toast(o, /already handed to the session/).isVisible())
+      await until(
+        "the reported round",
+        async () => (await outcomeOf(sheet, "5").innerText()) === outcome,
+      )
+      expect(answered.count).toBe(1)
+      expect(await button.count()).toBe(0)
+      expect(nowRequests(o)).toHaveLength(0)
+      expect(o.mock.rounds()[0]?.state).toMatchObject({ stage: "queued" })
+    },
+    30_000,
+  )
 
   test("only the queued round not yet sent now gets a button, among several rounds", async () => {
     const o = await open({
