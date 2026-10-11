@@ -123,6 +123,7 @@ async function setup() {
   const exits: number[] = []
   const connections: { start: boolean }[] = []
   const requests: { path: string; search: string; body: unknown }[] = []
+  const responses: { path: string; body: string }[] = []
   const client = hc<ControlApp>("http://iter8", {
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input))
@@ -131,7 +132,9 @@ async function setup() {
         search: url.search,
         body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
       })
-      return app.request(`${url.pathname}${url.search}`, init)
+      const response = await app.request(`${url.pathname}${url.search}`, init)
+      responses.push({ path: url.pathname, body: await response.clone().text() })
+      return response
     },
   })
   const deps: CliDeps = {
@@ -155,6 +158,7 @@ async function setup() {
     exits.length = 0
     connections.length = 0
     requests.length = 0
+    responses.length = 0
   }
   async function run(name: string, rawArgs: string[] = []) {
     const commands = cliCommands(deps)
@@ -233,6 +237,7 @@ async function setup() {
     exits,
     connections,
     requests,
+    responses,
     pages,
     inbox,
     screenshots,
@@ -1336,10 +1341,6 @@ describe("hook commands for another process", () => {
 describe("open targets", () => {
   test.each([false, true])("hands the page to a connected laptop with json=%s", async (json) => {
     const state = await setup()
-    await state.run("open", ["http://localhost:5173", "--json"])
-    const original = state.stdout.join("")
-    const opened = OpenResult.parse(JSON.parse(original))
-    state.clear()
     const received: LaptopOpen[] = []
     const listener = await listenForPages({
       socketPath: join(state.home, "laptop-mac-0000abcd.sock"),
@@ -1350,6 +1351,10 @@ describe("open targets", () => {
     })
     try {
       await state.run("open", ["http://localhost:5173", ...(json ? ["--json"] : [])])
+      const served = JSON.parse(
+        state.responses.find((response) => response.path === "/open")?.body ?? "",
+      )
+      const opened = OpenResult.parse(served)
       expect(state.exits).toEqual([ExitCode.ok])
       expect(state.stderr).toEqual([])
       expect(received).toEqual([{ machineId: state.machineId, url: opened.url }])
@@ -1357,12 +1362,27 @@ describe("open targets", () => {
         path: "/status",
         body: { owner: null, identities: [{ pid: 9001, startedAt: "linux:1:9001" }] },
       })
-      expect(state.stdout).toEqual([
-        json ? original : `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
-      ])
+      expect(state.stdout).toHaveLength(1)
+      if (json) expect(JSON.parse(state.stdout[0] ?? "")).toEqual(served)
+      else {
+        expect(state.stdout).toEqual([
+          `${opened.url}\n${opened.landingUrl}\nOpened in the browser on mac.\n`,
+        ])
+      }
     } finally {
       await listener.close()
     }
+  })
+
+  test("--json prints exactly the open result the service returned when no laptop is connected", async () => {
+    const state = await setup()
+    await state.run("open", ["http://localhost:5173", "--json"])
+    const served = JSON.parse(
+      state.responses.find((response) => response.path === "/open")?.body ?? "",
+    )
+    expect(state.exits).toEqual([ExitCode.ok])
+    expect(state.stdout).toHaveLength(1)
+    expect(JSON.parse(state.stdout[0] ?? "")).toEqual(served)
   })
 
   test("names every laptop that accepted the page, joined with a comma and a space", async () => {
