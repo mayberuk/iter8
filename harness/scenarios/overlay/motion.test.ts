@@ -391,6 +391,47 @@ describe("motion: live animations", () => {
     expect(offenders).toEqual([])
   }, 30_000)
 
+  test("closing the round sheet runs only compositor animations", async () => {
+    const o = await open()
+    const sheet = o.overlay.getByRole("complementary", { name: "Round sheet" })
+    await o.page.keyboard.press("r")
+    await until("the round sheet", () => sheet.isVisible())
+    await animationsDone(o.page, ".sheet")
+    await dockAtRest(o.page)
+    const watch = await watchAnimations(o.page)
+    await o.page.keyboard.press("Escape")
+    await until("the sheet to close", async () => !(await sheet.isVisible()))
+    await dockAtRest(o.page)
+    const { offenders } = await watch.stop()
+    expect(offenders).toEqual([])
+  }, 30_000)
+
+  test("closing the palette runs only compositor animations", async () => {
+    const o = await open()
+    const palette = o.overlay.getByRole("dialog", { name: "Command palette" })
+    await o.page.keyboard.press("ControlOrMeta+K")
+    await until("the palette", () => palette.isVisible())
+    await animationsDone(o.page, ".palette")
+    const watch = await watchAnimations(o.page)
+    await o.page.keyboard.press("Escape")
+    await until("the palette to close", async () => !(await palette.isVisible()))
+    const { offenders } = await watch.stop()
+    expect(offenders).toEqual([])
+  }, 30_000)
+
+  test("a toast leaving runs only compositor animations", async () => {
+    const o = await open()
+    await o.page.keyboard.press("p")
+    const toast = o.overlay.locator(".toast")
+    await until("a toast", () => toast.first().isVisible())
+    await animationsDone(o.page, ".toast")
+    const watch = await watchAnimations(o.page)
+    await until("the toast to leave", async () => (await toast.count()) === 0)
+    const { seen, offenders } = await watch.stop()
+    expect(seen.some((label) => label.includes("animation tout"))).toBe(true)
+    expect(offenders).toEqual([])
+  }, 30_000)
+
   test("dragging the dock to another anchor runs only compositor animations", async () => {
     const o = await open()
     const watch = await watchAnimations(o.page)
