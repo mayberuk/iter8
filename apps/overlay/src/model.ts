@@ -3,27 +3,43 @@ import {
   type AttachResult,
   type Box,
   type Capture,
+  type ChatSetting,
+  type ConversationMessage,
   type DraftBody,
   HelloResult,
-  type IdempotencyKey,
+  IdempotencyKey,
   type Intent,
   type LiveSession,
+  MESSAGE_MAX_CHARS,
+  type MessagePage,
+  type MessageQuery,
   type Note,
   type NoteId,
   type NoteTarget,
   type OverlayPrefs,
   type PageId,
   type Pairing,
+  type PostMessageRequest,
+  type PostMessageResult,
   ROUND_TRANSITIONS,
   type Round,
   type RoundId,
   type RoundStage,
+  type SendNowResult,
   type SendRequest,
   type SendResult,
   type ServerMessage,
 } from "@iter8/protocol"
 import { batch, computed, signal } from "@preact/signals"
 import { z } from "zod"
+import {
+  type ConversationLoad,
+  chatBlockedReason,
+  mergeMessages,
+  type PendingMessage,
+  type PostFailure,
+  settlePending,
+} from "./conversation"
 
 export const Mode = z.enum(["idle", "pick", "region", "shot", "markup", "compose"])
 export type Mode = z.infer<typeof Mode>
@@ -62,7 +78,7 @@ export type Shape = { tool: MarkupTool; x1: number; y1: number; x2: number; y2: 
 export const EnrichmentStatus = z.enum(["running", "done"])
 export type EnrichmentStatus = z.infer<typeof EnrichmentStatus>
 
-export const SheetTab = z.enum(["round", "history"])
+export const SheetTab = z.enum(["round", "conversation", "history"])
 export type SheetTab = z.infer<typeof SheetTab>
 
 export const Menu = z.enum(["none", "session", "more"])
@@ -128,6 +144,14 @@ export function sendBlockedReason(
   if (pairing.state.status === "gone") return "gone"
   if (draftCount === 0) return "empty"
   return null
+}
+
+export function canSendNow(round: Round, pairing: Pairing | null): boolean {
+  return (
+    pairing?.state.status === "busy" &&
+    round.state.stage === "queued" &&
+    round.state.sendNowAt === undefined
+  )
 }
 
 export function roundOutcome(round: Round): {
@@ -224,6 +248,14 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
   const draftOrder = signal<NoteId[]>(hello.state.drafts.map((note) => note.id))
   const rounds = signal<Round[]>(hello.state.rounds)
   const agentNotes = signal<Note[]>(hello.state.agentNotes)
+  const messages = signal<ConversationMessage[]>([])
+  const conversation = signal<ConversationLoad>({ status: "unloaded" })
+  const pendingMessages = signal<PendingMessage[]>([])
+  const chat = signal<ChatSetting | null>(null)
+  const chatDraft = signal("")
+  const chatBlocked = computed(() => chatBlockedReason(pairing.value, chat.value))
+  let chatEpoch = 0
+  let chatLoading: number | null = null
 
   const hover = signal<WeakRef<Element> | null>(null)
   const climbStack = signal<WeakRef<Element>[]>([])
@@ -546,9 +578,157 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
     draftOrder.value = draftOrder.value.filter((id) => !sent.has(id))
   }
 
+  function beginLoad(which: "newest" | "older"): MessageQuery | null {
+    const current = conversation.value
+    if (which === "newest") {
+      if (current.status !== "unloaded" && current.status !== "failed") return null
+      conversation.value = { status: "loading" }
+      return {}
+    }
+    const oldest = messages.value[0]
+    if (current.status !== "ready" || !current.hasOlder || current.olderLoading || !oldest)
+      return null
+    conversation.value = { ...current, olderLoading: true }
+    return { before: oldest.id }
+  }
+
+  function applyMessagePage(which: "newest" | "older", page: MessagePage): void {
+    batch(() => {
+      messages.value = mergeMessages(messages.value, page.messages)
+      pendingMessages.value = settlePending(pendingMessages.value, messages.value)
+      const current = conversation.value
+      if (which === "newest" || current.status === "ready")
+        conversation.value = { status: "ready", hasOlder: page.hasOlder, olderLoading: false }
+    })
+  }
+
+  function loadFailed(which: "newest" | "older"): void {
+    const current = conversation.value
+    if (which === "newest") conversation.value = { status: "failed" }
+    else if (current.status === "ready") conversation.value = { ...current, olderLoading: false }
+  }
+
+  function beginChatLoad(): number | null {
+    if (chat.value !== null || chatLoading === chatEpoch) return null
+    chatLoading = chatEpoch
+    return chatEpoch
+  }
+
+  function applyFetchedChat(ticket: number, setting: ChatSetting): void {
+    if (ticket !== chatEpoch) return
+    chatLoading = null
+    chat.value = setting
+  }
+
+  function chatLoadFailed(ticket: number): void {
+    if (chatLoading === ticket) chatLoading = null
+  }
+
+  function setChatSetting(setting: ChatSetting): void {
+    chatEpoch++
+    chatLoading = null
+    chat.value = setting
+  }
+
+  function beginPost(text: string): PostMessageRequest | null {
+    const trimmed = text.trim()
+    const current = pairing.value
+    if (
+      trimmed === "" ||
+      trimmed.length > MESSAGE_MAX_CHARS ||
+      chatBlocked.value !== null ||
+      !current
+    )
+      return null
+    const key = IdempotencyKey.parse(crypto.randomUUID())
+    batch(() => {
+      pendingMessages.value = [
+        ...pendingMessages.value,
+        { key, text: trimmed, at: new Date(now()).toISOString(), status: "sending" },
+      ]
+      chatDraft.value = ""
+    })
+    return { idempotencyKey: key, generation: current.generation, text: trimmed }
+  }
+
+  function failPost(key: IdempotencyKey, reason: PostFailure): void {
+    pendingMessages.value = pendingMessages.value.map((message) =>
+      message.key === key ? { ...message, status: "failed", reason } : message,
+    )
+  }
+
+  function applyPostResult(key: IdempotencyKey, result: PostMessageResult): void {
+    batch(() => {
+      if (result.outcome === "accepted") {
+        messages.value = mergeMessages(messages.value, [result.message])
+        pendingMessages.value = settlePending(pendingMessages.value, messages.value)
+        return
+      }
+      failPost(key, result.reason)
+      setChatSetting(result.chat)
+      pairing.value = result.pairing
+      if (result.reason === "chat-off" || result.reason === "unreachable") return
+      pushToast(
+        {
+          "session-gone": `${name.value} ended — attach this page to a session to send`,
+          "stale-generation":
+            "This page is now attached to another session — check it and send again",
+          "no-pairing": "This page isn't attached to a session — attach it to send",
+        }[result.reason],
+        { tone: "failed" },
+      )
+    })
+  }
+
+  function postFailed(key: IdempotencyKey, reason: "unreachable-service" | "invalid"): void {
+    failPost(key, reason)
+  }
+
+  function retryPost(key: IdempotencyKey): PostMessageRequest | null {
+    const current = pairing.value
+    const held = pendingMessages.value.find((message) => message.key === key)
+    if (!current || chatBlocked.value !== null || held?.status !== "failed") return null
+    pendingMessages.value = pendingMessages.value.map((message) =>
+      message.key === key ? { key, text: held.text, at: held.at, status: "sending" } : message,
+    )
+    return { idempotencyKey: key, generation: current.generation, text: held.text }
+  }
+
+  function discardPending(key: IdempotencyKey): void {
+    pendingMessages.value = pendingMessages.value.filter((message) => message.key !== key)
+  }
+
+  function applySendNowResult(result: SendNowResult): void {
+    batch(() => {
+      rounds.value = applyRound(rounds.value, result.round)
+      if (result.outcome === "accepted") {
+        pushToast(
+          `${roundLabel(result.round.id)} sent now · reaches ${name.value} after its current step`,
+          { tone: "ok" },
+        )
+        return
+      }
+      pushToast(
+        {
+          "not-waiting": `${roundLabel(result.round.id)} was already handed to the session`,
+          "session-gone": `${name.value} ended — attach this page to a session to send`,
+          "no-pairing": "This page isn't attached to a session — attach it to send",
+        }[result.reason],
+        { tone: "failed" },
+      )
+    })
+  }
+
   function applyServerMessage(message: ServerMessage) {
     batch(() => {
       switch (message.type) {
+        case "message":
+          messages.value = mergeMessages(messages.value, [message.message])
+          pendingMessages.value = settlePending(pendingMessages.value, messages.value)
+          return
+        case "chat":
+          setChatSetting(message.chat)
+          return
         case "pairing":
           pairing.value = message.pairing
           return
@@ -653,6 +833,13 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
   /** Adopts a fresh handshake after a reconnect, keeping the local order of drafts that survive. */
   function applyHello(next: AcceptedHello) {
     batch(() => {
+      chatEpoch++
+      chatLoading = null
+      chat.value = null
+      if (conversation.value.status !== "unloaded") {
+        messages.value = []
+        conversation.value = { status: "unloaded" }
+      }
       const ids = new Set(next.state.drafts.map((note) => note.id))
       const kept = draftOrder.value.filter((id) => ids.has(id))
       const known = new Set(kept)
@@ -684,6 +871,25 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
     draftOrder,
     rounds,
     agentNotes,
+    messages,
+    conversation,
+    pendingMessages,
+    chat,
+    chatDraft,
+    chatBlocked,
+    beginLoad,
+    applyMessagePage,
+    loadFailed,
+    beginChatLoad,
+    applyFetchedChat,
+    chatLoadFailed,
+    setChatSetting,
+    beginPost,
+    applyPostResult,
+    postFailed,
+    retryPost,
+    discardPending,
+    applySendNowResult,
     hover,
     climbStack,
     multi,

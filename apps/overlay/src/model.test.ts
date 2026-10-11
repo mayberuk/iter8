@@ -2,17 +2,24 @@ import { describe, expect, test } from "bun:test"
 import {
   AttachResult,
   Capture,
+  type ConversationMessage,
   HelloResult,
   IdempotencyKey,
+  MESSAGE_MAX_CHARS,
+  MessageId,
   Note,
   NoteId,
   type NoteTarget,
   OwnerId,
   PageId,
   Pairing,
+  PairingGeneration,
+  PostMessageRequest,
+  type PostMessageResult,
   ROUND_TRANSITIONS,
   Round,
   type RoundStage,
+  type SendNowResult,
   SendResult,
   ServerMessage,
 } from "@iter8/protocol"
@@ -38,6 +45,7 @@ import upstreamJson from "../../../packages/protocol/fixtures/ServerMessage.upst
 import {
   applyRound,
   buildSendRequest,
+  canSendNow,
   createOverlayModel,
   displayNoteState,
   dockState,
@@ -696,5 +704,381 @@ describe("send and attach results", () => {
     m.applyAttachResult(refused)
     expect(m.liveSessions.value).toEqual(refused.outcome === "refused" ? refused.sessions : [])
     expect(m.pairing.value).toEqual(pairing)
+  })
+})
+
+const availableChat = { enabled: true, defaultEnabled: true, reachable: true }
+function chatModel() {
+  const m = model()
+  m.pairing.value = pairing
+  m.setChatSetting(availableChat)
+  return m
+}
+function chatMessage(id: number, key = IdempotencyKey.parse("chat-key-0001")): ConversationMessage {
+  return {
+    id: MessageId.parse(`M${id}`),
+    pageId: hello.page.id,
+    roundId: null,
+    text: "hello",
+    at: new Date(T0).toISOString(),
+    author: { kind: "page", idempotencyKey: key, delivery: { status: "queued" } },
+  }
+}
+
+describe("conversation loading", () => {
+  test("initial values and lazy newest load guard", () => {
+    const m = model()
+    expect(m.messages.value).toEqual([])
+    expect(m.pendingMessages.value).toEqual([])
+    expect(m.chat.value).toBeNull()
+    expect(m.chatDraft.value).toBe("")
+    expect(m.conversation.value).toEqual({ status: "unloaded" })
+    expect(m.beginLoad("older")).toBeNull()
+    expect(m.beginLoad("newest")).toEqual({})
+    expect(m.conversation.value).toEqual({ status: "loading" })
+    expect(m.beginLoad("newest")).toBeNull()
+    expect(m.beginLoad("older")).toBeNull()
+    m.loadFailed("newest")
+    expect(m.conversation.value).toEqual({ status: "failed" })
+    expect(m.beginLoad("older")).toBeNull()
+    expect(m.beginLoad("newest")).toEqual({})
+    m.applyMessagePage("newest", { messages: [], hasOlder: false })
+    expect(m.beginLoad("newest")).toBeNull()
+    expect(m.beginLoad("older")).toBeNull()
+    m.toggleSheet("conversation")
+    expect(m.sheet.value).toEqual({ open: true, tab: "conversation" })
+  })
+  for (const count of [0, 1, 3])
+    for (const overlap of [false, true])
+      test(`newest retains ${count} early live messages with overlap=${overlap}`, () => {
+        const m = model()
+        const early = Array.from({ length: count }, (_, i) => chatMessage(i + 1))
+        for (const message of [...early].reverse())
+          m.applyServerMessage({ type: "message", message })
+        m.beginLoad("newest")
+        m.loadFailed("newest")
+        expect(m.messages.value).toEqual(early)
+        m.beginLoad("newest")
+        m.applyMessagePage("newest", { messages: overlap ? early : [], hasOlder: true })
+        expect(m.messages.value).toEqual(early)
+        expect(m.conversation.value).toEqual({
+          status: "ready",
+          hasOlder: true,
+          olderLoading: false,
+        })
+      })
+  test("older loads use oldest id, merge, settle, fail and retry one request at a time", () => {
+    const m = chatModel()
+    const request = PostMessageRequest.parse(m.beginPost("hello"))
+    m.applyMessagePage("newest", { messages: [chatMessage(12), chatMessage(20)], hasOlder: true })
+    expect(m.beginLoad("older")).toEqual({ before: MessageId.parse("M12") })
+    expect(m.beginLoad("older")).toBeNull()
+    expect(m.beginLoad("newest")).toBeNull()
+    m.loadFailed("older")
+    expect(m.conversation.value).toEqual({ status: "ready", hasOlder: true, olderLoading: false })
+    expect(m.beginLoad("older")).toEqual({ before: MessageId.parse("M12") })
+    m.applyMessagePage("older", {
+      messages: [chatMessage(1, request.idempotencyKey), chatMessage(12)],
+      hasOlder: false,
+    })
+    expect(m.messages.value.map((row) => row.id)).toEqual(
+      ["M1", "M12", "M20"].map((id) => MessageId.parse(id)),
+    )
+    expect(m.pendingMessages.value).toEqual([])
+    expect(m.conversation.value).toEqual({ status: "ready", hasOlder: false, olderLoading: false })
+    expect(m.beginLoad("older")).toBeNull()
+  })
+  test("older load needs a held cursor and older failure leaves unloaded state alone", () => {
+    const m = model()
+    m.loadFailed("older")
+    expect(m.conversation.value).toEqual({ status: "unloaded" })
+    m.applyMessagePage("newest", { messages: [], hasOlder: true })
+    expect(m.beginLoad("older")).toBeNull()
+    expect(m.conversation.value).toEqual({ status: "ready", hasOlder: true, olderLoading: false })
+  })
+  for (const status of ["unloaded", "loading", "failed", "ready"] as const)
+    test(`hello resets ${status} conversation and preserves unsent entries`, () => {
+      const m = chatModel()
+      const sending = PostMessageRequest.parse(m.beginPost("one"))
+      const failed = PostMessageRequest.parse(m.beginPost("two"))
+      m.postFailed(failed.idempotencyKey, "invalid")
+      m.applyServerMessage({ type: "message", message: chatMessage(1) })
+      if (status !== "unloaded") m.beginLoad("newest")
+      if (status === "failed") m.loadFailed("newest")
+      if (status === "ready") m.applyMessagePage("newest", { messages: [], hasOlder: true })
+      const pending = m.pendingMessages.value
+      m.applyHello(hello)
+      expect(m.chat.value).toBeNull()
+      expect(m.conversation.value).toEqual({ status: "unloaded" })
+      expect(m.messages.value).toEqual(status === "unloaded" ? [chatMessage(1)] : [])
+      expect(m.pendingMessages.value).toEqual(pending)
+      expect(m.pendingMessages.value[0]?.key).toBe(sending.idempotencyKey)
+      expect(m.beginLoad("newest")).toEqual({})
+      expect(m.beginChatLoad()).not.toBeNull()
+    })
+})
+
+describe("chat setting freshness", () => {
+  test("one fetch at a time, failure retry and valid reply", () => {
+    const m = model()
+    const ticket = m.beginChatLoad()
+    if (ticket === null) throw new Error("Expected a chat load ticket")
+    expect(ticket).toBe(0)
+    expect(m.beginChatLoad()).toBeNull()
+    m.chatLoadFailed(ticket)
+    expect(m.beginChatLoad()).toBe(ticket)
+    m.applyFetchedChat(ticket, availableChat)
+    expect(m.chat.value).toEqual(availableChat)
+    expect(m.beginChatLoad()).toBeNull()
+  })
+  for (const source of ["event", "setting", "hello"] as const)
+    test(`fetch before ${source} cannot overwrite fresh chat or clear a newer fetch`, () => {
+      const m = model()
+      const ticket = m.beginChatLoad()
+      if (ticket === null) throw new Error("Expected a chat load ticket")
+      const fresh = { ...availableChat, enabled: false }
+      if (source === "event") m.applyServerMessage({ type: "chat", chat: fresh })
+      if (source === "setting") m.setChatSetting(fresh)
+      if (source === "hello") m.applyHello(hello)
+      m.applyFetchedChat(ticket, availableChat)
+      expect(m.chat.value).toEqual(source === "hello" ? null : fresh)
+      if (source !== "hello") m.applyHello(hello)
+      const newer = m.beginChatLoad()
+      if (newer === null) throw new Error("Expected a new chat load ticket")
+      expect(newer).toBeGreaterThan(ticket)
+      m.chatLoadFailed(ticket)
+      expect(m.beginChatLoad()).toBeNull()
+      m.applyFetchedChat(ticket, availableChat)
+      expect(m.chat.value).toBeNull()
+      m.applyFetchedChat(newer, fresh)
+      expect(m.chat.value).toEqual(fresh)
+    })
+})
+
+describe("page posting", () => {
+  for (const text of [
+    "x",
+    "  hello \n",
+    "x".repeat(MESSAGE_MAX_CHARS),
+    ` ${"x".repeat(MESSAGE_MAX_CHARS)} `,
+  ])
+    test(`valid text length ${text.length} becomes sending synchronously`, () => {
+      const m = chatModel()
+      m.chatDraft.value = text
+      const request = PostMessageRequest.parse(m.beginPost(text))
+      expect(request).toEqual({
+        idempotencyKey: request.idempotencyKey,
+        generation: pairing.generation,
+        text: text.trim(),
+      })
+      expect(IdempotencyKey.safeParse(request.idempotencyKey).success).toBe(true)
+      expect(m.pendingMessages.value).toEqual([
+        {
+          key: request.idempotencyKey,
+          text: text.trim(),
+          at: new Date(T0).toISOString(),
+          status: "sending",
+        },
+      ])
+      expect(m.chatDraft.value).toBe("")
+      expect(m.beginPost(text)?.idempotencyKey).not.toBe(request.idempotencyKey)
+    })
+  for (const text of ["", " \n\t", "x".repeat(MESSAGE_MAX_CHARS + 1)])
+    test(`invalid trimmed text length ${text.trim().length} leaves draft and pending alone`, () => {
+      const m = chatModel()
+      m.chatDraft.value = text
+      expect(m.beginPost(text)).toBeNull()
+      expect(m.pendingMessages.value).toEqual([])
+      expect(m.chatDraft.value).toBe(text)
+    })
+  for (const block of ["no-pairing", "gone", "checking", "chat-off", "unreachable"] as const)
+    test(`${block} prevents both post and retry`, () => {
+      const m = chatModel()
+      const request = PostMessageRequest.parse(m.beginPost("retry"))
+      m.postFailed(request.idempotencyKey, "unreachable-service")
+      if (block === "no-pairing") m.pairing.value = null
+      if (block === "gone") m.pairing.value = gonePairing
+      if (block === "checking") m.chat.value = null
+      if (block === "chat-off") m.setChatSetting({ ...availableChat, enabled: false })
+      if (block === "unreachable") m.setChatSetting({ ...availableChat, reachable: false })
+      expect(m.chatBlocked.value).toBe(block)
+      const pending = m.pendingMessages.value
+      expect(m.beginPost("no")).toBeNull()
+      expect(m.retryPost(request.idempotencyKey)).toBeNull()
+      expect(m.pendingMessages.value).toEqual(pending)
+    })
+  for (const first of ["reply", "live"] as const)
+    test(`${first} first settles once; delivery events update the same stored entry`, () => {
+      const m = chatModel()
+      const request = PostMessageRequest.parse(m.beginPost("hello"))
+      const other = PostMessageRequest.parse(m.beginPost("other"))
+      const message = chatMessage(12, request.idempotencyKey)
+      const reply = () =>
+        m.applyPostResult(request.idempotencyKey, { outcome: "accepted", message })
+      const live = () => m.applyServerMessage({ type: "message", message })
+      if (first === "reply") {
+        reply()
+        live()
+      } else {
+        live()
+        reply()
+      }
+      reply()
+      live()
+      expect(m.pendingMessages.value.map((row) => row.key)).toEqual([other.idempotencyKey])
+      expect(m.messages.value).toEqual([message])
+      const delivered: ConversationMessage = {
+        ...message,
+        author: {
+          kind: "page",
+          idempotencyKey: request.idempotencyKey,
+          delivery: { status: "delivered", at: message.at },
+        },
+      }
+      m.applyServerMessage({ type: "message", message: delivered })
+      expect(m.messages.value).toEqual([delivered])
+      const failed: ConversationMessage = {
+        ...message,
+        author: {
+          kind: "page",
+          idempotencyKey: request.idempotencyKey,
+          delivery: { status: "failed", reason: "session-gone" },
+        },
+      }
+      m.applyServerMessage({ type: "message", message: failed })
+      expect(m.messages.value).toEqual([failed])
+    })
+  for (const reason of [
+    "no-pairing",
+    "stale-generation",
+    "session-gone",
+    "chat-off",
+    "unreachable",
+  ] as const)
+    test(`refusal ${reason} keeps text and adopts service state with appropriate toast`, () => {
+      const m = chatModel()
+      const request = PostMessageRequest.parse(m.beginPost("hello"))
+      const adopted =
+        reason === "no-pairing"
+          ? null
+          : reason === "session-gone"
+            ? gonePairing
+            : { ...pairing, generation: PairingGeneration.parse(0) }
+      const chat = { enabled: false, defaultEnabled: false, reachable: false }
+      const refusal: PostMessageResult = { outcome: "refused", reason, chat, pairing: adopted }
+      m.applyPostResult(request.idempotencyKey, refusal)
+      expect(m.pendingMessages.value).toEqual([
+        {
+          key: request.idempotencyKey,
+          text: "hello",
+          at: new Date(T0).toISOString(),
+          status: "failed",
+          reason,
+        },
+      ])
+      expect(m.pairing.value).toEqual(adopted)
+      expect(m.chat.value).toEqual(chat)
+      const expectedToast = {
+        "no-pairing": "This page isn't attached to a session — attach it to send",
+        "stale-generation":
+          "This page is now attached to another session — check it and send again",
+        "session-gone": `${m.name.value} ended — attach this page to a session to send`,
+      }
+      if (reason === "chat-off" || reason === "unreachable") expect(m.toasts.value).toEqual([])
+      else
+        expect(m.toasts.value.at(-1)).toMatchObject({ tone: "failed", text: expectedToast[reason] })
+      m.pairing.value = pairing
+      m.setChatSetting(availableChat)
+      expect(m.retryPost(request.idempotencyKey)).toEqual(request)
+    })
+  for (const reason of ["unreachable-service", "invalid"] as const)
+    test(`${reason} retry keeps key/text/time and uses current generation; duplicates and missing keys do nothing`, () => {
+      const m = chatModel()
+      const request = PostMessageRequest.parse(m.beginPost("hello"))
+      expect(m.retryPost(request.idempotencyKey)).toBeNull()
+      const unknown = IdempotencyKey.parse("missing-key")
+      expect(m.retryPost(unknown)).toBeNull()
+      m.postFailed(unknown, reason)
+      m.discardPending(unknown)
+      expect(m.pendingMessages.value).toHaveLength(1)
+      m.postFailed(request.idempotencyKey, reason)
+      expect(m.pendingMessages.value[0]).toMatchObject({ status: "failed", reason })
+      m.pairing.value = { ...pairing, generation: PairingGeneration.parse(9) }
+      expect(m.retryPost(request.idempotencyKey)).toEqual({
+        ...request,
+        generation: PairingGeneration.parse(9),
+      })
+      expect(m.pendingMessages.value[0]).toEqual({
+        key: request.idempotencyKey,
+        text: "hello",
+        at: new Date(T0).toISOString(),
+        status: "sending",
+      })
+      expect(m.retryPost(request.idempotencyKey)).toBeNull()
+      m.discardPending(request.idempotencyKey)
+      m.discardPending(request.idempotencyKey)
+      expect(m.pendingMessages.value).toEqual([])
+    })
+})
+
+describe("Send now", () => {
+  const states: Round["state"][] = [
+    { stage: "draft" },
+    queuedRound.state,
+    announcedState,
+    round.state,
+    orphanedRound.state,
+  ]
+  const pairings: (Pairing | null)[] = [
+    null,
+    pairing,
+    gonePairing,
+    { ...pairing, state: { status: "busy" } },
+    { ...pairing, state: { status: "unknown" } },
+  ]
+  for (const state of states)
+    for (const paired of pairings)
+      for (const nudged of [false, true])
+        test(`availability stage=${state.stage} pairing=${paired?.state.status ?? "absent"} sendNowAt=${nudged}`, () => {
+          const candidate: Round = {
+            ...queuedRound,
+            state: Round.shape.state.parse({
+              ...state,
+              ...(nudged ? { sendNowAt: new Date(T0).toISOString() } : {}),
+            }),
+          }
+          expect(canSendNow(candidate, paired)).toBe(
+            state.stage === "queued" && paired?.state.status === "busy" && !nudged,
+          )
+        })
+  for (const outcome of ["accepted", "not-waiting", "session-gone", "no-pairing"] as const)
+    test(`${outcome} adopts round and toasts`, () => {
+      const m = model()
+      const updated = {
+        ...queuedRound,
+        state: { ...queuedRound.state, sendNowAt: new Date(T0).toISOString() },
+      }
+      const result: SendNowResult =
+        outcome === "accepted"
+          ? { outcome, round: updated }
+          : { outcome: "refused", reason: outcome, round: updated }
+      m.applySendNowResult(result)
+      expect(m.rounds.value.find((row) => row.id === updated.id)).toEqual(updated)
+      const expected = {
+        accepted: `Round ${updated.id.slice(1)} sent now · reaches ${m.name.value} after its current step`,
+        "not-waiting": `Round ${updated.id.slice(1)} was already handed to the session`,
+        "session-gone": `${m.name.value} ended — attach this page to a session to send`,
+        "no-pairing": "This page isn't attached to a session — attach it to send",
+      }
+      expect(m.toasts.value.at(-1)).toMatchObject({
+        tone: outcome === "accepted" ? "ok" : "failed",
+        text: expected[outcome],
+      })
+    })
+  test("late Send now replies cannot regress a claimed round", () => {
+    const m = model()
+    m.applyServerMessage({ type: "round", round })
+    m.applySendNowResult({ outcome: "accepted", round: { ...round, state: queuedRound.state } })
+    expect(m.rounds.value.find((row) => row.id === round.id)).toEqual(round)
   })
 })

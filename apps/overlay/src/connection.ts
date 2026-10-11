@@ -1,20 +1,28 @@
 import {
   type AttachResult,
+  type ChatSetting,
+  type ChatToggle,
   type DraftBody,
   type HelloResult,
   LIVE_PATH,
   type LiveSession,
   liveSubprotocols,
+  type MessagePage,
+  MessageQuery,
   type Note,
   type NoteId,
   OVERLAY_ROUTES,
   type OverlayBoot,
   type OverlayPrefs,
   type OwnerId,
+  type PostMessageRequest,
+  type PostMessageResult,
   PROTOCOL_VERSION,
   type ResolvedSourceLead,
+  type RoundId,
   type Screenshot,
   type ScreenshotRef,
+  type SendNowResult,
   type SendRequest,
   type SendResult,
   ServerMessage,
@@ -70,9 +78,11 @@ export function createConnection(deps: {
       init.body = body as Blob
     }
     const path =
-      parameter === undefined
-        ? route.path
-        : route.path.replace(/:noteId|:ref/, encodeURIComponent(parameter))
+      key === "listMessages" && parameter
+        ? `${route.path}?${parameter}`
+        : parameter === undefined
+          ? route.path
+          : route.path.replace(/:noteId|:ref|:roundId/, encodeURIComponent(parameter))
     let response: Response
     try {
       response = await deps.fetch(path, init)
@@ -210,6 +220,31 @@ export function createConnection(deps: {
     },
     send(request: SendRequest): Promise<SendResult> {
       return json("send", request)
+    },
+    async listMessages(query: MessageQuery): Promise<MessagePage> {
+      let parsed: MessageQuery
+      try {
+        parsed = MessageQuery.parse(query)
+      } catch {
+        throw new Error("listMessages status 0: invalid request")
+      }
+      const search = new URLSearchParams()
+      if (parsed.before !== undefined) search.set("before", parsed.before)
+      if (parsed.limit !== undefined) search.set("limit", parsed.limit)
+      return json("listMessages", undefined, search.toString())
+    },
+    postMessage(request: PostMessageRequest): Promise<PostMessageResult> {
+      return json("postMessage", request)
+    },
+    getChat(): Promise<ChatSetting> {
+      return json("getChat")
+    },
+    setChat(enabled: boolean): Promise<ChatSetting> {
+      const toggle: ChatToggle = { enabled }
+      return json("setChat", toggle)
+    },
+    sendNow(roundId: RoundId): Promise<SendNowResult> {
+      return json("sendNow", undefined, roundId)
     },
     uploadScreenshot(png: Blob): Promise<Screenshot> {
       return json("uploadScreenshot", png)

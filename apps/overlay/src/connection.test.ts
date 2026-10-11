@@ -4,13 +4,17 @@ import {
   HelloResult,
   LIVE_PATH,
   liveSubprotocols,
+  MessageId,
+  type MessageQuery,
   Note,
   NoteId,
   OVERLAY_ROUTES,
   OverlayBoot,
   OverlayPrefs,
   OwnerId,
+  PostMessageRequest,
   PROTOCOL_VERSION,
+  RoundId,
   Screenshot,
   type ScreenshotRef,
   SendRequest,
@@ -20,16 +24,21 @@ import {
 } from "@iter8/protocol"
 import fc from "fast-check"
 import attachFixture from "../../../packages/protocol/fixtures/AttachResult.json"
+import chatFixture from "../../../packages/protocol/fixtures/ChatSetting.json"
 import draftFixture from "../../../packages/protocol/fixtures/DraftBody.json"
 import helloFixture from "../../../packages/protocol/fixtures/HelloResult.json"
 import refusedFixture from "../../../packages/protocol/fixtures/HelloResult.refused.json"
 import sessionsFixture from "../../../packages/protocol/fixtures/LiveSessionList.json"
+import messagePageFixture from "../../../packages/protocol/fixtures/MessagePage.json"
 import noteFixture from "../../../packages/protocol/fixtures/Note.json"
 import okFixture from "../../../packages/protocol/fixtures/Ok.json"
 import bootFixture from "../../../packages/protocol/fixtures/OverlayBoot.json"
 import prefsFixture from "../../../packages/protocol/fixtures/OverlayPrefs.json"
+import postRequestFixture from "../../../packages/protocol/fixtures/PostMessageRequest.json"
+import postResultFixture from "../../../packages/protocol/fixtures/PostMessageResult.json"
 import resolvedFixture from "../../../packages/protocol/fixtures/ResolvedSourceLead.json"
 import screenshotFixture from "../../../packages/protocol/fixtures/Screenshot.json"
+import sendNowFixture from "../../../packages/protocol/fixtures/SendNowResult.json"
 import sendRequestFixture from "../../../packages/protocol/fixtures/SendRequest.json"
 import sendFixture from "../../../packages/protocol/fixtures/SendResult.json"
 import drainingFixture from "../../../packages/protocol/fixtures/ServerMessage.draining.json"
@@ -44,6 +53,7 @@ const prefs = OverlayPrefs.parse(prefsFixture)
 const screenshot = Screenshot.parse(screenshotFixture)
 const sendRequest = SendRequest.parse(sendRequestFixture)
 const lead = SourceLead.parse(leadFixture)
+const postRequest = PostMessageRequest.parse(postRequestFixture)
 const owner = OwnerId.parse("own_9pz2mr4c")
 
 function deferred<T>() {
@@ -81,6 +91,12 @@ function fakeSockets() {
 }
 
 function fixtureResponse(path: string, init: RequestInit): Response {
+  if (path.startsWith("/__iter8/messages") && init.method === "GET")
+    return Response.json(messagePageFixture)
+  if (path === "/__iter8/messages" && init.method === "POST")
+    return Response.json(postResultFixture)
+  if (path === "/__iter8/chat") return Response.json(chatFixture)
+  if (path === "/__iter8/rounds/R4/now") return Response.json(sendNowFixture)
   if (path === "/__iter8/hello") return Response.json(helloFixture)
   if (
     path === "/__iter8/drafts" ||
@@ -112,6 +128,11 @@ const routes: {
   { key: "createDraft", path: "/__iter8/drafts", invoke: (c) => c.createDraft(draft) },
   { key: "putDraft", path: "/__iter8/drafts/N12", invoke: (c) => c.putDraft(note.id, draft) },
   { key: "deleteDraft", path: "/__iter8/drafts/N12", invoke: (c) => c.deleteDraft(note.id) },
+  { key: "listMessages", path: "/__iter8/messages", invoke: (c) => c.listMessages({}) },
+  { key: "postMessage", path: "/__iter8/messages", invoke: (c) => c.postMessage(postRequest) },
+  { key: "getChat", path: "/__iter8/chat", invoke: (c) => c.getChat() },
+  { key: "setChat", path: "/__iter8/chat", invoke: (c) => c.setChat(true) },
+  { key: "sendNow", path: "/__iter8/rounds/R4/now", invoke: (c) => c.sendNow(RoundId.parse("R4")) },
   { key: "send", path: "/__iter8/rounds", invoke: (c) => c.send(sendRequest) },
   {
     key: "uploadScreenshot",
@@ -166,6 +187,77 @@ describe("service connection", () => {
     connections.add(connection)
     return { connection, calls, messages, events, Socket }
   }
+
+  for (const query of [
+    {},
+    { before: MessageId.parse("M12") },
+    { limit: "1" },
+    { before: MessageId.parse("M12"), limit: "100" },
+  ] satisfies MessageQuery[])
+    test(`listMessages query ${JSON.stringify(query)} omits absent keys`, async () => {
+      const { connection, calls } = setup()
+      await connection.listMessages(query)
+      const expected =
+        "before" in query
+          ? `?before=M12${"limit" in query ? "&limit=100" : ""}`
+          : "limit" in query
+            ? "?limit=1"
+            : ""
+      expect(calls[0]?.path).toBe(`/__iter8/messages${expected}`)
+      expect(calls[0]?.init.body).toBeUndefined()
+    })
+  for (const query of [
+    { before: "M0" },
+    { before: "" },
+    { limit: "0" },
+    { limit: "101" },
+    { limit: "-1" },
+    { limit: "bad" },
+  ])
+    test(`invalid message query ${JSON.stringify(query)} fails before fetch`, async () => {
+      const { connection, calls } = setup()
+      await expect(connection.listMessages(query as MessageQuery)).rejects.toThrow(
+        "listMessages status 0: invalid request",
+      )
+      expect(calls).toEqual([])
+    })
+  for (const enabled of [false, true])
+    test(`setChat serializes enabled=${enabled}`, async () => {
+      const { connection, calls } = setup()
+      await connection.setChat(enabled)
+      expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ enabled })
+    })
+  test("sendNow reports 404 and encodes its round parameter", async () => {
+    const { connection, calls } = setup(() => new Response("missing", { status: 404 }))
+    await expect(connection.sendNow(RoundId.parse("R4"))).rejects.toThrow(
+      "sendNow status 404: request failed",
+    )
+    await expect(connection.sendNow("R4 /?#" as RoundId)).rejects.toThrow(
+      "sendNow status 404: request failed",
+    )
+    expect(calls[1]?.path).toBe("/__iter8/rounds/R4%20%2F%3F%23/now")
+  })
+  test("postMessage validates its body before fetch", async () => {
+    const { connection, calls } = setup()
+    await expect(connection.postMessage({ ...postRequest, text: "" })).rejects.toThrow(
+      "postMessage status 0: invalid request",
+    )
+    await expect(connection.setChat("yes" as unknown as boolean)).rejects.toThrow(
+      "setChat status 0: invalid request",
+    )
+    expect(calls).toEqual([])
+  })
+  for (const route of ["listMessages", "postMessage", "getChat", "setChat", "sendNow"] as const)
+    test(`${route} network failure uses the route error`, async () => {
+      const { connection } = setup(() => {
+        throw new TypeError("fetch failed")
+      })
+      const selected = routes.find((row) => row.key === route)
+      if (!selected) throw new Error(`Missing route ${route}`)
+      await expect(Promise.resolve().then(() => selected.invoke(connection))).rejects.toThrow(
+        `${route} status 0: network failure`,
+      )
+    })
 
   async function microtasks() {
     for (let turn = 0; turn < 20; turn++) await Promise.resolve()
