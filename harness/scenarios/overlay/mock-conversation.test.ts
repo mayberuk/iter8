@@ -425,6 +425,20 @@ describe("postMessage", () => {
     expect(mock.messages()).toHaveLength(2)
   })
 
+  test("a post whose key belongs to a seeded page message returns that message and stores nothing", async () => {
+    const seeds = [seedAt(2), seedAt(3), seedAt(4), seedAt(1), seedAt(5)]
+    await start({ messages: seeds })
+    for (const seed of seeds.filter((item) => item.author.kind === "page")) {
+      if (seed.author.kind !== "page") throw new Error("seed is not a page message")
+      expect(await posted(seed.author.idempotencyKey, "Different text.")).toEqual({
+        outcome: "accepted",
+        message: seed,
+      })
+    }
+    expect(mock.messages()).toEqual(seeds.toSorted((a, b) => numberOf(a.id) - numberOf(b.id)))
+    expect(await posted("chat-new")).toMatchObject({ message: { id: "M6" } })
+  })
+
   test("a post stays queued until the scenario marks it delivered, which stamps the time", async () => {
     await start()
     const accepted = await posted("chat-one")
