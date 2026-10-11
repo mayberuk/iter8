@@ -1,6 +1,7 @@
-import type { SourceLead } from "@iter8/protocol"
+import type { MarkupPath, SourceLead } from "@iter8/protocol"
 import { astroEvidence } from "./astro"
 import { type Adapter, type Evidence, toLead } from "./lead"
+import { markupOf } from "./markup"
 import { detectBuild } from "./page-build"
 import { reactEvidence } from "./react"
 import { svelteEvidence } from "./svelte"
@@ -62,5 +63,10 @@ export async function lookupSource(
     }
     current = parentOf(current)
   }
-  return toLead(null, build)
+  let markup: MarkupPath | null = null
+  try {
+    markup = markupOf(element)
+  } catch {}
+  signal.throwIfAborted()
+  return markup === null ? toLead(null, build) : { confidence: "none", markup }
 }

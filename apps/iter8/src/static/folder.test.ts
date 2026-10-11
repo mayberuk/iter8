@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { watch } from "node:fs"
-import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { serveFolder, watchFolder } from "./folder"
+import { folderFile, serveFolder, watchFolder } from "./folder"
 
 const directories: string[] = []
 const stops: (() => void)[] = []
@@ -46,6 +46,40 @@ async function remainsUnchanged(
     return performance.now() >= deadline
   })
 }
+
+describe("folderFile", () => {
+  test.each([
+    ["/", "index.html"],
+    ["/sub/", "sub/index.html"],
+    ["/second.html?x=1#y", "second.html"],
+  ])("resolves the served file at %s", async (url, file) => {
+    const root = await folder()
+    await mkdir(join(root, "sub"))
+    for (const name of ["index.html", "sub/index.html", "second.html"]) {
+      await writeFile(join(root, name), `<body>${name}</body>`)
+    }
+    expect(await folderFile(root, `http://mock.localhost${url}`)).toBe(
+      await realpath(join(root, file)),
+    )
+    expect(await (await serveFolder(request(url), root)).text()).toBe(`<body>${file}</body>`)
+  })
+
+  test.each([
+    "/../secret.html",
+    "/%2e%2e/secret.html",
+    "/link.html",
+    "/missing.html",
+    "/\0",
+    "/%00",
+  ])("refuses an unserved file at %s", async (url) => {
+    const parent = await folder()
+    const root = join(parent, "page")
+    await mkdir(root)
+    await writeFile(join(parent, "secret.html"), "outside")
+    await symlink(join(parent, "secret.html"), join(root, "link.html"))
+    expect(await folderFile(root, `http://mock.localhost${url}`)).toBeNull()
+  })
+})
 
 describe("serveFolder", () => {
   test.each(["/", "/docs", "/docs/", "/docs.v1", "/docs.v1/"])(
