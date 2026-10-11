@@ -178,8 +178,10 @@ function inspectIcons(page: Page, inners: string[]) {
     return Array.from(root.querySelectorAll("[data-item]"), (cell, index) => {
       const svg = cell.querySelector("svg")
       const groups = Array.from(svg?.querySelectorAll(":scope > g") ?? [])
+      const shade = groups[0] as SVGGraphicsElement | undefined
       const ink = groups[1] as SVGGraphicsElement | undefined
-      if (!svg || !ink) throw new Error("an icon must draw an svg with an ink group")
+      if (!svg || !shade || !ink)
+        throw new Error("an icon must draw an svg with a shade and an ink group")
       const parsed = new DOMParser().parseFromString(
         `<svg xmlns="http://www.w3.org/2000/svg">${inners[index]}</svg>`,
         "image/svg+xml",
@@ -194,6 +196,10 @@ function inspectIcons(page: Page, inners: string[]) {
         expected: Array.from(parsed.querySelectorAll("path"), (path) => ({
           d: path.getAttribute("d"),
           fillRule: path.getAttribute("fill-rule") ?? "nonzero",
+        })),
+        shadePaths: Array.from(shade.querySelectorAll("path"), (path) => ({
+          d: path.getAttribute("d"),
+          fillRule: getComputedStyle(path).fillRule,
         })),
         ink: {
           fill: ink.getAttribute("fill"),
@@ -238,6 +244,7 @@ describe("the glyph set", () => {
       expect(icon.groups, `${name} draws two copies`).toBe(2)
       expect(icon.expected.length, `${name} has no paths in the fixture`).toBeGreaterThan(0)
       expect({ name, paths: icon.ink.paths }).toEqual({ name, paths: icon.expected })
+      expect({ name, paths: icon.shadePaths }).toEqual({ name, paths: icon.ink.paths })
       expect(icon.ink.bbox.width, `${name} paints nothing`).toBeGreaterThan(0)
       expect(icon.ink.bbox.height, `${name} paints nothing`).toBeGreaterThan(0)
       expect(icon.ink.bbox.x).toBeGreaterThanOrEqual(0)

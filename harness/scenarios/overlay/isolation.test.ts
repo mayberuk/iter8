@@ -504,6 +504,16 @@ describe("styles and fonts", () => {
     expect(errors.filter((error) => error.includes("Content Security Policy"))).toEqual([])
   }, 30_000)
 
+  test("the production overlay build emits exactly the two hashed variable fonts beside its bundles", async () => {
+    const emitted = (await readdir(overlayBuild.path)).sort()
+    const fonts = emitted.filter((name) => name.endsWith(".woff2"))
+    expect(fonts.map((name) => name.replace(/-[0-9a-z]{8}\.woff2$/, "")).sort()).toEqual([
+      "JetBrainsMono-Variable",
+      "RedditSans-Variable",
+    ])
+    expect(emitted.filter((name) => !fonts.includes(name))).toEqual(["overlay.js", "source.js"])
+  })
+
   test("fonts load from the overlay's asset path", async () => {
     const { page, mock } = await open()
     await until("the overlay font", () =>

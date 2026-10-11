@@ -200,6 +200,12 @@ test("a dark root applies the sketch's dark values, with the neutral fixture's g
   expectValues(values, expectedDark)
 })
 
+test("a dark root applies the same dark values when the system is dark too", async () => {
+  const { colorScheme, values } = await tokens("dark", "dark", darkNames())
+  expect(colorScheme).toBe("dark")
+  expectValues(values, expectedDark)
+})
+
 test("a light root applies the sketch's light values even when the system is dark", async () => {
   const lightOfDark = new Map(
     Array.from(expectedDark.keys(), (name) => [name, sketchLight.get(name)] as const).filter(
@@ -245,6 +251,7 @@ test("every neutral dark token is grey at the sketch's lightness", async () => {
   const failures: string[] = []
   for (const [theme, scheme] of [
     ["dark", "light"],
+    ["dark", "dark"],
     ["auto", "dark"],
   ] as const) {
     const { values } = await tokens(theme, scheme, names)
