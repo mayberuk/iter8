@@ -87,5 +87,5 @@ the laptop is a manual check the suite cannot make.
 
 ## Policy
 - Integration tests required for behavior changes: yes
-- Integration test command: `bun run test`
+- Integration test command: `bun run build && bun run test`
 - Test Adversary check: strict
