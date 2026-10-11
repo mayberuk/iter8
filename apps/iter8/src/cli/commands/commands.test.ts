@@ -368,6 +368,8 @@ describe("command surface", () => {
   test.each([
     { rawArgs: ["-oProxyCommand=x"] },
     { rawArgs: ["--", "-oProxyCommand=x"] },
+    { rawArgs: ["-"] },
+    { rawArgs: ["--", "-"] },
     { rawArgs: [""] },
     { rawArgs: ["dev box"] },
     { rawArgs: ["dev\u0007box"] },
