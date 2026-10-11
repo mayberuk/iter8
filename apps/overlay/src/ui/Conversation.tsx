@@ -116,22 +116,29 @@ function checkChat({ model, connection }: Overlay, setFailed: (failed: boolean) 
   )
 }
 
-type Hold = { row: Element; top: number }
+type Hold = { row: Element; top: number; scrollTop: number }
 
 function topRow(list: HTMLElement): Hold | null {
   const edge = list.getBoundingClientRect().top
   for (const row of list.querySelectorAll("article")) {
     const box = row.getBoundingClientRect()
-    if (box.bottom > edge) return { row, top: box.top - edge }
+    if (box.bottom > edge) return { row, top: box.top - edge, scrollTop: list.scrollTop }
   }
   return null
 }
 
-function keepPlace(list: HTMLElement, held: Hold | null, stick: boolean) {
-  if (held?.row.isConnected) {
-    const shift = held.row.getBoundingClientRect().top - list.getBoundingClientRect().top - held.top
-    if (shift !== 0) list.scrollTop += shift
-  } else if (stick) list.scrollTop = list.scrollHeight
+function restore(list: HTMLElement, held: Hold) {
+  const shift = held.row.getBoundingClientRect().top - list.getBoundingClientRect().top - held.top
+  if (shift === 0) return
+  list.scrollTop += shift
+  held.scrollTop = list.scrollTop
+}
+
+function keepPlace(list: HTMLElement, held: Hold | null, anchor: Hold | null, stick: boolean) {
+  if (held?.row.isConnected) restore(list, held)
+  else if (stick) list.scrollTop = list.scrollHeight
+  // Only from the offset it was taken at: a scroll whose event has not fired yet is never undone.
+  else if (anchor?.row.isConnected && anchor.scrollTop === list.scrollTop) restore(list, anchor)
 }
 
 const SCROLL_INPUT = ["wheel", "touchstart", "pointerdown", "keydown"] as const
@@ -204,7 +211,12 @@ function MessageList() {
   const body = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const hold = useRef<Hold | null>(null)
+  const anchor = useRef<Hold | null>(null)
   const unloaded = load.status === "unloaded"
+
+  // Read before this render commits: a scroll in the same task as a push has no scroll event yet.
+  const shown = list.current
+  if (shown) stick.current = shown.scrollHeight - shown.scrollTop - shown.clientHeight <= STICK_PX
 
   function holdTopRow() {
     const el = list.current
@@ -226,16 +238,18 @@ function MessageList() {
       stick.current = true
       hold.current = null
     }
-    keepPlace(el, hold.current, stick.current)
+    keepPlace(el, hold.current, anchor.current, stick.current)
   })
 
   // `content-visibility: auto` rows take their real height over several frames, each correction
-  // bringing more into range; so the held row is re-held on every resize until the reader scrolls.
+  // bringing more into range; so the place is re-held on every resize.
   useEffect(() => {
     const el = list.current
     const content = body.current
     if (!el || !content) return
-    const observer = new ResizeObserver(() => keepPlace(el, hold.current, stick.current))
+    const observer = new ResizeObserver(() =>
+      keepPlace(el, hold.current, anchor.current, stick.current),
+    )
     const release = () => {
       hold.current = null
     }
@@ -267,6 +281,7 @@ function MessageList() {
       onScroll={(event) => {
         const el = event.currentTarget
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX
+        anchor.current = stick.current ? null : topRow(el)
       }}
     >
       <div class="cv-body" ref={body}>

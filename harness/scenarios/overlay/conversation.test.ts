@@ -317,6 +317,33 @@ describe("conversation: finished messages", () => {
     }
   }, 60_000)
 
+  for (const rate of [1, 4]) {
+    test(`a long jump up through rows never shown before holds the top row once they settle, at ${rate}× CPU`, async () => {
+      const all = Array.from({ length: 30 }, (_, i) =>
+        agentMessage(i + 1, { text: `Uneven ${i + 1}${"\nmore".repeat((i * 7) % 5)}` }),
+      )
+      const o = await open({ messages: all })
+      const panel = await openConversation(o)
+      await untilCount(panel, 30)
+      await until("the list at the bottom", async () => (await listScroll(panel)).gap <= 1)
+      const throttle = rate > 1 ? await throttleCpu(o.page, rate) : null
+      try {
+        const jumped = await log(panel).evaluate((el) => {
+          el.scrollTop = 240
+          const edge = el.getBoundingClientRect().top
+          const rows = [...el.querySelectorAll("article")]
+          const index = rows.findIndex((row) => row.getBoundingClientRect().bottom > edge)
+          return { index, top: rows[index]?.getBoundingClientRect().top as number }
+        })
+        expect(jumped.index).toBeGreaterThan(1)
+        const settled = await settledTop(articles(panel).nth(jumped.index))
+        expect(Math.abs(settled - jumped.top)).toBeLessThanOrEqual(2)
+      } finally {
+        await throttle?.restore()
+      }
+    }, 60_000)
+  }
+
   test("a live message that lands while earlier messages load leaves the view where it was", async () => {
     const all = seeded(45)
     const o = await open({ messages: all })
@@ -627,12 +654,66 @@ describe("conversation: live messages", () => {
         }),
     )
     const anchor = articles(panel).nth(2)
-    const before = (await anchor.boundingBox())?.y as number
+    const before = await settledTop(anchor)
     const topBefore = (await listScroll(panel)).top
 
     await pushUntil(o, agentMessage(31), async () => (await articles(panel).count()) === 31)
+    expect(Math.abs((await settledTop(anchor)) - before)).toBeLessThanOrEqual(1)
     expect((await listScroll(panel)).top).toBe(topBefore)
-    expect(Math.abs(((await anchor.boundingBox())?.y as number) - before)).toBeLessThanOrEqual(1)
+    expect((await listScroll(panel)).gap).toBeGreaterThan(24)
+  }, 30_000)
+
+  test("a message that lands in the same task as a scroll up, before its scroll event, is not followed", async () => {
+    const o = await open({ messages: seeded(30) })
+    const panel = await openConversation(o)
+    await untilCount(panel, 30)
+    await o.page.evaluate(() => {
+      const state = window as unknown as { held: (() => void)[] | null; wrapped: number }
+      state.held = null
+      state.wrapped = 0
+      const own = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage")
+      Object.defineProperty(WebSocket.prototype, "onmessage", {
+        ...own,
+        set(this: WebSocket, handle: ((event: MessageEvent) => void) | null) {
+          state.wrapped++
+          own?.set?.call(this, (event: MessageEvent) => {
+            if (state.held && JSON.parse(event.data).type === "message")
+              state.held.push(() => handle?.call(this, event))
+            else handle?.call(this, event)
+          })
+        },
+      })
+    })
+    o.mock.dropSockets()
+    await until(
+      "the socket to reconnect",
+      () => o.page.evaluate(() => (window as unknown as { wrapped: number }).wrapped > 0),
+      10_000,
+    )
+    await untilCount(panel, 30)
+    await until("the list at the bottom", async () => (await listScroll(panel)).gap <= 1)
+    await settledTop(articles(panel).last())
+
+    await o.page.evaluate(() => {
+      ;(window as unknown as { held: (() => void)[] }).held = []
+    })
+    o.mock.pushMessage(agentMessage(31))
+    await until("the push to be held", () =>
+      o.page.evaluate(() => (window as unknown as { held: unknown[] }).held.length === 1),
+    )
+    const jumped = await log(panel).evaluate((el) => {
+      el.scrollTop = 40
+      const edge = el.getBoundingClientRect().top
+      const rows = [...el.querySelectorAll("article")]
+      const index = rows.findIndex((row) => row.getBoundingClientRect().bottom > edge)
+      const top = rows[index]?.getBoundingClientRect().top as number
+      for (const deliver of (window as unknown as { held: (() => void)[] }).held) deliver()
+      return { index, top }
+    })
+    await untilCount(panel, 31)
+    expect(
+      Math.abs((await settledTop(articles(panel).nth(jumped.index))) - jumped.top),
+    ).toBeLessThanOrEqual(2)
     expect((await listScroll(panel)).gap).toBeGreaterThan(24)
   }, 30_000)
 
