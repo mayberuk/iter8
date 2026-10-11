@@ -1,3 +1,8 @@
+/* A relayout boundary, so a keystroke re-lays-out the composer without walking the page. The layer
+   is fixed at the viewport, so it stays the viewport for the fixed panel inside it. */
+.layer.typing {
+  contain: strict;
+}
 .composer {
   width: 356px;
   padding: 0;

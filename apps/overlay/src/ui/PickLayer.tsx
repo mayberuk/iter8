@@ -33,9 +33,15 @@ const SETTLE = 0.1
 const EDGE = 12
 const COMPOSER_GAP = 16
 const CHIP_GAP = 14
+/**
+ * The chip's text waits for the hover to hold this long: each change repaints the page's root
+ * layer (6 ms at 4x CPU on the heavy page), and a sweep there changes the hover every 50–80 ms.
+ */
+const CHIP_DWELL_MS = 120
 const CLIMB_DEPTH = 4
 
 type Rect = { x: number; y: number; w: number; h: number }
+type Size = { w: number; h: number }
 type Lead = ResolvedSourceLead | "pending" | null
 
 type Run = {
@@ -97,7 +103,9 @@ function boxRect(box: Box): Rect {
   return { x: box.x - window.scrollX, y: box.y - window.scrollY, w: box.width, h: box.height }
 }
 
-function roundedPath({ x, y, w, h }: Rect, radius = 6): string {
+const HOLE_RADIUS = 6
+
+function roundedPath({ x, y, w, h }: Rect, radius = HOLE_RADIUS): string {
   const k = Math.max(0, Math.min(radius, w / 2, h / 2))
   return `M${x + k} ${y}H${x + w - k}A${k} ${k} 0 0 1 ${x + w} ${y + k}V${y + h - k}A${k} ${k} 0 0 1 ${x + w - k} ${y + h}H${x + k}A${k} ${k} 0 0 1 ${x} ${y + h - k}V${y + k}A${k} ${k} 0 0 1 ${x + k} ${y}Z`
 }
@@ -135,8 +143,7 @@ function tagOf(el: Element): string {
   return first ? `${el.localName}.${first}` : el.localName
 }
 
-function describe(el: Element) {
-  const rect = el.getBoundingClientRect()
+function describe(el: Element, rect: Rect) {
   const { name, text } = identityOf(el)
   const path: Element[] = []
   for (
@@ -147,7 +154,7 @@ function describe(el: Element) {
     path.unshift(at)
   return {
     tag: tagOf(el),
-    dims: `${Math.round(rect.width)} × ${Math.round(rect.height)}`,
+    dims: `${Math.round(rect.w)} × ${Math.round(rect.h)}`,
     name: name ?? text,
     path: path.map(tagOf),
   }
@@ -172,7 +179,7 @@ export function PickLayer(): JSX.Element | null {
   const run = useRef<Run | null>(null)
   const stored = useRef<Capture | undefined>(undefined)
   const lookup = useRef<ReturnType<typeof loadSourceLookup> | null>(null)
-  const [dragging, setDragging] = useState(false)
+  const [info, setInfo] = useState<ReturnType<typeof describe> | null>(null)
   const [lead, setLead] = useState<Lead>(null)
   const [thumb, setThumb] = useState<string | null>(null)
   const [attach, setAttach] = useState(true)
@@ -386,6 +393,10 @@ export function PickLayer(): JSX.Element | null {
       let pointer: { x: number; y: number } | null = null
       let lastRaw: Element | null = null
       let spring: { cur: Rect; vel: Rect } | null = null
+      let candidate: Element | null = null
+      let candidateSince = 0
+      let described: Element | null = null
+      let describedAt = 0
       let lastTime = 0
       let frame = 0
       const written = new Map<Element, string>()
@@ -427,7 +438,6 @@ export function PickLayer(): JSX.Element | null {
             drag.rect !== null ||
             Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) > DRAG_PX
           if (!moved) return
-          if (drag.rect === null) setDragging(true)
           drag.rect = {
             x: Math.min(drag.x0, event.clientX),
             y: Math.min(drag.y0, event.clientY),
@@ -495,7 +505,6 @@ export function PickLayer(): JSX.Element | null {
         if (!done) return
         const mode = model.mode.peek()
         if (done.rect) {
-          setDragging(false)
           const { x, y, w, h } = done.rect
           if (w < REGION_MIN_PX || h < REGION_MIN_PX) return
           if (mode === "pick" || mode === "region")
@@ -548,12 +557,12 @@ export function PickLayer(): JSX.Element | null {
         })
       }
 
-      function lens(): { rect: Rect; region: boolean; tags: boolean } | null {
+      function lens(): { rect: Rect; region: boolean; tags: boolean; el?: Element } | null {
         if (drag?.rect) return { rect: drag.rect, region: true, tags: true }
         const mode = model.mode.peek()
         if (mode === "pick") {
           const el = model.hover.peek()?.deref()
-          return el?.isConnected ? { rect: viewRect(el), region: false, tags: true } : null
+          return el?.isConnected ? { rect: viewRect(el), region: false, tags: true, el } : null
         }
         if (mode !== "compose") return null
         const composer = model.composer.peek()
@@ -580,11 +589,7 @@ export function PickLayer(): JSX.Element | null {
         return spring.cur
       }
 
-      function placeChip(around: Rect) {
-        const chip = chipRef.current
-        if (!chip?.classList.contains("on")) return
-        const width = chip.offsetWidth
-        const height = chip.offsetHeight
+      function placeChip(chip: HTMLDivElement, around: Rect, { w: width, h: height }: Size) {
         const x = Math.min(Math.max(around.x, EDGE), window.innerWidth - width - EDGE)
         let y = around.y + around.h + CHIP_GAP
         if (y + height > window.innerHeight - EDGE) y = around.y - height - 2 * CHIP_GAP
@@ -593,35 +598,78 @@ export function PickLayer(): JSX.Element | null {
         write(chip, `transform:translate(${Math.round(x)}px,${Math.round(y)}px)`)
       }
 
-      function placeComposer(panel: HTMLDivElement) {
+      /**
+       * Bands around the hole and fillets in its corners, moved only by transform: rewriting a
+       * clip-path every frame repaints the whole viewport, and the page with it.
+       */
+      function cutHole(veil: HTMLDivElement, hole: Rect | null) {
+        const [top, bottom, left, right, tl, tr, bl, br] = veil.querySelectorAll<HTMLElement>("i")
+        if (!(top && bottom && left && right && tl && tr && bl && br)) return
+        const width = window.innerWidth
+        const height = window.innerHeight
+        const x0 = hole ? Math.round(hole.x) : width
+        const y0 = hole ? Math.round(hole.y) : height
+        const x1 = hole ? Math.max(x0, Math.round(hole.x + hole.w)) : width
+        const y1 = hole ? Math.max(y0, Math.round(hole.y + hole.h)) : height
+        const sy = (y1 - y0) / height
+        const k = Math.min(HOLE_RADIUS, (x1 - x0) / 2, (y1 - y0) / 2)
+        const corner = `scale(${k / HOLE_RADIUS})`
+        write(top, `transform:translate(0px,${y0 - height}px)`)
+        write(bottom, `transform:translate(0px,${y1}px)`)
+        write(left, `transform:translate(${x0 - width}px,${y0}px) scale(1,${sy})`)
+        write(right, `transform:translate(${x1}px,${y0}px) scale(1,${sy})`)
+        write(tl, `transform:translate(${x0}px,${y0}px) ${corner}`)
+        write(tr, `transform:translate(${x1 - k}px,${y0}px) ${corner}`)
+        write(bl, `transform:translate(${x0}px,${y1 - k}px) ${corner}`)
+        write(br, `transform:translate(${x1 - k}px,${y1 - k}px) ${corner}`)
+      }
+
+      function measureComposer(panel: HTMLDivElement) {
         const composer = model.composer.peek()
-        if (!composer) return
+        if (!composer) return null
         const rects =
           composer.target.kind === "region"
             ? [boxRect(composer.target.box)]
             : targets.current.flatMap((el) => (el?.isConnected ? [viewRect(el)] : []))
-        if (rects.length === 0) return
+        if (rects.length === 0) return null
         const { dock: anchor, collapsed } = model.prefs.peek()
         const dockBox = root
           .querySelector(collapsed ? ".iter8btn" : ".dock")
           ?.getBoundingClientRect()
         const sheet = model.sheet.peek().open ? root.querySelector<HTMLElement>(".sheet") : null
-        const { x, y, side } = composerSpot({
+        return composerSpot({
           targets: rects,
           panel: { w: panel.offsetWidth, h: panel.offsetHeight },
           viewport: { w: window.innerWidth, h: window.innerHeight },
           dock: dockBox ? { top: dockBox.top, bottom: dockBox.bottom, anchor } : null,
           sheetLeft: sheet ? sheet.offsetLeft : null,
         })
-        write(panel, `left:${Math.round(x)}px;top:${Math.round(y)}px;--ox:${side}`)
       }
 
+      /** Every layout read comes before the first style write, so no read in a frame forces layout. */
       function tick(time: number) {
         frame = requestAnimationFrame(tick)
         const dt = lastTime === 0 ? 1 / 60 : Math.min(MAX_STEP_S, (time - lastTime) / 1000)
         lastTime = time
         hoverFromPointer()
         const target = lens()
+        const marks = markEls.current
+        const markRects = marks.map((el) => (el.isConnected ? viewRect(el) : null))
+        const chip = chipRef.current
+        const chipSize = chip && described ? { w: chip.offsetWidth, h: chip.offsetHeight } : null
+        const panel = panelRef.current
+        const spot = panel ? measureComposer(panel) : null
+        const hovered = target?.el ?? null
+        if (hovered !== candidate) {
+          candidate = hovered
+          candidateSince = time
+        }
+        if (hovered !== described && (!hovered || time - candidateSince >= CHIP_DWELL_MS)) {
+          described = hovered
+          describedAt = time
+          setInfo(hovered && target ? describe(hovered, target.rect) : null)
+        }
+
         let hole: Rect | null = null
         if (target && ring) {
           const shown = ring.classList.contains("on")
@@ -637,39 +685,42 @@ export function PickLayer(): JSX.Element | null {
           const h = String(Math.round(target.rect.h))
           if (wtag && wtag.textContent !== w) wtag.textContent = w
           if (htag && htag.textContent !== h) htag.textContent = h
-          placeChip(cur)
+          if (chip && chipSize) placeChip(chip, cur, chipSize)
         } else if (ring) {
           spring = null
           setClass(ring, "ring")
         }
+        if (chip) {
+          const fresh = described !== null && described === hovered && describedAt < time
+          setClass(chip, fresh ? "chip on" : "chip")
+        }
 
         const mode = model.mode.peek()
-        const marks = markEls.current
         const veilOn = target !== null || mode === "region"
         if (veil) {
           setClass(veil, veilOn ? "veil on" : "veil")
           if (veilOn) {
-            const holes = [
-              ...(hole ? [roundedPath(hole)] : []),
-              ...marks.flatMap((el) => (el.isConnected ? [roundedPath(viewRect(el))] : [])),
-            ]
+            const markHoles = markRects.flatMap((r) => (r ? [roundedPath(r)] : []))
             write(
               veil,
-              `clip-path:path(evenodd,"M0 0H${window.innerWidth}V${window.innerHeight}H0Z ${holes.join(" ")}")`,
+              markHoles.length === 0
+                ? ""
+                : `clip-path:path(evenodd,"M0 0H${window.innerWidth}V${window.innerHeight}H0Z ${markHoles.join(" ")}")`,
             )
+            cutHole(veil, hole)
           }
         }
         const nodes = marksRef.current?.children ?? []
-        marks.forEach((el, i) => {
+        markRects.forEach((r, i) => {
           const node = nodes[i]
-          if (!(node instanceof HTMLElement) || !el.isConnected) return
-          const r = viewRect(el)
+          if (!(node instanceof HTMLElement) || !r) return
           write(
             node,
             `transform:translate(${r.x.toFixed(1)}px,${r.y.toFixed(1)}px);width:${r.w.toFixed(1)}px;height:${r.h.toFixed(1)}px`,
           )
         })
-        if (panelRef.current) placeComposer(panelRef.current)
+        if (panel && spot)
+          write(panel, `left:${Math.round(spot.x)}px;top:${Math.round(spot.y)}px;--ox:${spot.side}`)
       }
 
       window.addEventListener("pointermove", onMove, { capture: true, passive: true })
@@ -689,7 +740,8 @@ export function PickLayer(): JSX.Element | null {
         cancelAnimationFrame(frame)
         if (ring) setClass(ring, "ring")
         if (veil) setClass(veil, "veil")
-        setDragging(false)
+        if (chipRef.current) setClass(chipRef.current, "chip")
+        setInfo(null)
       }
     }
 
@@ -700,7 +752,6 @@ export function PickLayer(): JSX.Element | null {
   }, [model, root, host, renderGeneration])
 
   const mode = model.mode.value
-  const hoverEl = mode === "pick" ? model.hover.value?.deref() : undefined
   const multi = model.multi.value.flatMap((ref) => ref.deref() ?? [])
   const marks =
     mode === "pick"
@@ -709,7 +760,6 @@ export function PickLayer(): JSX.Element | null {
         ? targets.current.slice(1).flatMap((el) => el ?? [])
         : []
   markEls.current = marks
-  const info = hoverEl && !dragging ? describe(hoverEl) : null
 
   function onAttach(on: boolean) {
     setAttach(on)
@@ -738,7 +788,16 @@ export function PickLayer(): JSX.Element | null {
   return (
     <>
       <div class="layer pick">
-        <div ref={veilRef} class="veil" />
+        <div ref={veilRef} class="veil">
+          <i />
+          <i />
+          <i />
+          <i />
+          <i class="tl" />
+          <i class="tr" />
+          <i class="bl" />
+          <i class="br" />
+        </div>
         <div ref={marksRef}>
           {marks.map((_, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: marks are numbered by position
@@ -757,7 +816,7 @@ export function PickLayer(): JSX.Element | null {
         </div>
         <div
           ref={chipRef}
-          class={info ? "chip on" : "chip"}
+          class="chip"
           role="status"
           aria-live="polite"
           aria-hidden={info ? undefined : "true"}
