@@ -23,12 +23,24 @@ export type ConversationLoad =
 
 export type ChatBlock = "checking" | "no-pairing" | "gone" | "chat-off" | "unreachable"
 
+function deliveryRank(message: ConversationMessage): number {
+  return message.author.kind === "page" && message.author.delivery.status === "queued" ? 0 : 1
+}
+
+/** A page message's delivery only moves queued to delivered or failed, so a queued copy never replaces a settled one. */
 export function mergeMessages(
   held: readonly ConversationMessage[],
   incoming: readonly ConversationMessage[],
 ): ConversationMessage[] {
   const messages = new Map(held.map((message) => [message.id, message]))
-  for (const message of incoming) messages.set(message.id, message)
+  for (const message of incoming) {
+    const current = messages.get(message.id)
+    const stale =
+      current?.author.kind === "page" &&
+      message.author.kind === "page" &&
+      deliveryRank(message) < deliveryRank(current)
+    if (!stale) messages.set(message.id, message)
+  }
   return [...messages.values()].sort((a, b) => {
     const left = BigInt(a.id.slice(1))
     const right = BigInt(b.id.slice(1))

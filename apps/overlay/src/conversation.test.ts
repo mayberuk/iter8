@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { ConversationMessage, IdempotencyKey, MessageId, Pairing } from "@iter8/protocol"
+import {
+  ConversationMessage,
+  IdempotencyKey,
+  type MessageDelivery,
+  MessageId,
+  Pairing,
+} from "@iter8/protocol"
 import fc from "fast-check"
 import messageJson from "../../../packages/protocol/fixtures/ConversationMessage.page.json"
 import pairingJson from "../../../packages/protocol/fixtures/Pairing.json"
@@ -56,6 +62,41 @@ describe("mergeMessages", () => {
       },
     }
     expect(mergeMessages([base], [delivered, delivered])).toEqual([delivered])
+  })
+  test("a settled page message is not replaced by a late queued copy", () => {
+    const withDelivery = (delivery: MessageDelivery): ConversationMessage => ({
+      ...base,
+      author: { kind: "page", idempotencyKey: IdempotencyKey.parse("chat-key-0001"), delivery },
+    })
+    const queued = withDelivery({ status: "queued" })
+    const delivered = withDelivery({ status: "delivered", at: base.at })
+    const failed = withDelivery({ status: "failed", reason: "session-gone" })
+    expect(mergeMessages([delivered], [queued])).toEqual([delivered])
+    expect(mergeMessages([failed], [queued])).toEqual([failed])
+    expect(mergeMessages([queued], [failed])).toEqual([failed])
+  })
+  test("property: a page message's delivery ends at the furthest state, whatever the arrival order", () => {
+    const settled = fc.constantFrom<MessageDelivery>(
+      { status: "delivered", at: base.at },
+      { status: "failed", reason: "session-gone" },
+    )
+    fc.assert(
+      fc.property(settled, fc.array(fc.boolean(), { minLength: 1 }), (final, arrivals) => {
+        const queued: MessageDelivery = { status: "queued" }
+        const copy = (delivery: MessageDelivery): ConversationMessage => ({
+          ...base,
+          author: { kind: "page", idempotencyKey: IdempotencyKey.parse("chat-key-0001"), delivery },
+        })
+        const merged = arrivals.reduce<ConversationMessage[]>(
+          (held, isFinal) => mergeMessages(held, [copy(isFinal ? final : queued)]),
+          [],
+        )
+        const author = merged[0]?.author
+        expect(author?.kind === "page" ? author.delivery : null).toEqual(
+          arrivals.includes(true) ? final : queued,
+        )
+      }),
+    )
   })
   test("message ids keep numeric order beyond safe integer precision", () => {
     const lower = { ...base, id: MessageId.parse("M9007199254740992") }
