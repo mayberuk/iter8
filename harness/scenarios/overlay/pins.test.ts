@@ -768,8 +768,14 @@ describe("lost-notes panel", () => {
     const middle = box.y + box.height / 2
     expect(await opacityOf(panel)).toBe(1)
 
-    await o.page.mouse.move(box.x + box.width / 2, middle)
-    await until("the fade", async () => (await opacityOf(panel)) < 0.2)
+    await waitFor(
+      "the fade",
+      async () => {
+        await o.page.mouse.move(box.x + box.width / 2, middle + (Math.random() - 0.5))
+        return (await opacityOf(panel)) < 0.2 ? true : null
+      },
+      { timeoutMs: 5000, everyMs: 100 },
+    )
     expect(await opacityOf(panel)).toBeCloseTo(0.15, 1)
 
     await o.page.mouse.move(box.x - 2, middle)
@@ -782,9 +788,50 @@ describe("lost-notes panel", () => {
 
     await o.page.mouse.move(box.x + box.width / 2, middle)
     await until("the fade again", async () => (await opacityOf(panel)) < 0.2)
+
+    const repick = panel.getByRole("button", { name: "Re-pick" })
+    const hide = panel.getByRole("button", { name: "Hide" })
+    const onBody = { x: box.x + box.width / 2, y: middle }
+    const onRepick = await centre(repick)
+    await o.page.mouse.move(onRepick.x, onRepick.y)
+    await until("full opacity over Re-pick", async () => (await opacityOf(panel)) === 1)
+    await o.page.mouse.move(onBody.x, onBody.y)
+    await until("faded off the button", async () => (await opacityOf(panel)) < 0.2)
+
+    await hide.focus()
+    await o.page.keyboard.press("Shift+Tab")
+    await o.page.keyboard.press("Tab")
+    await until(
+      "full opacity with keyboard focus on Hide",
+      async () => (await opacityOf(panel)) === 1,
+    )
+    await hide.blur()
+    await until("faded after focus leaves", async () => (await opacityOf(panel)) < 0.2)
+
     const pickTool = o.overlay.getByRole("button", { name: "Pick element" })
-    await panel.getByRole("button", { name: "Re-pick" }).click()
+    await repick.click()
     await until("pick mode", async () => (await pickTool.getAttribute("aria-pressed")) === "true")
+  }, 30_000)
+
+  test("the fade clears when the pointer leaves the browser window", async () => {
+    const { o, panel } = await openLost()
+    const box = await panel.boundingBox()
+    if (!box) throw new Error("no panel box")
+    await waitFor(
+      "the fade",
+      async () => {
+        await o.page.mouse.move(
+          box.x + box.width / 2,
+          box.y + box.height / 2 + (Math.random() - 0.5),
+        )
+        return (await opacityOf(panel)) < 0.2 ? true : null
+      },
+      { timeoutMs: 5000, everyMs: 100 },
+    )
+
+    await o.page.mouse.move(-10, -10)
+    await until("the panel to return", async () => (await opacityOf(panel)) === 1)
+    expect(await isAway(panel)).toBe(false)
   }, 30_000)
 
   test("the x collapses the panel to a chip in the same corner, and the chip brings the panel back", async () => {

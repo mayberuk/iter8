@@ -552,13 +552,21 @@ export function Pins(): JSX.Element | null {
       at = { x: event.clientX, y: event.clientY }
       if (frame === 0) frame = requestAnimationFrame(settle)
     }
+    const onLeave = (event: PointerEvent) => {
+      if (event.relatedTarget !== null) return
+      at = null
+      inside = false
+      lostRef.current?.classList.remove("away")
+    }
     const onResize = () => {
       lostRect.current = lostRef.current?.getBoundingClientRect() ?? null
     }
     window.addEventListener("pointermove", onMove, { capture: true, passive: true })
+    window.addEventListener("pointerout", onLeave, { capture: true, passive: true })
     window.addEventListener("resize", onResize, { passive: true })
     return () => {
       window.removeEventListener("pointermove", onMove, { capture: true })
+      window.removeEventListener("pointerout", onLeave, { capture: true })
       window.removeEventListener("resize", onResize)
       if (frame !== 0) cancelAnimationFrame(frame)
     }

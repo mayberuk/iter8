@@ -295,6 +295,9 @@
 .pop.on.lost.away {
   opacity: 0.15;
 }
+.pop.on.lost.away:has(button:hover, button:focus-visible) {
+  opacity: 1;
+}
 .lost .chipbtn,
 .lost .iconbtn {
   pointer-events: auto;
