@@ -717,6 +717,55 @@ describe("conversation: live messages", () => {
     expect((await listScroll(panel)).gap).toBeGreaterThan(24)
   }, 30_000)
 
+  test("a row that grows in the same task as a push still lets the list follow to the bottom", async () => {
+    const o = await open({ messages: seeded(30) })
+    const panel = await openConversation(o)
+    await untilCount(panel, 30)
+    await o.page.evaluate(() => {
+      const state = window as unknown as { held: (() => void)[] | null; wrapped: number }
+      state.held = null
+      state.wrapped = 0
+      const own = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage")
+      Object.defineProperty(WebSocket.prototype, "onmessage", {
+        ...own,
+        set(this: WebSocket, handle: ((event: MessageEvent) => void) | null) {
+          state.wrapped++
+          own?.set?.call(this, (event: MessageEvent) => {
+            if (state.held && JSON.parse(event.data).type === "message")
+              state.held.push(() => handle?.call(this, event))
+            else handle?.call(this, event)
+          })
+        },
+      })
+    })
+    o.mock.dropSockets()
+    await until(
+      "the socket to reconnect",
+      () => o.page.evaluate(() => (window as unknown as { wrapped: number }).wrapped > 0),
+      10_000,
+    )
+    await untilCount(panel, 30)
+    await until("the list at the bottom", async () => (await listScroll(panel)).gap <= 1)
+    await settledTop(articles(panel).last())
+
+    await o.page.evaluate(() => {
+      ;(window as unknown as { held: (() => void)[] }).held = []
+    })
+    o.mock.pushMessage(agentMessage(31))
+    await until("the push to be held", () =>
+      o.page.evaluate(() => (window as unknown as { held: unknown[] }).held.length === 1),
+    )
+    const grown = await log(panel).evaluate((el) => {
+      const last = [...el.querySelectorAll("article")].at(-1) as HTMLElement
+      last.style.paddingBottom = "300px"
+      for (const deliver of (window as unknown as { held: (() => void)[] }).held) deliver()
+      return el.scrollHeight - el.scrollTop - el.clientHeight
+    })
+    expect(grown).toBeGreaterThan(24)
+    await untilCount(panel, 31)
+    await until("the list at the bottom", async () => (await listScroll(panel)).gap <= 1)
+  }, 30_000)
+
   test("a pushed message is followed from 24 px above the bottom but not from 25", async () => {
     const o = await open({ messages: seeded(29) })
     const panel = await openConversation(o)
