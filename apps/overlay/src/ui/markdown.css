@@ -413,7 +413,7 @@
   position: sticky;
   left: 0;
   z-index: 1;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   box-shadow: 1px 0 0 var(--line);
 }
 .md td:first-child {

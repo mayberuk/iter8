@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { Note, OverlayPrefs, Pairing, Round } from "@iter8/protocol"
+import { ConversationMessage, Note, OverlayPrefs, Pairing, Round } from "@iter8/protocol"
 import type { Browser, Locator, Page } from "playwright"
+import agentJson from "../../../packages/protocol/fixtures/ConversationMessage.json"
 import noteJson from "../../../packages/protocol/fixtures/Note.json"
 import pairingJson from "../../../packages/protocol/fixtures/Pairing.json"
 import roundJson from "../../../packages/protocol/fixtures/Round.json"
@@ -319,6 +320,10 @@ async function adoptEverySheet(o: Awaited<ReturnType<typeof open>>) {
   await until("the round sheet", () => sheet.isVisible())
   await sheet.getByRole("tab", { name: /^History/ }).click()
   await until("History", () => sheet.getByRole("tabpanel", { name: "History" }).isVisible())
+  await sheet.getByRole("tab", { name: "Conversation" }).click()
+  await until("Conversation", () =>
+    sheet.getByRole("tabpanel", { name: "Conversation" }).isVisible(),
+  )
   await page.keyboard.press("Escape")
   await until("the sheet to close", async () => !(await sheet.isVisible()))
 
@@ -429,6 +434,44 @@ describe("motion: live animations", () => {
     await until("the toast to leave", async () => (await toast.count()) === 0)
     const { seen, offenders } = await watch.stop()
     expect(seen.some((label) => label.includes("animation tout"))).toBe(true)
+    expect(offenders).toEqual([])
+  }, 30_000)
+
+  test("a pushed message and a sent one run only compositor animations", async () => {
+    const message = (n: number) =>
+      ConversationMessage.parse({
+        ...agentJson,
+        id: `M${n}`,
+        pageId: PAGE,
+        roundId: null,
+        text: `Agent message ${n}`,
+        at: new Date(Date.UTC(2026, 9, 9, 10, n)).toISOString(),
+      })
+    opened = await openOverlay({
+      overlayDir: overlayBuild.path,
+      folder: STATIC,
+      mock: { pairing: LIVE, pageState: SEEDED, prefs: TOUR_DONE, messages: [message(1)] },
+      browser,
+    })
+    const o = opened
+    const sheet = o.overlay.getByRole("complementary", { name: "Round sheet" })
+    await o.page.keyboard.press("r")
+    await until("the round sheet", () => sheet.isVisible())
+    await sheet.getByRole("tab", { name: "Conversation" }).click()
+    const panel = sheet.getByRole("tabpanel", { name: "Conversation" })
+    const rows = panel.getByRole("log").getByRole("article")
+    await until("the first message", async () => (await rows.count()) === 1)
+    await animationsDone(o.page, ".sheet")
+    const watch = await watchAnimations(o.page)
+    o.mock.pushMessage(message(2))
+    await until("the pushed message", async () => (await rows.count()) === 2)
+    await panel.getByRole("textbox", { name: /^Message / }).fill("Make the header sticky")
+    await panel.getByRole("button", { name: "Send message" }).click()
+    await until("the sent message", async () => (await rows.count()) === 3)
+    await animationsDone(o.page, ".cv-msg.mine")
+    const { seen, offenders } = await watch.stop()
+    expect(seen.some((label) => label.endsWith("animation cv-in"))).toBe(true)
+    expect(seen.some((label) => label.endsWith("animation cv-in-own"))).toBe(true)
     expect(offenders).toEqual([])
   }, 30_000)
 

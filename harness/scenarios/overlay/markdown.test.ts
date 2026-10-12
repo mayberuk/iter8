@@ -30,7 +30,7 @@ or write to [the team](mailto:team@example.test). Inline \`PricingCard.tsx\` and
 
 | Component | Where it is used | Owner | Status | Last run | Duration | Notes about the run |
 |:--|--:|:--|:--|:--|:--|:--|
-| PricingCard | the pricing page and the checkout summary | design systems | passing | 2026-10-09 | 12.4 s | needs a second look at the narrow breakpoint |
+| PricingCardWithAnExtremelyLongNameThatNeverBreaksAnywhere | the pricing page and the checkout summary | design systems | passing | 2026-10-09 | 12.4 s | needs a second look at the narrow breakpoint |
 | ToggleHeight | the plan switcher in the header | web platform | failing | 2026-10-08 | 31.0 s | the toggle is 36px but the CTA is 40px |
 
 \`\`\`ts
@@ -109,6 +109,15 @@ test("a wide table scrolls inside its own box and nothing around it does", async
   expect(
     await o.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
   ).toBeLessThanOrEqual(0)
+
+  expect(
+    await table.evaluate(
+      (node) =>
+        Array.from(node.querySelectorAll("td:first-child")).filter(
+          (cell) => cell.scrollWidth > cell.clientWidth,
+        ).length,
+    ),
+  ).toBe(0)
 
   const card = await body.evaluate((node) => node.getBoundingClientRect().width)
   const box = await table.evaluate((node) => node.getBoundingClientRect().width)

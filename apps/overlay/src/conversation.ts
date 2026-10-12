@@ -2,9 +2,14 @@ import type {
   ChatSetting,
   ConversationMessage,
   IdempotencyKey,
+  MessageAuthor,
   Pairing,
   PostMessageResult,
+  RoundId,
 } from "@iter8/protocol"
+
+/** A longer silence than this starts a new run, so a run's one shown time stays close to every row in it. */
+export const GROUP_WINDOW_MS = 5 * 60_000
 
 export type PostFailure =
   | Extract<PostMessageResult, { outcome: "refused" }>["reason"]
@@ -70,4 +75,29 @@ export function chatBlockedReason(
   if (!chat.enabled) return "chat-off"
   if (!chat.reachable) return "unreachable"
   return null
+}
+
+export function authorIdentity(author: MessageAuthor): string {
+  switch (author.kind) {
+    case "agent":
+      return `agent:${author.agent}:${author.name}:${author.owner}`
+    case "user":
+      return "user"
+    case "page":
+      return "page"
+  }
+}
+
+/** A row continues the run above it unless the speaker changes, a round divider sits between them, or the gap is over the window. */
+export function groupRuns(
+  rows: readonly { identity: string; roundId: RoundId | null; at: string }[],
+): { head: boolean; last: boolean }[] {
+  const continues = rows.map((row, index) => {
+    const before = rows[index - 1]
+    if (!before) return false
+    const divided = row.roundId !== null && row.roundId !== before.roundId
+    const gap = Date.parse(row.at) - Date.parse(before.at)
+    return !divided && row.identity === before.identity && gap <= GROUP_WINDOW_MS
+  })
+  return rows.map((_, index) => ({ head: !continues[index], last: !continues[index + 1] }))
 }
