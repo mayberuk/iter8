@@ -625,6 +625,27 @@
   width: 9px;
   height: 9px;
 }
+.sheet .sframe .stamp.working::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  box-sizing: border-box;
+  border: 1.5px solid transparent;
+  border-top-color: var(--sc);
+  border-radius: 50%;
+  opacity: 0;
+  animation: stamp-orbit 2.4s linear infinite;
+}
+@keyframes stamp-orbit {
+  from {
+    opacity: 1;
+    transform: rotate(0deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(360deg);
+  }
+}
 .sheet .strip + .hn {
   margin-top: 6px;
 }

@@ -102,6 +102,33 @@
     center / 10px no-repeat;
   box-shadow: 0 1.5px 0 var(--cobalt-d);
 }
+.pin.sent::before {
+  content: "";
+  position: absolute;
+  right: -9px;
+  bottom: -9px;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  border: 1.5px solid transparent;
+  border-top-color: var(--cobalt);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+.pin.sent.working::before {
+  animation: orbit 2.4s linear infinite;
+}
+@keyframes orbit {
+  from {
+    opacity: 1;
+    transform: rotate(0deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(360deg);
+  }
+}
 .pin.sub {
   width: 12px;
   height: 12px;
@@ -262,11 +289,58 @@
   top: auto;
   bottom: var(--edge-gap);
 }
-.lost h4 {
+.pop.lost {
+  pointer-events: none;
+}
+.pop.on.lost.away {
+  opacity: 0.15;
+}
+.pop.on.lost.away:has(button:hover, button:focus-visible) {
+  opacity: 1;
+}
+.lost .chipbtn,
+.lost .iconbtn {
+  pointer-events: auto;
+}
+.lost-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 6px;
+}
+.lost-h .iconbtn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -4px -6px -4px 0;
+}
+.lost h4 {
+  margin: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink);
+}
+.pop.lost.collapsed {
+  pointer-events: auto;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--amber-t);
+  box-shadow:
+    0 2px 0 var(--edge),
+    var(--top);
+  transition: transform 0.09s var(--press);
+}
+.pop.lost.collapsed:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--edge);
 }
 .lost ul {
   list-style: none;

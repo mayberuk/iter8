@@ -49,6 +49,7 @@ import {
   createOverlayModel,
   displayNoteState,
   dockState,
+  isBeingWorked,
   roundOutcome,
   sendBlockedReason,
   sessionName,
@@ -121,6 +122,118 @@ describe("displayNoteState", () => {
     expect(displayNoteState(orphanedRound, draft(1, { resolution: answered }))).toBe("answered")
     expect(displayNoteState(queuedRound, draft(1, { resolution: done }))).toBe("done")
     expect(displayNoteState(round, draft(1, { resolution: answered }))).toBe("answered")
+  })
+})
+
+describe("isBeingWorked", () => {
+  const busy = { ...pairing, state: { status: "busy" } } as const satisfies Pairing
+  const states: Record<RoundStage, Round["state"]> = {
+    draft: { stage: "draft" },
+    queued: queuedRound.state,
+    announced: announcedState,
+    claimed: round.state,
+    orphaned: orphanedRound.state,
+  }
+  const roundAt = (stage: RoundStage, owner: Round["owner"] = round.owner): Round => ({
+    ...round,
+    owner,
+    state: states[stage],
+  })
+  const openNote = draft(1, { resolution: open })
+  const otherOwner = OwnerId.parse("own_9zz9zz9z")
+
+  const table: [string, Round, Note, Pairing | null, boolean][] = [
+    ["claimed, open, same owner, busy", roundAt("claimed"), openNote, busy, true],
+    ["announced, open, same owner, busy", roundAt("announced"), openNote, busy, true],
+    ["announced, open, same owner, idle", roundAt("announced"), openNote, pairing, false],
+    ["claimed, open, same owner, idle", roundAt("claimed"), openNote, pairing, false],
+    [
+      "claimed, open, same owner, unknown",
+      roundAt("claimed"),
+      openNote,
+      { ...pairing, state: { status: "unknown" } },
+      false,
+    ],
+    ["claimed, open, same owner, gone", roundAt("claimed"), openNote, gonePairing, false],
+    ["claimed, open, no pairing", roundAt("claimed"), openNote, null, false],
+    ["claimed, done, busy", roundAt("claimed"), draft(1, { resolution: done }), busy, false],
+    [
+      "claimed, answered, busy",
+      roundAt("claimed"),
+      draft(1, { resolution: answered }),
+      busy,
+      false,
+    ],
+    ["claimed, open, owner differs", roundAt("claimed", otherOwner), openNote, busy, false],
+    ["claimed, open, round has no owner", roundAt("claimed", null), openNote, busy, false],
+    ["draft, open, busy", roundAt("draft"), openNote, busy, false],
+    ["queued, open, busy", roundAt("queued"), openNote, busy, false],
+    ["orphaned, open, busy", roundAt("orphaned"), openNote, busy, false],
+  ]
+  for (const [name, subject, subjectNote, subjectPairing, expected] of table)
+    test(name, () => {
+      expect(isBeingWorked(subject, subjectNote, subjectPairing)).toBe(expected)
+    })
+
+  const stages = fc.constantFrom<RoundStage>("draft", "queued", "announced", "claimed", "orphaned")
+  const resolutions = fc.constantFrom(open, done, answered)
+  const pairingArb = fc.option(
+    fc.record({
+      owner: fc.constantFrom(round.owner ?? otherOwner, otherOwner),
+      state: fc.constantFrom<Pairing["state"]>(
+        { status: "live" },
+        { status: "busy" },
+        { status: "unknown" },
+        { status: "gone", reason: "exited" },
+      ),
+    }),
+  )
+  type Case = {
+    stage: RoundStage
+    resolution: Note["resolution"]
+    roundOwner: Round["owner"]
+    pairing: { owner: Pairing["owner"]; state: Pairing["state"] } | null
+  }
+  const scenario = fc.record<Case>({
+    stage: stages,
+    resolution: resolutions,
+    roundOwner: fc.constantFrom<Round["owner"]>(round.owner, otherOwner, null),
+    pairing: pairingArb,
+  })
+  const evaluate = (c: Case) =>
+    isBeingWorked(
+      roundAt(c.stage, c.roundOwner),
+      draft(1, { resolution: c.resolution }),
+      c.pairing ? { ...pairing, ...c.pairing } : null,
+    )
+
+  test("property: a resolved note is never being worked on", () => {
+    fc.assert(
+      fc.property(
+        scenario.filter((c) => c.resolution.status !== "open"),
+        (c) => !evaluate(c),
+      ),
+    )
+  })
+
+  test("property: a round in draft, queued or orphaned never is", () => {
+    fc.assert(
+      fc.property(
+        scenario.filter(
+          (c) => c.stage === "draft" || c.stage === "queued" || c.stage === "orphaned",
+        ),
+        (c) => !evaluate(c),
+      ),
+    )
+  })
+
+  test("property: an owner mismatch never is", () => {
+    fc.assert(
+      fc.property(
+        scenario.filter((c) => c.pairing === null || c.pairing.owner !== c.roundOwner),
+        (c) => !evaluate(c),
+      ),
+    )
   })
 })
 

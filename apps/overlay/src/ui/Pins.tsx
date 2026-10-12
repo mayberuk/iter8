@@ -2,7 +2,7 @@ import type { Box, ElementAnchor, Intent, Note, NoteId, RoundId } from "@iter8/p
 import { effect } from "@preact/signals"
 import type { JSX } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
-import { type AnchorResolution, type OverlayModel, toDraftBody } from "../model"
+import { type AnchorResolution, isBeingWorked, type OverlayModel, toDraftBody } from "../model"
 import { parentAcrossShadow, resolveAnchor } from "../pick/anchor"
 import { useOverlay, useSheet } from "./context"
 import { Avatar, Icon, IntentGlyph } from "./glyphs"
@@ -26,6 +26,8 @@ const CARD_GAP = 10
 const PIN_REACH = 20
 /** An agent pin's box centre relative to its placed point, from its margins in pins.css. */
 const AGENT_CENTRE = { x: 10, y: -16 }
+/** The pointer must leave the panel's rectangle by this much before it comes back from its fade. */
+const FADE_HYSTERESIS = 4
 const TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 
 type Source = {
@@ -169,6 +171,8 @@ export function Pins(): JSX.Element | null {
   const place = useRef<() => void>(() => {})
   const repick = useRef<NoteId | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
+  const lostRef = useRef<HTMLDivElement>(null)
+  const lostRect = useRef<DOMRect | null>(null)
   const [hover, setHover] = useState<Hover | null>(null)
 
   useEffect(() => {
@@ -508,6 +512,66 @@ export function Pins(): JSX.Element | null {
     card.style.top = `${top}px`
   }, [hover])
 
+  const dismissed = model.lostDismissed.value
+  const collapsed = lost.length > 0 && lost.every(({ note }) => dismissed.has(note.id))
+  const hasLost = lost.length > 0
+  const lostKey = lost.map(({ note }) => note.id).join("\n")
+  const sheetOpen = model.sheet.value.open
+  const dock = model.prefs.value.dock
+
+  useEffect(() => {
+    const held = model.lostDismissed.peek()
+    const stillLost = new Set(lostKey === "" ? [] : lostKey.split("\n"))
+    const kept = [...held].filter((id) => stillLost.has(id))
+    if (kept.length !== held.size) model.lostDismissed.value = new Set(kept)
+  }, [model, lostKey])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the panel's position and size follow the collapse state, the sheet, the dock side and its rows, so a change re-measures it
+  useLayoutEffect(() => {
+    lostRect.current = lostRef.current?.getBoundingClientRect() ?? null
+  }, [collapsed, sheetOpen, dock, lostKey])
+
+  useEffect(() => {
+    if (!hasLost) return
+    let frame = 0
+    let at: Point | null = null
+    let inside = false
+    function settle() {
+      frame = 0
+      const rect = lostRect.current
+      if (!at || !rect) return
+      const slack = inside ? FADE_HYSTERESIS : 0
+      inside =
+        at.x >= rect.left - slack &&
+        at.x <= rect.right + slack &&
+        at.y >= rect.top - slack &&
+        at.y <= rect.bottom + slack
+      lostRef.current?.classList.toggle("away", inside)
+    }
+    const onMove = (event: PointerEvent) => {
+      at = { x: event.clientX, y: event.clientY }
+      if (frame === 0) frame = requestAnimationFrame(settle)
+    }
+    const onLeave = (event: PointerEvent) => {
+      if (event.relatedTarget !== null) return
+      at = null
+      inside = false
+      lostRef.current?.classList.remove("away")
+    }
+    const onResize = () => {
+      lostRect.current = lostRef.current?.getBoundingClientRect() ?? null
+    }
+    window.addEventListener("pointermove", onMove, { capture: true, passive: true })
+    window.addEventListener("pointerout", onLeave, { capture: true, passive: true })
+    window.addEventListener("resize", onResize, { passive: true })
+    return () => {
+      window.removeEventListener("pointermove", onMove, { capture: true })
+      window.removeEventListener("pointerout", onLeave, { capture: true })
+      window.removeEventListener("resize", onResize)
+      if (frame !== 0) cancelAnimationFrame(frame)
+    }
+  }, [hasLost])
+
   function bind(key: string) {
     let bound: HTMLElement | SVGElement | null = null
     return (node: HTMLElement | SVGElement | null) => {
@@ -546,7 +610,6 @@ export function Pins(): JSX.Element | null {
 
   const hovered = hover && pins.find((pin) => pin.key === hover.key)
   const { author } = hovered?.source.note ?? {}
-  const dock = model.prefs.value.dock
   const moved = lost.filter(({ kind }) => kind !== "agent")
   const unanchored = lost.filter(({ kind }) => kind === "agent")
 
@@ -571,10 +634,13 @@ export function Pins(): JSX.Element | null {
           <Avatar agent={note.author.agent} size={26} />
         </button>
       )
+    const sentRound =
+      source.kind === "sent" ? model.rounds.value.find(({ id }) => id === source.round) : undefined
     const classes = [
       "pin",
       note.intent,
       source.kind === "sent" ? "sent" : "",
+      sentRound && isBeingWorked(sentRound, note, model.pairing.value) ? "working" : "",
       pin.index > 0 ? "sub" : "",
       source.kind === "draft" && note.id === focusedId ? "focus" : "",
     ]
@@ -655,17 +721,45 @@ export function Pins(): JSX.Element | null {
           </>
         )}
       </div>
-      {lost.length > 0 && (
+      {collapsed && (
+        <button
+          type="button"
+          class={`pop on lost collapsed${sheetOpen ? " beside-sheet" : ""}`}
+          data-v={dock[0]}
+          data-h={dock[1] === "l" ? "l" : "r"}
+          aria-expanded="false"
+          onClick={() => {
+            model.lostDismissed.value = new Set()
+          }}
+        >
+          <Icon name="pick" size={14} />
+          {lost.length} lost
+        </button>
+      )}
+      {hasLost && !collapsed && (
         <div
-          class={`pop on lost${model.sheet.value.open ? " beside-sheet" : ""}`}
+          ref={lostRef}
+          class={`pop on lost${sheetOpen ? " beside-sheet" : ""}`}
           data-v={dock[0]}
           data-h={dock[1] === "l" ? "l" : "r"}
         >
-          <h4>
-            {lost.length === 1
-              ? "1 note lost its element"
-              : `${lost.length} notes lost their element`}
-          </h4>
+          <div class="lost-h">
+            <h4>
+              {lost.length === 1
+                ? "1 note lost its element"
+                : `${lost.length} notes lost their element`}
+            </h4>
+            <button
+              type="button"
+              class="iconbtn"
+              aria-label="Hide"
+              onClick={() => {
+                model.lostDismissed.value = new Set(lost.map(({ note }) => note.id))
+              }}
+            >
+              <Icon name="x" size={14} />
+            </button>
+          </div>
           {moved.length > 0 && (
             <ul aria-label="Moved notes">
               {moved.map((source) => (
