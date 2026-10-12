@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util"
 import { z } from "zod"
 
 export const RUN_PORTS = { first: 4100, last: 4899 } as const
@@ -30,6 +31,15 @@ export function fnv1a(text: string): number {
 
 export function stablePort(projectRoot: string): number {
   return RUN_PORTS.first + (fnv1a(projectRoot) % (RUN_PORTS.last - RUN_PORTS.first + 1))
+}
+
+const LOOPBACK_URL = /http:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):(\d{1,5})(?!\d)/gi
+
+/** Ports of the loopback http URLs a dev server printed on one line; 0.0.0.0 counts as loopback. */
+export function printedPorts(line: string): number[] {
+  return [...stripVTControlCharacters(line).matchAll(LOOPBACK_URL)]
+    .map((match) => Number(match[1]))
+    .filter((port) => port >= 1 && port <= 65_535)
 }
 
 function packageManager(lockfiles: string[]): string {

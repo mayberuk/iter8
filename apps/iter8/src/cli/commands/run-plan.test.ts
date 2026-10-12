@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import fc from "fast-check"
 import { ZodError } from "zod"
-import { planRun, stablePort } from "./run-plan"
+import { planRun, printedPorts, stablePort } from "./run-plan"
 
 const ROOT = "/home/dev/shop"
 const PORT = 4321
@@ -191,5 +191,37 @@ describe("planRun", () => {
     ["not an object", "vite"],
   ])("a package.json with %s is refused", (_, packageJson) => {
     expect(() => plan({ packageJson })).toThrow(ZodError)
+  })
+})
+
+describe("printedPorts", () => {
+  test.each([
+    [
+      "vite's coloured Local line",
+      "  \u001b[32m➜\u001b[39m  \u001b[1mLocal\u001b[22m:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m",
+      [5173],
+    ],
+    ["Next's Local line", "   - Local:        http://localhost:3000", [3000]],
+    ["an IPv4 loopback URL", "listening on http://127.0.0.1:8080/app", [8080]],
+    ["an IPv6 loopback URL", "listening on http://[::1]:8081/", [8081]],
+    ["the unspecified address, which is loopback here", "ready http://0.0.0.0:3001", [3001]],
+    ["several URLs on one line", "http://localhost:1111/ and http://127.0.0.1:2222/", [1111, 2222]],
+  ])("reads %s", (_, line, ports) => {
+    expect(printedPorts(line)).toEqual(ports)
+  })
+
+  test.each([
+    ["a LAN address", "  ➜  Network: http://192.168.1.20:5173/"],
+    ["a public host", "http://example.com:3000/"],
+    ["a host that only ends in localhost", "http://app.localhost:3000/"],
+    ["a host that only starts with localhost", "http://localhost.example.com:3000/"],
+    ["a URL without a port", "Local: http://localhost/"],
+    ["a bare host and port", "localhost:3000"],
+    ["https", "https://localhost:3000/"],
+    ["a port above 65535", "http://localhost:70000/"],
+    ["port 0", "http://localhost:0/"],
+    ["no URL", "ready in 312 ms"],
+  ])("ignores %s", (_, line) => {
+    expect(printedPorts(line)).toEqual([])
   })
 })

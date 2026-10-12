@@ -212,6 +212,67 @@ describe("a dev server", () => {
     expect(state.exits).toEqual([130])
   })
 
+  test("a server that ignores PORT is found at the loopback URL it prints", async () => {
+    const dir = await tempDir()
+    const port = await freeTestPort()
+    const printedPort = await freeTestPort()
+    const state = setup()
+    const pending = state.start([
+      dir,
+      "--port",
+      String(port),
+      "--",
+      "bun",
+      "-e",
+      `Bun.serve({ hostname: "127.0.0.1", port: ${printedPort}, fetch: () => new Response("ok") }); console.log("\\u001b[36m  Local: http://localhost:${printedPort}/\\u001b[39m")`,
+    ])
+    await until("the page to open", () => state.opened[0] ?? null)
+
+    expect(state.opened).toEqual([
+      { target: { kind: "server", upstream: `http://127.0.0.1:${printedPort}/` }, cwd: dir },
+    ])
+    expect(state.out()).toContain(
+      `The dev server ignored port ${port} and is on ${printedPort}, so this page's address changes between runs. Make it listen on ${port} with its --port flag or the $PORT variable.\n${PAGE_URL}\n`,
+    )
+
+    state.interrupt("SIGINT")
+    await pending
+    expect(state.exits).toEqual([130])
+  })
+
+  test("a printed URL on a non-loopback host is never probed", async () => {
+    const dir = await tempDir()
+    const port = await freeTestPort()
+    const printedPort = await freeTestPort()
+    const probed: string[] = []
+    let spoken = ""
+    const clock = fakeClock(() => spoken.includes("Network"))
+    const state = setup({
+      clock,
+      probe: async (url) => {
+        probed.push(url)
+        return false
+      },
+    })
+    const done = state.start([
+      dir,
+      "--port",
+      String(port),
+      "--",
+      "bun",
+      "-e",
+      `console.log("Network: http://192.168.1.20:${printedPort}/"); setInterval(() => {}, 1000)`,
+    ])
+    await until("the child's output", () => {
+      spoken = state.out()
+      return spoken.includes("Network") ? true : null
+    })
+    await done
+    expect(state.exits).toEqual([ExitCode.failure])
+    expect(probed.length).toBeGreaterThan(0)
+    expect(probed.filter((url) => url.includes(`:${printedPort}/`))).toEqual([])
+  })
+
   test("SIGINT stops the dev server's whole process group, grandchildren included, and exits 130", async () => {
     const dir = await tempDir()
     const pidFile = join(dir, "grandchild.pid")

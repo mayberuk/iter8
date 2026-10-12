@@ -34,6 +34,8 @@ To choose the command yourself, replace `<cmd>` with your dev server command:
 iter8 run -- <cmd>
 ```
 
+The chosen port arrives as `PORT`; if the command ignores it, iter8 uses the URL the server prints.
+
 If both machines run iter8 with the same pool, give one a different `pool` in its `config.json`.
 
 ## Work on it

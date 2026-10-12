@@ -9,7 +9,7 @@ import type { Clock } from "../../connect/supervisor"
 import { resolvePaths } from "../../home"
 import { type CliDeps, type caller, commandArgs, runCli, textFlag } from "../client"
 import { openPage } from "./open"
-import { fnv1a, planRun, RUN_PORTS, type RunPlan, stablePort } from "./run-plan"
+import { fnv1a, planRun, printedPorts, RUN_PORTS, type RunPlan, stablePort } from "./run-plan"
 
 export type DevServer = {
   pid: number
@@ -278,6 +278,7 @@ async function pump(
   stream: ReadableStream<Uint8Array>,
   write: (text: string) => void,
   tail: string[],
+  onLine: (line: string) => void,
 ): Promise<void> {
   const decoder = new TextDecoder()
   let partial = ""
@@ -288,10 +289,12 @@ async function pump(
     partial = lines.pop() ?? ""
     tail.push(...lines)
     tail.splice(0, Math.max(0, tail.length - TAIL_LINES))
+    for (const line of lines) onLine(line)
   }
   if (partial !== "") {
     tail.push(partial)
     tail.splice(0, Math.max(0, tail.length - TAIL_LINES))
+    onLine(partial)
   }
 }
 
@@ -331,9 +334,15 @@ async function serve(
   deps.stdout(`Starting ${plan.argv.join(" ")} on port ${port}…\n`)
   const child = system.spawn(plan.argv, { cwd: dir, env: { ...system.env, ...plan.env } })
   const tail: string[] = []
+  const printed: number[] = []
+  const onLine = (line: string) => {
+    for (const printedPort of printedPorts(line)) {
+      if (printedPort !== port && !printed.includes(printedPort)) printed.push(printedPort)
+    }
+  }
   const pumped = Promise.all([
-    pump(child.stdout, deps.stdout, tail),
-    pump(child.stderr, deps.stderr, tail),
+    pump(child.stdout, deps.stdout, tail, onLine),
+    pump(child.stderr, deps.stderr, tail, onLine),
   ]).catch(() => {})
   const state: { exit: number | null; interrupt: Interrupt | null } = {
     exit: null,
@@ -362,7 +371,6 @@ async function serve(
   try {
     await remember(deps, record, dir, child.pid)
     const deadline = clock.now() + READY_TIMEOUT_MS
-    const urls = [`http://127.0.0.1:${port}/`, `http://[::1]:${port}/`]
     let upstream: string | null = null
     while (upstream === null) {
       if (state.interrupt !== null) {
@@ -374,6 +382,10 @@ async function serve(
           `The dev server exited with code ${state.exit} before answering on port ${port}.`,
         )
       }
+      const urls = [port, ...printed].flatMap((candidate) => [
+        `http://127.0.0.1:${candidate}/`,
+        `http://[::1]:${candidate}/`,
+      ])
       const answers = await Promise.all(urls.map((url) => system.probe(url)))
       upstream = urls[answers.indexOf(true)] ?? null
       if (upstream === null) {
@@ -384,6 +396,12 @@ async function serve(
       }
     }
 
+    const answeredPort = Number(new URL(upstream).port)
+    if (answeredPort !== port) {
+      deps.stdout(
+        `The dev server ignored port ${port} and is on ${answeredPort}, so this page's address changes between runs. Make it listen on ${port} with its --port flag or the $PORT variable.\n`,
+      )
+    }
     await place(deps, system, { kind: "server", upstream }, dir)
     const code = await child.exited
     await stop()
