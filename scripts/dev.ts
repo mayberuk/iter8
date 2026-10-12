@@ -4,6 +4,37 @@ import { resolve } from "node:path"
 import { ENV, ServiceStatus } from "@iter8/protocol"
 import { buildOverlayBundles } from "./build"
 
+const READY_LIMIT_MS = 30_000
+const READY_POLL_MS = 200
+
+type Readiness = {
+  status: (timeoutMs: number) => Promise<string | null>
+  start: () => void
+  now: () => number
+  pause: (ms: number) => Promise<void>
+  stopping: () => boolean
+}
+
+const statusSchema = ServiceStatus.pick({ state: true })
+
+export async function startWhenReady({ status, start, now, pause, stopping }: Readiness) {
+  const deadline = now() + READY_LIMIT_MS
+  while (!stopping() && now() < deadline) {
+    try {
+      const text = await status(Math.max(1, deadline - now()))
+      const report = text === null ? null : statusSchema.safeParse(JSON.parse(text))
+      if (report?.success && report.data.state === "ready") {
+        if (!stopping()) start()
+        return
+      }
+    } catch {}
+    if (stopping()) return
+    await pause(Math.min(READY_POLL_MS, Math.max(0, deadline - now())))
+  }
+  if (stopping()) return
+  throw new Error("The dev service did not become ready within 30 s.")
+}
+
 async function dev(): Promise<void> {
   const root = resolve(import.meta.dir, "..")
   const overlayDir = process.env[ENV.overlayDir]
@@ -16,7 +47,6 @@ async function dev(): Promise<void> {
   }
   const children = new Set<Bun.Subprocess>()
   const watchers: ReturnType<typeof watch>[] = []
-  const statusSchema = ServiceStatus.pick({ state: true })
   let stopping = false
   let debounce: ReturnType<typeof setTimeout> | undefined
   let poll: ReturnType<typeof setTimeout> | undefined
@@ -89,40 +119,38 @@ async function dev(): Promise<void> {
       watchers.push(watcher)
     }
     start([process.execPath, "--watch", "apps/iter8/src/main.ts", "serve"])
-    const deadline = Date.now() + 30_000
-    let ready = false
-    while (!stopping && Date.now() < deadline) {
-      const probe = Bun.spawn([launcher, "status", "--json"], {
-        cwd: root,
-        env,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "ignore",
-        timeout: Math.max(1, deadline - Date.now()),
-        killSignal: "SIGKILL",
-      })
-      children.add(probe)
-      try {
-        const [text, code] = await Promise.all([new Response(probe.stdout).text(), probe.exited])
-        if (code === 0) {
-          const report = statusSchema.safeParse(JSON.parse(text))
-          ready = report.success && report.data.state === "ready"
+    await startWhenReady({
+      status: async (timeoutMs) => {
+        const probe = Bun.spawn([launcher, "status", "--json"], {
+          cwd: root,
+          env,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "ignore",
+          timeout: timeoutMs,
+          killSignal: "SIGKILL",
+        })
+        children.add(probe)
+        try {
+          const [text, code] = await Promise.all([new Response(probe.stdout).text(), probe.exited])
+          return code === 0 ? text : null
+        } finally {
+          children.delete(probe)
         }
-      } catch {
-      } finally {
-        children.delete(probe)
-      }
-      if (ready || stopping) break
-      await Promise.race([
-        stopped,
-        new Promise<void>((resolve) => {
-          poll = setTimeout(resolve, Math.min(200, Math.max(0, deadline - Date.now())))
-        }),
-      ])
-    }
-    if (stopping) return
-    if (!ready) throw new Error("The dev service did not become ready within 30 s.")
-    start([launcher, "run", "playground", ...process.argv.slice(2)])
+      },
+      start: () => {
+        start([launcher, "run", "playground", ...process.argv.slice(2)])
+      },
+      now: Date.now,
+      pause: (ms) =>
+        Promise.race([
+          stopped,
+          new Promise<void>((resolve) => {
+            poll = setTimeout(resolve, ms)
+          }),
+        ]),
+      stopping: () => stopping,
+    })
     await stopped
   } catch (error) {
     fail(error)
@@ -139,4 +167,4 @@ async function dev(): Promise<void> {
   }
 }
 
-await dev()
+if (import.meta.main) await dev()
