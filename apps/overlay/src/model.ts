@@ -134,6 +134,12 @@ export function isBeingWorked(round: Round, note: Note, pairing: Pairing | null)
   )
 }
 
+/** The state a round's marker shows in the conversation: done once no note is still open. */
+export function roundDisplayState(round: Round): DisplayNoteState {
+  const open = round.notes.some((note) => note.resolution.status === "open")
+  return open ? STAGE_DISPLAY[round.state.stage] : "done"
+}
+
 export function dockState(
   pairing: Pairing | null,
   deliveredUntil: number | null,

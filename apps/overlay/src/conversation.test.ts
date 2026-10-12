@@ -1,16 +1,22 @@
 import { describe, expect, test } from "bun:test"
 import {
+  AgentAuthor,
   ConversationMessage,
   IdempotencyKey,
   type MessageDelivery,
   MessageId,
+  OwnerId,
   Pairing,
+  RoundId,
 } from "@iter8/protocol"
 import fc from "fast-check"
 import messageJson from "../../../packages/protocol/fixtures/ConversationMessage.page.json"
 import pairingJson from "../../../packages/protocol/fixtures/Pairing.json"
 import {
+  authorIdentity,
   chatBlockedReason,
+  GROUP_WINDOW_MS,
+  groupRuns,
   mergeMessages,
   type PendingMessage,
   settlePending,
@@ -185,4 +191,125 @@ describe("chatBlockedReason", () => {
     test(`${status} permits reachable enabled chat`, () => {
       expect(chatBlockedReason({ ...pairing, state: { status } }, chat)).toBeNull()
     })
+})
+
+describe("groupRuns", () => {
+  const at = (ms: number) => new Date(Date.UTC(2026, 9, 9, 10, 0, 0) + ms).toISOString()
+  const row = (identity: string, ms: number, round: string | null = null) => ({
+    identity,
+    roundId: round === null ? null : RoundId.parse(round),
+    at: at(ms),
+  })
+  const shape = (rows: ReturnType<typeof row>[]) =>
+    groupRuns(rows).map(({ head, last }) => `${head ? "H" : "-"}${last ? "L" : "-"}`)
+
+  test("a row continues the one above from the same speaker up to the window and not past it", () => {
+    expect(GROUP_WINDOW_MS).toBe(5 * 60 * 1000)
+    expect(shape([row("a", 0), row("a", GROUP_WINDOW_MS)])).toEqual(["H-", "-L"])
+    expect(shape([row("a", 0), row("a", GROUP_WINDOW_MS + 1)])).toEqual(["HL", "HL"])
+  })
+
+  test("another speaker starts a run", () => {
+    expect(shape([row("a", 0), row("b", 1000), row("a", 2000)])).toEqual(["HL", "HL", "HL"])
+  })
+
+  test("a round divider between two rows splits them, but a row with no round does not", () => {
+    expect(shape([row("a", 0, "R1"), row("a", 1000, "R2")])).toEqual(["HL", "HL"])
+    expect(shape([row("a", 0, "R1"), row("a", 1000, "R1")])).toEqual(["H-", "-L"])
+    expect(shape([row("a", 0, "R1"), row("a", 1000)])).toEqual(["H-", "-L"])
+  })
+
+  test("nothing at all, and one row", () => {
+    expect(groupRuns([])).toEqual([])
+    expect(shape([row("a", 0)])).toEqual(["HL"])
+  })
+
+  const rows = fc.array(
+    fc.record({
+      identity: fc.constantFrom("a", "b", "c"),
+      round: fc.constantFrom(null, "R1", "R2", "R3"),
+      gap: fc.integer({ min: 0, max: GROUP_WINDOW_MS * 2 }),
+    }),
+    { maxLength: 40 },
+  )
+  const timed = (specs: { identity: string; round: string | null; gap: number }[]) => {
+    let clock = 0
+    return specs.map(({ identity, round, gap }) => {
+      clock += gap
+      return row(identity, clock, round)
+    })
+  }
+
+  test("property: the first row is always a head and the last row always last", () => {
+    fc.assert(
+      fc.property(rows, (specs) => {
+        const runs = groupRuns(timed(specs))
+        expect(runs[0]?.head ?? true).toBe(true)
+        expect(runs[runs.length - 1]?.last ?? true).toBe(true)
+      }),
+    )
+  })
+
+  test("property: a row is last exactly when the next one is a head", () => {
+    fc.assert(
+      fc.property(rows, (specs) => {
+        const runs = groupRuns(timed(specs))
+        runs.forEach((run, index) => {
+          const next = runs[index + 1]
+          if (next) expect(run.last).toBe(next.head)
+        })
+      }),
+    )
+  })
+
+  test("property: a run never spans a divider, a change of speaker or a gap over the window", () => {
+    fc.assert(
+      fc.property(rows, (specs) => {
+        const items = timed(specs)
+        const runs = groupRuns(items)
+        items.forEach((item, index) => {
+          const before = items[index - 1]
+          if (!before) return
+          const divided = item.roundId !== null && item.roundId !== before.roundId
+          const gap = Date.parse(item.at) - Date.parse(before.at)
+          if (divided || item.identity !== before.identity || gap > GROUP_WINDOW_MS) {
+            expect(runs[index]?.head).toBe(true)
+          }
+        })
+      }),
+    )
+  })
+
+  test("property: rows of one speaker, one round and short gaps form a single run", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.integer({ min: 0, max: GROUP_WINDOW_MS }), { minLength: 1 }),
+        (gaps) => {
+          let clock = 0
+          const items = gaps.map((gap) => {
+            clock += gap
+            return row("a", clock, "R1")
+          })
+          const runs = groupRuns(items)
+          expect(runs.filter((run) => run.head)).toHaveLength(1)
+          expect(runs.filter((run) => run.last)).toHaveLength(1)
+        },
+      ),
+    )
+  })
+})
+
+describe("authorIdentity", () => {
+  const agent = AgentAuthor.parse({
+    kind: "agent",
+    agent: "claude",
+    name: "larkspur",
+    owner: "o1",
+  })
+  test("two agent sessions differ by name or owner, and every page message is one speaker", () => {
+    expect(authorIdentity(agent)).not.toBe(authorIdentity({ ...agent, name: "heron" }))
+    expect(authorIdentity(agent)).not.toBe(authorIdentity({ ...agent, owner: OwnerId.parse("o2") }))
+    expect(authorIdentity(agent)).toBe(authorIdentity({ ...agent }))
+    expect(authorIdentity(base.author)).toBe("page")
+  })
 })

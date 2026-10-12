@@ -496,7 +496,7 @@ describe("conversation: finished messages", () => {
     const panel = await openConversation(o)
     await untilCount(panel, 7)
     const sequence = await log(panel).evaluate((el) =>
-      [...el.querySelectorAll("article, button")].map((node) =>
+      [...el.querySelectorAll(".cv-body > article, .cv-body > .cv-round")].map((node) =>
         node.tagName === "BUTTON"
           ? (node.textContent ?? "")
           : (node.querySelector(".cv-text")?.textContent ?? ""),
@@ -805,6 +805,38 @@ describe("conversation: sending from the page", () => {
     expect(await articles(panel).count()).toBe(2)
   }, 30_000)
 
+  test("one row carries a sent message from sending through waiting to taken, and shows the change", async () => {
+    const o = await open({ messages: [agentMessage(1)] })
+    const panel = await openConversation(o)
+    await untilCount(panel, 1)
+    const release = o.mock.holdPosts()
+    let held = true
+    try {
+      await input(panel).fill("Make the header sticky")
+      await input(panel).press("Enter")
+      await until("the sending row", async () => (await articles(panel).count()) === 2)
+      const handle = await articles(panel).last().elementHandle()
+      if (!handle) throw new Error("no row to follow")
+      const state = () =>
+        handle.evaluate((el) =>
+          ["sending", "queued", "delivered", "failed"].find((name) => el.classList.contains(name)),
+        )
+      expect(await state()).toBe("sending")
+      expect(await handle.evaluate((el) => el.classList.contains("fresh"))).toBe(false)
+      release()
+      held = false
+      await until("waiting", async () => (await state()) === "queued")
+      const stored = pageMessages(o)[0]
+      o.mock.markDelivered(MessageId.parse(stored?.id))
+      await until("taken", async () => (await state()) === "delivered")
+      expect(await handle.evaluate((el) => el.isConnected)).toBe(true)
+      expect(await handle.evaluate((el) => el.classList.contains("fresh"))).toBe(true)
+      expect(await articles(panel).count()).toBe(2)
+    } finally {
+      if (held) release()
+    }
+  }, 30_000)
+
   test("Send message posts too; Shift+Enter makes a new line and blank text sends nothing", async () => {
     const o = await open()
     const panel = await openConversation(o)
@@ -1057,6 +1089,113 @@ describe("conversation: sending from the page", () => {
   }, 30_000)
 })
 
+describe("conversation: runs and following the latest", () => {
+  test("messages from one speaker within five minutes share one head and keep every row's label", async () => {
+    const o = await open({
+      messages: [agentMessage(1), agentMessage(2), agentMessage(3), agentMessage(20)],
+    })
+    const panel = await openConversation(o)
+    await untilCount(panel, 4)
+    const rows = await articles(panel).evaluateAll(
+      (els, author) =>
+        els.map((el) => ({
+          head: el.classList.contains("head"),
+          last: el.classList.contains("last"),
+          meta: el.querySelectorAll(".cv-meta").length,
+          label: el.getAttribute("aria-label")?.startsWith(`Claude · ${author}`) ?? false,
+          text: el.textContent ?? "",
+        })),
+      NAME,
+    )
+    expect(rows.map((row) => [row.head, row.last, row.meta])).toEqual([
+      [true, false, 1],
+      [false, false, 0],
+      [false, true, 0],
+      [true, true, 1],
+    ])
+    expect(rows.every((row) => row.label)).toBe(true)
+    expect(rows.every((row) => row.text.includes(`Claude · ${NAME}`))).toBe(true)
+  }, 30_000)
+
+  test("a history with rows far taller than their first estimate still opens pinned to the bottom", async () => {
+    const tall = Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} of a long report.`).join(
+      "\n\n",
+    )
+    const o = await open({
+      messages: [
+        agentMessage(1),
+        agentMessage(2, { text: tall }),
+        agentMessage(3, { text: tall }),
+        userMessage(4),
+        agentMessage(5),
+      ],
+    })
+    const panel = await openConversation(o)
+    await untilCount(panel, 5)
+    await until("the list at the bottom", async () => (await listScroll(panel)).gap <= 1)
+    expect(await articles(panel).last().isVisible()).toBe(true)
+    expect(await panel.getByRole("button", { name: /jump to latest/i }).count()).toBe(0)
+  }, 30_000)
+
+  test("scrolled up, new agent messages raise a count and a New line, and the pill takes you back to the bottom", async () => {
+    const o = await open({ messages: seeded(29) })
+    const panel = await openConversation(o)
+    await untilCount(panel, 29)
+    await pushUntil(o, agentMessage(30), async () => (await articles(panel).count()) === 30)
+    await sizeEveryRow(panel)
+    await until("the list at the bottom", async () => (await listScroll(panel)).gap <= 1)
+    expect(await panel.getByRole("button", { name: /jump to latest/i }).count()).toBe(0)
+
+    await scrollListTo(panel, 300)
+    const pill = panel.getByRole("button", { name: "Jump to latest" })
+    await until("the plain pill", () => pill.isVisible())
+    o.mock.pushMessage(agentMessage(31))
+    await untilCount(panel, 31)
+    await until("one unread", () =>
+      panel.getByRole("button", { name: "1 new message, jump to latest" }).isVisible(),
+    )
+    o.mock.pushMessage(agentMessage(32))
+    await untilCount(panel, 32)
+    const counted = panel.getByRole("button", { name: "2 new messages, jump to latest" })
+    await until("two unread", () => counted.isVisible())
+    expect(await counted.textContent()).toBe("2new messages")
+
+    const marker = log(panel).getByRole("separator")
+    expect(await marker.count()).toBe(1)
+    expect(await marker.textContent()).toBe("New")
+    expect(
+      await marker.evaluate((el) => el.nextElementSibling?.querySelector(".cv-text")?.textContent),
+    ).toBe("Agent message 31")
+
+    await counted.click()
+    await until(
+      "the list back at the bottom",
+      async () => (await listScroll(panel)).gap <= 24,
+      10_000,
+    )
+    await until("the pill and the line to go", async () => {
+      const left = await panel.getByRole("button", { name: /jump to latest/i }).count()
+      return left + (await marker.count()) === 0
+    })
+  }, 30_000)
+
+  test("a message sent from the page never counts as unread", async () => {
+    const o = await open({ messages: seeded(29) })
+    const panel = await openConversation(o)
+    await untilCount(panel, 29)
+    await pushUntil(o, agentMessage(30), async () => (await articles(panel).count()) === 30)
+    await sizeEveryRow(panel)
+    await until("the list at the bottom", async () => (await listScroll(panel)).gap <= 1)
+    await scrollListTo(panel, 300)
+    await until("the pill", () => panel.getByRole("button", { name: "Jump to latest" }).isVisible())
+    await input(panel).fill("Make the header sticky")
+    await input(panel).press("Enter")
+    await until("the sent row", async () => (await articles(panel).count()) === 31)
+    expect(await panel.getByRole("button", { name: /new message/i }).count()).toBe(0)
+    expect(await log(panel).getByRole("separator").count()).toBe(0)
+  }, 30_000)
+})
+
 describe("conversation: what the panel shows", () => {
   test("the panel says Loading… and Checking chat… while its first requests are out, with no input", async () => {
     const o = await open({ messages: seeded(3) })
@@ -1170,7 +1309,7 @@ describe("conversation: what the panel shows", () => {
     const [spacedRow, unbrokenRow] = looks as [(typeof looks)[0], (typeof looks)[0]]
     for (const row of looks) {
       expect(row.contentVisibility).toBe("auto")
-      expect(row.intrinsicHeight).toBe("auto 72px")
+      expect(row.intrinsicHeight).toBe("auto 92px")
     }
     expect(spacedRow.firstLine).toBe("two  spaces")
     expect(spacedRow.height).toBeGreaterThanOrEqual(2 * spacedRow.lineHeight - 1)
