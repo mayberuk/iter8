@@ -7,6 +7,7 @@ import { hook } from "./hook"
 import { note } from "./note"
 import { open } from "./open"
 import { rounds } from "./rounds"
+import { run } from "./run"
 import { show } from "./show"
 import { status } from "./status"
 import { version } from "./version"
@@ -14,6 +15,7 @@ import { version } from "./version"
 export function cliCommands(deps: CliDeps): Record<string, CommandDef> {
   return {
     open: open(deps),
+    run: run(deps),
     connect: connect(deps),
     attach: attach(deps),
     rounds: rounds(deps),

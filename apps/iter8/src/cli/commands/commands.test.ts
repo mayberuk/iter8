@@ -300,6 +300,7 @@ describe("command surface", () => {
     expect(Object.keys(commands).sort()).toEqual(
       [
         "open",
+        "run",
         "connect",
         "attach",
         "rounds",
@@ -347,6 +348,16 @@ describe("command surface", () => {
     expect(Object.keys(commandArgs("connect")).sort()).toEqual(["HOST", "json"])
     const command = cliCommands((await setup()).deps).connect
     expect(Object.keys(await resolved(command?.args ?? {})).sort()).toEqual(["HOST", "json"])
+  })
+
+  test("run takes DIR, an integer --port and --owner, and prints no protocol result", async () => {
+    const { positionals, flags, output } = CLI_SURFACE.run
+    expect(positionals).toEqual(["DIR"])
+    expect(flags).toEqual([
+      { name: "port", value: "integer", repeatable: false, required: false },
+      { name: "owner", value: "text", repeatable: false, required: false },
+    ])
+    expect(output).toBeNull()
   })
 
   test("connect without a host exits usage before reaching the system", async () => {

@@ -7,6 +7,7 @@ import { defineCommand } from "citty"
 import { announceToLaptops } from "../../connect/page-channel"
 import {
   type CliDeps,
+  type ControlClient,
   caller,
   commandArgs,
   connect,
@@ -32,6 +33,35 @@ function localUrl(input: string): string {
     throw new Error("Target must be an http(s) URL on a loopback host", { cause: ExitCode.usage })
   }
   return url.href
+}
+
+type OpenTarget = Parameters<ControlClient["open"]["$post"]>[0]["json"]["target"]
+
+/** Opens the page and hands its URL to every connected laptop, returning the names reached. */
+export async function openPage(
+  deps: CliDeps,
+  values: Parameters<typeof caller>[1],
+  target: OpenTarget,
+  upstreams: string[],
+  cwd: string,
+): Promise<{ opened: OpenResult; laptops: string[] }> {
+  const body = { ...caller(deps, values), target, upstreams, cwd }
+  const client = await connect(deps)
+  const opened = OpenResult.parse(
+    await (await request(() => client.open.$post({ json: body }))).json(),
+  )
+  let laptops: string[] = []
+  try {
+    const status = ServiceStatus.parse(
+      await (await request(() => client.status.$post({ json: caller(deps, values) }))).json(),
+    )
+    const reached = await announceToLaptops(status.home, {
+      machineId: status.machineId,
+      url: opened.url,
+    })
+    laptops = reached.sort()
+  } catch {}
+  return { opened, laptops }
 }
 
 export const open = (deps: CliDeps) =>
@@ -62,27 +92,14 @@ export const open = (deps: CliDeps) =>
               file: info.isDirectory() ? null : basename(path),
             }
           : { kind: "server" as const, upstream: localUrl(input) }
-        const body = {
-          ...caller(deps, values),
+        const { opened, laptops } = await openPage(
+          deps,
+          values,
           target,
-          upstreams: repeatedFlag(values, "upstream").map(localUrl),
-          cwd: deps.cwd,
-        }
-        const client = await connect(deps)
-        const result = await (await request(() => client.open.$post({ json: body }))).json()
-        const opened = OpenResult.parse(result)
-        let laptops: string[] = []
-        try {
-          const status = ServiceStatus.parse(
-            await (await request(() => client.status.$post({ json: caller(deps, values) }))).json(),
-          )
-          const reached = await announceToLaptops(status.home, {
-            machineId: status.machineId,
-            url: opened.url,
-          })
-          laptops = reached.sort()
-        } catch {}
-        printResult(deps, "open", result, values.json === true, () => {
+          repeatedFlag(values, "upstream").map(localUrl),
+          deps.cwd,
+        )
+        printResult(deps, "open", opened, values.json === true, () => {
           const forwards = opened.poolPorts.map((port) => `-L ${port}:localhost:${port}`).join(" ")
           const hint = laptops.length
             ? `Opened in the browser on ${laptops.join(", ")}.`

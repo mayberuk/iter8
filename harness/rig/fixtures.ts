@@ -18,18 +18,19 @@ export const FixtureName = z.enum([
   "sveltekit",
   "vue",
   "astro",
+  "playground",
 ])
 export type FixtureName = z.infer<typeof FixtureName>
 
 const Fixture = z.object({
   name: FixtureName,
-  dir: z.string().startsWith("fixtures/"),
+  dir: z.string().regex(/^(fixtures\/|playground$)/),
   kind: z.enum(["folder", "server"]),
   devArgs: z.array(z.string()),
   env: z.record(z.string(), z.string()),
   readyPath: z.string().startsWith("/"),
   heavyPath: z.string().startsWith("/").nullable(),
-  targets: z.array(z.string().min(1)).min(1),
+  targets: z.array(z.string().min(1)),
   confidence: SourceConfidence,
 })
 export type Fixture = z.infer<typeof Fixture>

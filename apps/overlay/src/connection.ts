@@ -39,6 +39,11 @@ export type ConnectionEvent =
 
 type RouteKey = keyof typeof OVERLAY_ROUTES
 type JsonRouteKey = Exclude<RouteKey, "getScreenshot">
+type WriteKey = NoteId | "prefs"
+
+function isUnreachable(error: unknown): boolean {
+  return error instanceof Error && error.message.endsWith("status 0: network failure")
+}
 
 export function createConnection(deps: {
   boot: OverlayBoot
@@ -53,9 +58,10 @@ export function createConnection(deps: {
   let socket: WebSocket | null = null
   let reconnect: ReturnType<typeof setTimeout> | null = null
   let starting: Promise<void> | null = null
-  const pending = new Map<NoteId | "prefs", DraftBody | OverlayPrefs>()
-  const writes = new Map<NoteId | "prefs", Promise<void>>()
-  let writeError: Error | null = null
+  const pending = new Map<WriteKey, DraftBody | OverlayPrefs>()
+  const writes = new Map<WriteKey, Promise<void>>()
+  const inflight = new Map<WriteKey, DraftBody | OverlayPrefs>()
+  const errors = new Map<WriteKey, Error>()
 
   function parseRequest(key: RouteKey, body: unknown): unknown {
     try {
@@ -131,7 +137,9 @@ export function createConnection(deps: {
       deps.onEvent({ kind: "refused", hello })
       return
     }
-    deps.onEvent({ kind: "ready", hello })
+    const adopted = withQueuedWrites(hello)
+    resumeWrites()
+    deps.onEvent({ kind: "ready", hello: adopted })
     if (closed) return
     const live = new deps.WebSocket(
       `${deps.secure ? "wss" : "ws"}://${deps.host}${LIVE_PATH}`,
@@ -178,20 +186,48 @@ export function createConnection(deps: {
     }
   }
 
-  function enqueue(key: NoteId | "prefs", body: DraftBody | OverlayPrefs): void {
-    const route = key === "prefs" ? "savePrefs" : "putDraft"
-    pending.set(key, parseRequest(route, body) as DraftBody | OverlayPrefs)
+  function withQueuedWrites(
+    hello: Extract<HelloResult, { outcome: "accepted" }>,
+  ): Extract<HelloResult, { outcome: "accepted" }> {
+    const unsaved = new Map([...inflight, ...pending])
+    if (unsaved.size === 0) return hello
+    const prefs = unsaved.get("prefs") as OverlayPrefs | undefined
+    return {
+      ...hello,
+      state: {
+        ...hello.state,
+        drafts: hello.state.drafts.map((note) => {
+          const queued = unsaved.get(note.id) as DraftBody | undefined
+          return queued ? { ...note, ...queued } : note
+        }),
+        prefs: prefs ?? hello.state.prefs,
+      },
+    }
+  }
+
+  function startWrite(key: WriteKey): void {
     if (writes.has(key)) return
+    const route = key === "prefs" ? "savePrefs" : "putDraft"
     const task = (async () => {
       try {
-        while (pending.has(key)) {
+        for (;;) {
           const next = pending.get(key)
+          if (next === undefined) return
           pending.delete(key)
+          inflight.set(key, next)
           try {
             await json(route, next, key === "prefs" ? undefined : key)
+            if (isUnreachable(errors.get(key))) errors.delete(key)
           } catch (error) {
-            // Void writes surface their failure at flush, without an unhandled rejection.
-            writeError ??= error as Error
+            if (inflight.get(key) === next) {
+              errors.set(key, error as Error)
+              if (isUnreachable(error) && !pending.has(key)) {
+                pending.set(key, next)
+                return
+              }
+            }
+          } finally {
+            if (inflight.get(key) === next) inflight.delete(key)
           }
         }
       } finally {
@@ -199,6 +235,24 @@ export function createConnection(deps: {
       }
     })()
     writes.set(key, task)
+  }
+
+  function resumeWrites(): void {
+    for (const key of [...pending.keys()]) startWrite(key)
+  }
+
+  function dropQueued(key: WriteKey): void {
+    pending.delete(key)
+    inflight.delete(key)
+    errors.delete(key)
+  }
+
+  function enqueue(key: WriteKey, body: DraftBody | OverlayPrefs): void {
+    pending.set(
+      key,
+      parseRequest(key === "prefs" ? "savePrefs" : "putDraft", body) as DraftBody | OverlayPrefs,
+    )
+    startWrite(key)
   }
 
   return {
@@ -211,15 +265,18 @@ export function createConnection(deps: {
     },
     async deleteDraft(id: NoteId): Promise<void> {
       await json("deleteDraft", undefined, id)
+      dropQueued(id)
     },
     async flush(): Promise<void> {
       while (writes.size) await Promise.all(writes.values())
-      const error = writeError
-      writeError = null
+      const [error] = errors.values()
+      for (const key of [...errors.keys()]) if (!pending.has(key)) errors.delete(key)
       if (error) throw error
     },
-    send(request: SendRequest): Promise<SendResult> {
-      return json("send", request)
+    async send(request: SendRequest): Promise<SendResult> {
+      const result = await json("send", request)
+      if (result.outcome === "accepted") for (const id of request.noteIds) dropQueued(id)
+      return result
     },
     async listMessages(query: MessageQuery): Promise<MessagePage> {
       let parsed: MessageQuery

@@ -12,6 +12,7 @@ export const CLI_NAME = "iter8"
 
 export const CliCommand = z.enum([
   "open",
+  "run",
   "connect",
   "attach",
   "rounds",
@@ -157,6 +158,13 @@ export const CLI_SURFACE = {
     positionals: ["TARGET"],
     flags: [{ name: "upstream", value: "text", repeatable: true, required: false }, ownerFlag],
     output: OpenResult,
+    owner: AGENT_OWNER,
+  },
+  run: {
+    summary: "Start this project's dev server, or serve its HTML, behind an iter8 page and open it",
+    positionals: ["DIR"],
+    flags: [{ name: "port", value: "integer", repeatable: false, required: false }, ownerFlag],
+    output: null,
     owner: AGENT_OWNER,
   },
   connect: {

@@ -135,5 +135,19 @@
       "card"
     ],
     "confidence": "exact"
+  },
+  {
+    "name": "playground",
+    "dir": "playground",
+    "kind": "server",
+    "devArgs": [
+      "--port",
+      "{port}"
+    ],
+    "env": {},
+    "readyPath": "/",
+    "heavyPath": "/heavy",
+    "targets": [],
+    "confidence": "none"
   }
 ]
