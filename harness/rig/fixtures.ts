@@ -11,6 +11,7 @@ const REPO = Bun.fileURLToPath(new URL("../../", import.meta.url))
 
 export const FixtureName = z.enum([
   "static",
+  "modals",
   "vite-react",
   "next-turbopack",
   "next-webpack",

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A native dialog opened with showModal</title>
+  <link rel="stylesheet" href="./modal.css" />
+</head>
+<body>
+  <main id="app">
+    <h1>A native dialog opened with showModal</h1>
+    <button type="button" id="open">Open modal</button>
+    <button type="button" id="page-button">Page button</button>
+  </main>
+  <dialog id="modal" aria-label="Modal">
+    <h2>Modal</h2>
+    <p id="modal-target">Annotate me</p>
+    <input id="modal-input" aria-label="Modal field" />
+    <button type="button" id="close">Close modal</button>
+  </dialog>
+  <script>
+    const modal = document.getElementById("modal")
+    window.__closedBy = []
+    modal.addEventListener("cancel", () => window.__closedBy.push("cancel"))
+    window.__open = () => modal.showModal()
+    window.__close = () => modal.close()
+    window.__isOpen = () => modal.open
+  </script>
+  <script src="./common.js"></script>
+</body>
+</html>

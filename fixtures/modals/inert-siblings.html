@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A modal that makes the body siblings inert</title>
+  <link rel="stylesheet" href="./modal.css" />
+</head>
+<body>
+  <main id="app">
+    <h1>A modal that makes the body siblings inert</h1>
+    <button type="button" id="open">Open modal</button>
+    <button type="button" id="page-button">Page button</button>
+  </main>
+  <div id="modal" role="dialog" aria-modal="true" aria-label="Modal" hidden>
+    <h2>Modal</h2>
+    <p id="modal-target">Annotate me</p>
+    <input id="modal-input" aria-label="Modal field" />
+    <button type="button" id="close">Close modal</button>
+  </div>
+  <script>
+    const modal = document.getElementById("modal")
+    const app = document.getElementById("app")
+    window.__closedBy = []
+    window.__isOpen = () => !modal.hidden
+    window.__open = () => {
+      modal.hidden = false
+      app.inert = true
+      document.getElementById("modal-input").focus()
+    }
+    window.__close = () => {
+      modal.hidden = true
+      app.inert = false
+    }
+  </script>
+  <script src="./common.js"></script>
+</body>
+</html>

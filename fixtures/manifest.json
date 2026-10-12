@@ -16,6 +16,22 @@
     "confidence": "none"
   },
   {
+    "name": "modals",
+    "dir": "fixtures/modals",
+    "kind": "folder",
+    "devArgs": [
+      "--port",
+      "{port}"
+    ],
+    "env": {},
+    "readyPath": "/",
+    "heavyPath": null,
+    "targets": [
+      "card"
+    ],
+    "confidence": "none"
+  },
+  {
     "name": "vite-react",
     "dir": "fixtures/vite-react",
     "kind": "server",

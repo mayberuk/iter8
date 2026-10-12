@@ -1,0 +1,36 @@
+body {
+  margin: 0;
+  padding: 24px;
+  font: 16px/1.5 system-ui, sans-serif;
+  color: #243242;
+  background: #f6f8fa;
+}
+#modal {
+  box-sizing: border-box;
+  width: 400px;
+  padding: 20px;
+  border: 1px solid #243242;
+  background: white;
+  color: inherit;
+}
+div#modal {
+  position: fixed;
+  top: 20%;
+  left: 30%;
+  z-index: 51;
+}
+#backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.5);
+}
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+#modal {
+  pointer-events: auto;
+}
+[hidden] {
+  display: none !important;
+}
