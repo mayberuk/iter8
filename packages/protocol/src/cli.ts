@@ -14,6 +14,7 @@ export const CliCommand = z.enum([
   "open",
   "run",
   "connect",
+  "setup",
   "attach",
   "rounds",
   "show",
@@ -169,6 +170,14 @@ export const CLI_SURFACE = {
   },
   connect: {
     summary: "Keep an SSH tunnel to a devbox's iter8 pool up and open its pages here",
+    positionals: ["HOST"],
+    flags: [],
+    output: null,
+    owner: "none",
+  },
+  setup: {
+    summary:
+      "Install the iter8 command for this user; with HOST, also keep iter8 connect HOST running at login",
     positionals: ["HOST"],
     flags: [],
     output: null,

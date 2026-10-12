@@ -302,6 +302,7 @@ describe("command surface", () => {
         "open",
         "run",
         "connect",
+        "setup",
         "attach",
         "rounds",
         "show",
@@ -349,6 +350,35 @@ describe("command surface", () => {
     const command = cliCommands((await setup()).deps).connect
     expect(Object.keys(await resolved(command?.args ?? {})).sort()).toEqual(["HOST", "json"])
   })
+
+  test("setup takes an optional HOST and no flags, prints no protocol result, and its command has exactly HOST and json", async () => {
+    const { positionals, flags, output, owner } = CLI_SURFACE.setup
+    expect(positionals).toEqual(["HOST"])
+    expect(flags).toEqual([])
+    expect(output).toBeNull()
+    expect(owner).toBe("none")
+    const command = cliCommands((await setup()).deps).setup
+    expect(Object.keys(await resolved(command?.args ?? {})).sort()).toEqual(["HOST", "json"])
+  })
+
+  test.each([{ rawArgs: ["-oProxyCommand=x"] }, { rawArgs: ["dev box"] }, { rawArgs: [""] }])(
+    "setup rejects invalid host arguments %j with usage, before any system call",
+    async ({ rawArgs }) => {
+      const state = await setup()
+      const spawn = spyOn(Bun, "spawn").mockImplementation(() => {
+        throw new Error("an invalid host must not spawn")
+      })
+      try {
+        await state.run("setup", [...rawArgs])
+        expect(state.exits).toEqual([ExitCode.usage])
+        expect(state.stdout).toEqual([])
+        expect(state.connections).toEqual([])
+        expect(spawn).not.toHaveBeenCalled()
+      } finally {
+        spawn.mockRestore()
+      }
+    },
+  )
 
   test("run takes DIR, an integer --port and --owner, and prints no protocol result", async () => {
     const { positionals, flags, output } = CLI_SURFACE.run

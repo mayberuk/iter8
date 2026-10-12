@@ -11,6 +11,9 @@
     "playground"
   ],
   "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "dev:claude": "ITER8_BIN=$PWD/scripts/iter8-dev claude",
+    "prod": "iter8 run playground",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "biome check .",
     "knip": "knip",
