@@ -638,6 +638,44 @@ describe("command palette: commands do what their keys do", () => {
     await until("expanded to be saved", () => !o.mock.prefs().collapsed)
   }, 60_000)
 
+  test("a chat check that resolves while the palette is open leaves focus in the palette", async () => {
+    const o = await open({ pairing: LIVE, pageState: seed([]), prefs: TOUR_DONE })
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const checks: string[] = []
+    await o.page.route(
+      (url) => url.pathname === OVERLAY_ROUTES.getChat.path,
+      async (route) => {
+        checks.push(route.request().method())
+        await gate
+        await route.continue()
+      },
+    )
+
+    await runCommand(o, "show conversation")
+    await until("the chat check to be in flight", () => checks.length === 1)
+    await openPalette(o)
+    await commandInput(o.overlay).fill("collapse dock")
+    release()
+
+    const field = o.overlay.getByRole("textbox", { name: /^Message / })
+    await until("the chat input to appear once the check resolves", () => field.isVisible())
+    const focusInPalette = await commandInput(o.overlay).evaluate((input) => {
+      const root = input.getRootNode()
+      return root instanceof ShadowRoot && root.activeElement === input
+    })
+    expect(focusInPalette).toBe(true)
+
+    await commandInput(o.overlay).press("Enter")
+    await until("the palette to close", async () => !(await palette(o.overlay).isVisible()))
+    await until("Enter to have run Collapse dock", () =>
+      o.overlay.locator(".dock").evaluate((el) => el.hasAttribute("inert")),
+    )
+    expect(await field.inputValue()).toBe("")
+  }, 30_000)
+
   test("Theme: Auto and Theme: Light switch the theme and save it", async () => {
     const o = await open({
       pairing: LIVE,

@@ -723,7 +723,7 @@ function ChatInput({ name, focus }: { name: string; focus: { current: boolean } 
     setEmpty(el.value.trim() === "")
     if (focus.current) {
       focus.current = false
-      el.focus()
+      if (!model.paletteOpen.peek()) el.focus()
     }
   }, [model, focus])
 
