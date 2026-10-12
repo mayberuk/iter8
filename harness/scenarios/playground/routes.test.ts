@@ -10,7 +10,52 @@ import { waitFor } from "../../rig/wait"
 import { startBuiltService } from "../e2e/steps"
 
 const MOUNT_TIMEOUT_MS = 30_000
-const ROUTES = ["/", "/pricing", "/app", "/app/customers", "/app/settings", "/heavy"]
+
+type Marker = "home" | "pricing" | "dashboard" | "customers" | "settings" | "heavy"
+
+const ROUTES: [string, Marker][] = [
+  ["/", "home"],
+  ["/pricing", "pricing"],
+  ["/app", "dashboard"],
+  ["/app/customers", "customers"],
+  ["/app/settings", "settings"],
+  ["/heavy", "heavy"],
+]
+
+const markersOf = (page: Page): Promise<Record<Marker, boolean>> =>
+  page.evaluate(() => {
+    const count = (selector: string) => document.querySelectorAll(selector).length
+    const headings = [...document.querySelectorAll("h2")].map((h) => h.id)
+    const labelled = (text: string) =>
+      [...document.querySelectorAll("label")].some((label) => label.textContent === text)
+    const activity = document.querySelector('ul[aria-label="Recent activity"]')
+    const header = document.querySelector("thead th")
+    return {
+      home:
+        (document.querySelector("h1")?.textContent ?? "").includes(
+          "release notes that write themselves",
+        ) && count("pg-rating") === 1,
+      pricing: ["tier-Starter", "tier-Team", "tier-Scale"].every((id) => headings.includes(id)),
+      dashboard:
+        count('svg[aria-label="Drafts generated per month"] path[d^="M"]') >= 1 &&
+        activity !== null &&
+        activity.children.length === 40 &&
+        getComputedStyle(activity).overflowY === "auto" &&
+        activity.scrollHeight > activity.clientHeight,
+      customers:
+        count("tbody tr") === 200 &&
+        header !== null &&
+        getComputedStyle(header).position === "sticky",
+      settings:
+        ["Full name", "Work email", "Company"].every(labelled) &&
+        [...document.querySelectorAll("button")].some((b) => b.textContent === "Delete workspace"),
+      heavy:
+        count("tbody tr") === 6000 &&
+        [...document.querySelectorAll("tbody td")].some((td) =>
+          /tick \d+/.test(td.textContent ?? ""),
+        ),
+    }
+  })
 
 const overlayMounted = (page: Page, label: string) =>
   waitFor(
@@ -73,11 +118,27 @@ async function withPlayground(
 
 test("every playground route mounts the overlay with no page errors, and client-side navigation keeps it", async () => {
   await withPlayground(async ({ page, errors, open }) => {
-    for (const route of ROUTES) {
-      await page.goto(new URL(route, open.url).href)
+    for (const [route, own] of ROUTES) {
+      const response = await page.goto(new URL(route, open.url).href)
+      expect(response?.status()).toBe(200)
       await overlayMounted(page, `the overlay to mount on ${route}`)
       expect(pathOf(page)).toBe(route)
       expect(await page.getByRole("heading", { level: 1 }).count()).toBeGreaterThan(0)
+      await waitFor(
+        `the ${own} page content to render on ${route}`,
+        async () => ((await markersOf(page))[own] ? true : null),
+        { timeoutMs: MOUNT_TIMEOUT_MS, everyMs: 100 },
+      )
+      const found = await markersOf(page)
+      expect(found).toEqual({
+        home: false,
+        pricing: false,
+        dashboard: false,
+        customers: false,
+        settings: false,
+        heavy: false,
+        [own]: true,
+      })
     }
 
     await page.goto(new URL("/", open.url).href)
