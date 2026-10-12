@@ -1207,3 +1207,99 @@ describe("keyboard shortcuts", () => {
     expect(await overlay.getByRole("status").filter({ hasText: "Pins" }).count()).toBe(0)
   }, 30_000)
 })
+
+const DELIVERED_WINDOW_MS = 2500
+const STILL_STATES = {
+  checking: { ...LIVE, state: { status: "unknown" } },
+  gone: GONE,
+  unattached: null,
+} as const
+
+function shimmer(page: Page) {
+  return page.evaluate(() => {
+    const idn = document.querySelector("iter8-overlay")?.shadowRoot?.querySelector(".dock .idn")
+    if (!idn) throw new Error("no dock identity area")
+    const tint = getComputedStyle(idn, "::after").getPropertyValue("--sheen")
+    const animations = idn.getAnimations({ subtree: true }).flatMap((animation) => {
+      if (!(animation instanceof CSSAnimation) || !(animation.effect instanceof KeyframeEffect))
+        return []
+      if (animation.effect.pseudoElement !== "::after") return []
+      const timing = animation.effect.getComputedTiming()
+      return [
+        {
+          name: animation.animationName,
+          duration: Number(timing.duration),
+          iterations: timing.iterations ?? 0,
+        },
+      ]
+    })
+    return { tint, animations }
+  })
+}
+
+const dockClass = (overlay: Locator) => dock(overlay).getAttribute("class")
+const token = (overlay: Locator, name: string) =>
+  dock(overlay).evaluate((el, prop) => getComputedStyle(el).getPropertyValue(prop).trim(), name)
+
+describe("the dock's state shimmer", () => {
+  test("a live session sweeps a faint keep-tinted band slowly, with a long rest", async () => {
+    const o = await open({ pairing: LIVE })
+    expect(await dockClass(o.overlay)).toContain("s-live")
+    const { animations, tint } = await shimmer(o.page)
+    expect(animations.map((a) => a.name)).toEqual(["sheen"])
+    expect(animations[0]?.iterations).toBe(Number.POSITIVE_INFINITY)
+    expect(animations[0]?.duration).toBeGreaterThanOrEqual(4000)
+    expect(animations[0]?.duration).toBeLessThanOrEqual(5000)
+    expect(tint).toContain(await token(o.overlay, "--keep"))
+  }, 30_000)
+
+  test("a busy session sweeps faster than a live one, in the change tint", async () => {
+    const o = await open({ pairing: { ...LIVE, state: { status: "busy" } } })
+    expect(await dockClass(o.overlay)).toContain("s-busy")
+    const { animations, tint } = await shimmer(o.page)
+    expect(animations.map((a) => a.name)).toEqual(["sheen"])
+    expect(animations[0]?.iterations).toBe(Number.POSITIVE_INFINITY)
+    expect(animations[0]?.duration).toBeGreaterThanOrEqual(1200)
+    expect(animations[0]?.duration).toBeLessThanOrEqual(2000)
+    expect(tint).toContain(await token(o.overlay, "--change"))
+  }, 30_000)
+
+  test("a delivered send sweeps twice in the cobalt tint inside the delivered window, then goes back to the session's own state", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    await sendButton(o.overlay).click()
+    const seen = await waitFor(
+      "the delivered shimmer",
+      async () => {
+        const now = await shimmer(o.page)
+        return now.animations.length > 0 && (await dockClass(o.overlay))?.includes("s-delivered")
+          ? now
+          : null
+      },
+      { timeoutMs: 2000, everyMs: 25 },
+    )
+    expect(seen.animations.map((a) => a.name)).toEqual(["sheen"])
+    expect(seen.animations[0]?.iterations).toBe(2)
+    expect(
+      (seen.animations[0]?.duration ?? 0) * (seen.animations[0]?.iterations ?? 0),
+    ).toBeLessThanOrEqual(DELIVERED_WINDOW_MS)
+    expect(seen.tint).toContain(await token(o.overlay, "--cobalt"))
+    await until("the dock to return to live", async () =>
+      ((await dockClass(o.overlay)) ?? "").includes("s-live"),
+    )
+  }, 30_000)
+
+  for (const [state, pairing] of Object.entries(STILL_STATES)) {
+    test(`a ${state} dock does not animate at all`, async () => {
+      const o = await open({ pairing })
+      expect(await dockClass(o.overlay)).toContain(`s-${state}`)
+      expect((await shimmer(o.page)).animations).toEqual([])
+    }, 30_000)
+  }
+
+  test("with reduced motion a live dock shows no sweep, only the lamp's colour", async () => {
+    const o = await open({ pairing: LIVE })
+    await o.page.emulateMedia({ reducedMotion: "reduce" })
+    await until("the sweep to stop", async () => (await shimmer(o.page)).animations.length === 0)
+    expect(await o.overlay.locator(".dock .vu svg.meter").count()).toBe(1)
+  }, 30_000)
+})

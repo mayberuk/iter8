@@ -419,7 +419,7 @@ describe("the glyph set", () => {
     expect(ids[0]).not.toBe(ids[1])
   }, 30_000)
 
-  test("the meter has five bars for every dock state, and checking and unattached sit still and faint", async () => {
+  test("the meter is one lamp per dock state, carrying the state's class, with checking and unattached faint", async () => {
     const { page } = await openUi()
     await show(
       page,
@@ -428,19 +428,24 @@ describe("the glyph set", () => {
     const meters = await page.evaluate(() => {
       const root = document.getElementById("stage")?.shadowRoot
       return Array.from(root?.querySelectorAll("[data-item] svg") ?? [], (svg) => ({
-        bars: svg.querySelectorAll(".mf").length,
+        lamps: svg.querySelectorAll(".mf").length,
+        shapes: svg.querySelectorAll("*").length,
         classes: Array.from(svg.classList),
       }))
     })
-    expect(meters.map((meter) => meter.bars)).toEqual([5, 5, 5, 5, 5, 5])
+    expect(meters.map((meter) => meter.lamps)).toEqual([1, 1, 1, 1, 1, 1])
+    expect(meters.map((meter) => meter.shapes)).toEqual([2, 2, 2, 2, 2, 2])
     const byState = new Map(METER_KEYS.map((state, index) => [state, meters[index]?.classes ?? []]))
+    for (const state of ["busy", "gone", "delivered"] as const) {
+      expect(byState.get(state)).toContain(state)
+    }
     for (const state of ["checking", "unattached"] as const) {
-      expect(byState.get(state)).toContain("still")
       expect(byState.get(state)).toContain("faint")
     }
     for (const state of ["live", "busy", "gone", "delivered"] as const) {
       expect(byState.get(state)).not.toContain("faint")
     }
+    expect(byState.get("live")).toEqual(["meter"])
   }, 30_000)
 
   test("the Claude avatar draws the mark from the shared symbol; any other agent is a two-letter monogram", async () => {
