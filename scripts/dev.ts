@@ -1,11 +1,13 @@
 import { watch } from "node:fs"
 import { homedir } from "node:os"
 import { resolve } from "node:path"
-import { ServiceStatus } from "@iter8/protocol"
+import { ENV, ServiceStatus } from "@iter8/protocol"
 import { buildOverlayBundles } from "./build"
 
 async function dev(): Promise<void> {
   const root = resolve(import.meta.dir, "..")
+  const overlayDir = process.env[ENV.overlayDir]
+  const buildOptions = overlayDir ? { outDir: overlayDir } : {}
   const launcher = resolve(root, "scripts/iter8-dev")
   const env = {
     ...process.env,
@@ -46,7 +48,7 @@ async function dev(): Promise<void> {
       while (dirty && !stopping) {
         dirty = false
         try {
-          await buildOverlayBundles()
+          await buildOverlayBundles(buildOptions)
         } catch (error) {
           console.error(
             `Overlay build failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -76,7 +78,7 @@ async function dev(): Promise<void> {
   process.on("SIGINT", stop)
   process.on("SIGTERM", stop)
   try {
-    await buildOverlayBundles()
+    await buildOverlayBundles(buildOptions)
     if (stopping) return
     for (const path of ["apps/overlay/src", "packages/source/src"]) {
       const watcher = watch(resolve(root, path), { recursive: true }, () => {
@@ -120,7 +122,7 @@ async function dev(): Promise<void> {
     }
     if (stopping) return
     if (!ready) throw new Error("The dev service did not become ready within 30 s.")
-    start([launcher, "run", "playground"])
+    start([launcher, "run", "playground", ...process.argv.slice(2)])
     await stopped
   } catch (error) {
     fail(error)
