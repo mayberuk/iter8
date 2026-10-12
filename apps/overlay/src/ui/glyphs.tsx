@@ -480,8 +480,6 @@ const METER_VARIANTS = {
 
 export type MeterKey = keyof typeof METER_VARIANTS
 
-const METER_BAR_X = [0, 4.6, 9.2, 13.8, 18.4]
-
 export function Meter({
   state,
   still = false,
@@ -498,16 +496,9 @@ export function Meter({
     size === "small" ? "small" : "",
   ]
   return (
-    <svg class={classes.filter(Boolean).join(" ")} viewBox="0 0 23 15" aria-hidden="true">
-      {/* Scaling an SVG-internal element lays out the page every frame; HTML inside foreignObject composites. */}
-      <foreignObject width="23" height="15">
-        {METER_BAR_X.map((x) => (
-          <span key={x} class="mb" style={{ left: `${x}px` }}>
-            <i class="md" />
-            <i class="mf" />
-          </span>
-        ))}
-      </foreignObject>
+    <svg class={classes.filter(Boolean).join(" ")} viewBox="0 0 10 11" aria-hidden="true">
+      <circle class="md" cx="5" cy="6" r="4" />
+      <circle class="mf" cx="5" cy="5" r="4" />
     </svg>
   )
 }

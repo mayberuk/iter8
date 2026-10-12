@@ -1207,3 +1207,161 @@ describe("keyboard shortcuts", () => {
     expect(await overlay.getByRole("status").filter({ hasText: "Pins" }).count()).toBe(0)
   }, 30_000)
 })
+
+const DELIVERED_WINDOW_MS = 2500
+const STILL_STATES = {
+  checking: { ...LIVE, state: { status: "unknown" } },
+  gone: GONE,
+  unattached: null,
+} as const
+
+function shimmer(page: Page) {
+  return page.evaluate(() => {
+    const root = document.querySelector("iter8-overlay")?.shadowRoot
+    const window = root?.querySelector(".dock .idn .sheen")
+    const copy = root?.querySelector(".dock .idn .sheen-copy")
+    if (!root || !window || !copy) throw new Error("no sheen window")
+    const probe = (el: Element) =>
+      el.getAnimations().flatMap((animation) => {
+        if (!(animation instanceof CSSAnimation) || !(animation.effect instanceof KeyframeEffect))
+          return []
+        const timing = animation.effect.getComputedTiming()
+        return [
+          {
+            name: animation.animationName,
+            duration: Number(timing.duration),
+            iterations: timing.iterations ?? 0,
+          },
+        ]
+      })
+    const base = root.querySelector(".dock .idn")
+    const text = (selector: string) => base?.querySelector(selector)?.textContent ?? null
+    const own = (selector: string) => copy.querySelector(selector)?.textContent ?? null
+    return {
+      window: probe(window),
+      copy: probe(copy),
+      shown: getComputedStyle(window).display !== "none",
+      color: getComputedStyle(copy).color,
+      copied: { name: own(".hn"), where: own(".hw"), word: own(".hs") },
+      base: { name: text(".proj"), where: text(".where"), word: text(".stword .w") },
+      hidden: window.getAttribute("aria-hidden"),
+    }
+  })
+}
+
+const dockClass = (overlay: Locator) => dock(overlay).getAttribute("class")
+
+/** The colour a token resolves to, as the browser reports a computed `color`. */
+function tokenColor(page: Page, name: string) {
+  return page.evaluate((prop) => {
+    const root = document.querySelector("iter8-overlay")?.shadowRoot
+    const dock = root?.querySelector(".dock")
+    if (!root || !dock) throw new Error("no dock")
+    const probe = document.createElement("i")
+    probe.style.color = getComputedStyle(dock).getPropertyValue(prop).trim()
+    root.append(probe)
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    return color
+  }, name)
+}
+
+describe("the dock's state shimmer", () => {
+  test("a live session sweeps a keep-tinted highlight over its text, slowly, with a long rest", async () => {
+    const o = await open({ pairing: LIVE })
+    expect(await dockClass(o.overlay)).toContain("s-live")
+    const seen = await shimmer(o.page)
+    expect(seen.shown).toBe(true)
+    expect(seen.window.map((a) => a.name)).toEqual(["sheen-window"])
+    expect(seen.copy.map((a) => a.name)).toEqual(["sheen-copy"])
+    expect(seen.window[0]?.iterations).toBe(Number.POSITIVE_INFINITY)
+    expect(seen.window[0]?.duration).toBeGreaterThanOrEqual(4000)
+    expect(seen.window[0]?.duration).toBeLessThanOrEqual(5000)
+    expect(seen.copy).toEqual(seen.window.map((a) => ({ ...a, name: "sheen-copy" })))
+    expect(seen.color).toBe(await tokenColor(o.page, "--keep"))
+  }, 30_000)
+
+  test("a busy session sweeps faster than a live one, in the change tint", async () => {
+    const o = await open({ pairing: { ...LIVE, state: { status: "busy" } } })
+    expect(await dockClass(o.overlay)).toContain("s-busy")
+    const seen = await shimmer(o.page)
+    expect(seen.window.map((a) => a.name)).toEqual(["sheen-window"])
+    expect(seen.window[0]?.iterations).toBe(Number.POSITIVE_INFINITY)
+    expect(seen.window[0]?.duration).toBeGreaterThanOrEqual(1200)
+    expect(seen.window[0]?.duration).toBeLessThanOrEqual(2000)
+    expect(seen.copy).toEqual(seen.window.map((a) => ({ ...a, name: "sheen-copy" })))
+    expect(seen.color).toBe(await tokenColor(o.page, "--change"))
+  }, 30_000)
+
+  test("the highlight copy says exactly what the dock says, and is hidden from assistive tech", async () => {
+    const o = await open({ pairing: { ...LIVE, state: { status: "busy" } } })
+    const seen = await shimmer(o.page)
+    expect(seen.base.name).toBe("larkspur")
+    expect(seen.base.word).toBe("busy")
+    expect(seen.copied).toEqual(seen.base)
+    expect(seen.hidden).toBe("true")
+  }, 30_000)
+
+  test("in the dark theme the highlight is the lighter text tint", async () => {
+    const o = await open({ pairing: LIVE })
+    await o.page.evaluate(() =>
+      document
+        .querySelector("iter8-overlay")
+        ?.shadowRoot?.querySelector(".root")
+        ?.setAttribute("data-theme", "dark"),
+    )
+    expect((await shimmer(o.page)).color).toBe(await tokenColor(o.page, "--keep-t"))
+  }, 30_000)
+
+  test("a delivered send sweeps twice in the cobalt tint inside the delivered window, then goes back to the session's own state", async () => {
+    const o = await open({ pairing: LIVE, pageState: SEEDED })
+    await sendButton(o.overlay).click()
+    const seen = await waitFor(
+      "the delivered shimmer",
+      async () => {
+        const now = await shimmer(o.page)
+        return now.window.length > 0 && (await dockClass(o.overlay))?.includes("s-delivered")
+          ? now
+          : null
+      },
+      { timeoutMs: 2000, everyMs: 25 },
+    )
+    expect(seen.window.map((a) => a.name)).toEqual(["sheen-window"])
+    expect(seen.window[0]?.iterations).toBe(2)
+    expect((seen.window[0]?.duration ?? 0) * (seen.window[0]?.iterations ?? 0)).toBeLessThanOrEqual(
+      DELIVERED_WINDOW_MS,
+    )
+    expect(seen.copy).toEqual(seen.window.map((a) => ({ ...a, name: "sheen-copy" })))
+    expect(seen.color).toBe(await tokenColor(o.page, "--cobalt"))
+    await until("the dock to return to live", async () =>
+      ((await dockClass(o.overlay)) ?? "").includes("s-live"),
+    )
+  }, 30_000)
+
+  for (const [state, pairing] of Object.entries(STILL_STATES)) {
+    test(`a ${state} dock does not animate at all`, async () => {
+      const o = await open({ pairing })
+      expect(await dockClass(o.overlay)).toContain(`s-${state}`)
+      const seen = await shimmer(o.page)
+      expect([seen.shown, seen.window, seen.copy]).toEqual([false, [], []])
+    }, 30_000)
+  }
+
+  test("with reduced motion a live dock shows no highlight, only the lamp's colour", async () => {
+    const o = await open({ pairing: LIVE })
+    await o.page.emulateMedia({ reducedMotion: "reduce" })
+    await until("the sweep to stop", async () => {
+      const seen = await shimmer(o.page)
+      return seen.window.length === 0 && seen.copy.length === 0
+    })
+    const rest = await o.page.evaluate(() => {
+      const root = document.querySelector("iter8-overlay")?.shadowRoot
+      const idn = root?.querySelector(".dock .idn")?.getBoundingClientRect()
+      const sheen = root?.querySelector(".dock .idn .sheen")?.getBoundingClientRect()
+      if (!idn || !sheen) throw new Error("no dock")
+      return sheen.right <= idn.left
+    })
+    expect(rest).toBe(true)
+    expect(await o.overlay.locator(".dock .vu svg.meter").count()).toBe(1)
+  }, 30_000)
+})

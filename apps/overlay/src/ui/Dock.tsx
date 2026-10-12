@@ -49,6 +49,7 @@ const SNAP_RADIUS = 90
 const SNAP_PULL = 0.55
 const POP_GAP = 10
 const POP_EDGE = 12
+const DOCK_AVATAR_PX = 22
 const POP_WIDTH = 320
 const MORE_WIDTH = 272
 const BUMP_MS = 200
@@ -771,7 +772,7 @@ export function Dock() {
           <span class="vu">
             <Meter state={state} />
           </span>
-          {pairing ? <Avatar agent={pairing.agent} size={22} /> : null}
+          {pairing ? <Avatar agent={pairing.agent} size={DOCK_AVATAR_PX} /> : null}
           <span class="proj">{name}</span>
           <span class="where">{where}</span>
           {word ? (
@@ -781,6 +782,20 @@ export function Dock() {
               <span class="w">{word}</span>
             </span>
           ) : null}
+          <span class="sheen" aria-hidden="true">
+            <span class="sheen-copy">
+              <i class="vu skip" />
+              {pairing ? <i class="skip" style={{ width: `${DOCK_AVATAR_PX}px` }} /> : null}
+              <span class="hn">{name}</span>
+              <span class="hw">{where}</span>
+              {word ? (
+                <span class="hs">
+                  {state === "busy" || state === "delivered" ? <i class="skip hs-icon" /> : null}
+                  <span>{word}</span>
+                </span>
+              ) : null}
+            </span>
+          </span>
         </button>
         <i class="vr" />
         <div class="seg">
