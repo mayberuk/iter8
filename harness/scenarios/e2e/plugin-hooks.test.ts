@@ -22,8 +22,9 @@ import { expectPointerOnly, pickAndNote, sendRound, startBuiltService } from "./
 const REPO = join(import.meta.dir, "..", "..", "..")
 const PLUGIN_DIR = process.env.ITER8_CC_PLUGIN_DIR ?? resolve(REPO, "../cc-plugins/plugins/iter8")
 const SYNC_TIMEOUT_MS = 30_000
-const ASYNC_TIMEOUT_MS = 120_000
 const UI_TIMEOUT_MS = 15_000
+// A wake hook ends within one UI wait of its trigger; four keep a hang well inside the test timeout.
+const ASYNC_TIMEOUT_MS = 4 * UI_TIMEOUT_MS
 
 const HooksFile = z.object({
   hooks: z.record(
@@ -83,7 +84,36 @@ async function teardown(steps: (() => Promise<unknown> | undefined)[]): Promise<
   if (failures.length > 0) throw new AggregateError(failures, "teardown failed")
 }
 
-type AsyncHook = { event: string; settled: HookRun | null; done: Promise<HookRun> }
+type AsyncHook = {
+  event: string
+  pidFile: string
+  killed: boolean
+  settled: HookRun | null
+  done: Promise<HookRun>
+}
+
+async function killHook(hook: AsyncHook): Promise<void> {
+  if (hook.settled !== null) return
+  const pgid = await waitFor(
+    `the ${hook.event} wake hook to record its process group`,
+    async () => {
+      const text = (
+        await Bun.file(hook.pidFile)
+          .text()
+          .catch(() => "")
+      ).trim()
+      return /^\d+$/.test(text) ? Number(text) : null
+    },
+    { timeoutMs: UI_TIMEOUT_MS },
+  )
+  hook.killed = true
+  try {
+    process.kill(-pgid, "SIGKILL")
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error
+  }
+  await hook.done
+}
 
 test.skipIf(!pluginPresent)(
   "the plugin's real hooks pair the session, deliver pointer-only wakes and survive a clear",
@@ -133,14 +163,17 @@ test.skipIf(!pluginPresent)(
         let wake: AsyncHook | undefined
         for (const hook of commandsFor(event)) {
           if (hook.asyncRewake === true) {
+            const pidFile = join(scratch.path, `wake-${asyncHooks.length}.pgid`)
             const running = session.runHook({
-              command: hook.command,
+              command: `echo $$ > ${shellQuote(pidFile)}; ${hook.command}`,
               input,
               env: hookEnv,
               timeoutMs: ASYNC_TIMEOUT_MS,
             })
             const started: AsyncHook = {
               event,
+              pidFile,
+              killed: false,
               settled: null,
               done: running.then((run) => {
                 started.settled = run
@@ -287,9 +320,10 @@ test.skipIf(!pluginPresent)(
         { timeoutMs: UI_TIMEOUT_MS },
       )
     } finally {
+      // Hooks end before the service: a late wake.sh would autostart a fresh service in ITER8_HOME.
       await teardown([
+        ...asyncHooks.map((hook) => () => killHook(hook)),
         () => stopService?.(),
-        () => Promise.allSettled(asyncHooks.map((hook) => hook.done)),
         () => exitSession?.(),
         ...disposers.reverse(),
       ])
@@ -298,8 +332,11 @@ test.skipIf(!pluginPresent)(
     const wakes = asyncHooks.filter((hook) => hook.settled?.exitCode === ExitCode.wake)
     expect(wakes.map((hook) => hook.event)).toEqual(["Stop"])
     for (const hook of asyncHooks) {
-      expect(hook.settled?.timedOut).toBe(false)
-      if (hook.settled?.exitCode !== ExitCode.wake) {
+      if (hook.settled?.timedOut === true) {
+        throw new Error(`the ${hook.event} wake hook ran past its ${ASYNC_TIMEOUT_MS} ms bound`)
+      }
+      expect(hook.settled).not.toBeNull()
+      if (!hook.killed && hook.settled?.exitCode !== ExitCode.wake) {
         expect(hook.settled?.exitCode).toBe(0)
         expect(hook.settled?.stderr).toBe("")
       }
