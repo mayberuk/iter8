@@ -13,6 +13,7 @@ import { useOverlay, useSheet } from "./context"
 import conversationCss from "./conversation.css" with { type: "text" }
 import { SessionRows } from "./Dock"
 import { Icon, Meter } from "./glyphs"
+import { Markdown } from "./Markdown"
 
 type Overlay = Pick<ReturnType<typeof useOverlay>, "model" | "connection">
 
@@ -153,7 +154,11 @@ function MessageRow({ message, name }: { message: ConversationMessage; name: str
         <b>{label}</b>
         <span>{time}</span>
       </div>
-      <p class="cv-text">{message.text}</p>
+      {author.kind === "agent" ? (
+        <Markdown text={message.text} />
+      ) : (
+        <p class="cv-text">{message.text}</p>
+      )}
       {author.kind === "page" ? (
         <p class={`cv-state ${author.delivery.status}`}>{deliveryWords(author.delivery, name)}</p>
       ) : null}

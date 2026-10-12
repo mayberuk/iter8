@@ -40,6 +40,16 @@ const ICON_CATALOG = {
   sun: true,
   moon: true,
   auto: true,
+  copy: true,
+  down: true,
+  up: true,
+  right: true,
+  info: true,
+  bulb: true,
+  flag: true,
+  alert: true,
+  octagon: true,
+  lock: true,
 } satisfies Record<IconName, true>
 
 const ICON_NAMES = Object.keys(ICON_CATALOG) as IconName[]

@@ -55,8 +55,10 @@
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--ink);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+p.cv-text {
+  white-space: pre-wrap;
 }
 .cv-state {
   margin: 4px 0 0;
