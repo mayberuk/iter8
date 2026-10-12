@@ -57,8 +57,11 @@ Import each module by path; there are no barrels.
   `runHook({ command, input, env, timeoutMs })`, `hookInput(event, extra)`.
 - `harness/rig/fixtures.ts` — `startFixture(name)` (waits for readiness, stops the process group),
   `buildFixture(name)`, `HEAVY_PAGE`, `MANIFEST`; `fixtures/manifest.json`.
-  Next fixtures get a per-start `distDir` and scratch prefixes (`SCRATCH_ROOT` in `scratch.ts`) carry
-  the pid, so concurrent runs don't collide.
+  Next fixtures get a per-start `distDir`, SvelteKit a per-start `outDir` and Vite dep cache, and
+  scratch prefixes (`SCRATCH_ROOT` in `scratch.ts`) carry the pid, so concurrent runs don't collide.
+  `playground` is the permanent test site (`playground/`: marketing page, app shell, dialog, table,
+  form, shadow-DOM and SVG edge cases, `/heavy`, and the static `mock/`); its scenario is
+  `harness/scenarios/playground/`.
 - `harness/rig/bundle.ts` — `buildBrowserBundle(entry)`.
 - `harness/stubs/mock-service.ts` — `startMockService({ folder, overlayDir, … })`: the overlay API
   over a built folder; controls `setPairing`, `setLiveSessions`, `push`, `draft()`, `rounds()`,
@@ -80,6 +83,10 @@ the laptop is a manual check the suite cannot make.
 - Where new integration tests live: beside the code (`*.test.ts`); scenario tests under `harness/scenarios/<part>/`
 - Where new shared helpers/fixtures go: `harness/rig/`, `harness/stubs/`, `fixtures/`
 - Start the cheapest fixture that proves the behaviour: the static folder or the Vite + React app.
+- Try iter8 by hand with `bun run dev` (from source, on `~/.iter8-dev` and pool 3970–3973, opens the
+  playground), `bun run dev:claude` (a Claude Code session on that build) or `bun run prod` (the
+  installed iter8). Their scenarios: `harness/scenarios/dev/`, `harness/scenarios/setup/`,
+  `harness/scenarios/run/`.
 - No fixed ports, no `~/.iter8`, no real `claude` turn; ports, state dirs and browsers come from
   `harness/rig/`.
 - A test removes every temp dir and stops every process it started; one day of leaked scratch
