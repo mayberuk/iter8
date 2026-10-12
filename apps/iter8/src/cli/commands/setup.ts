@@ -192,7 +192,8 @@ async function enableUnit(system: SetupSystem, host: string): Promise<void> {
   ].join("\n")
   await writeAtomically(unit, content, 0o644)
   await succeed(system, ["systemctl", "--user", "daemon-reload"])
-  await succeed(system, ["systemctl", "--user", "enable", "--now", UNIT_NAME])
+  await succeed(system, ["systemctl", "--user", "enable", UNIT_NAME])
+  await succeed(system, ["systemctl", "--user", "restart", UNIT_NAME])
 }
 
 const xml = (text: string) => text.replace(/[&<>"']/g, (char) => XML_ENTITIES[char] ?? char)

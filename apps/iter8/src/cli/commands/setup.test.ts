@@ -197,6 +197,51 @@ describe("installing the command", () => {
     expect(await readFile(t.binary, "utf8")).toBe("#!/bin/sh\necho compiled\n")
   })
 
+  test("points current at a newer release installed while current is absent", async () => {
+    const t = await fixture()
+    const newer = join(t.data, "releases", "v9.0.0", "iter8")
+    await mkdir(join(t.data, "releases", "v9.0.0"), { recursive: true })
+    await writeFile(newer, "newer")
+    await chmod(newer, 0o755)
+    await t.run()
+    expect(t.exits).toEqual([ExitCode.ok])
+    expect(await readlink(join(t.data, "current"))).toBe(newer)
+    expect(await readFile(t.binary, "utf8")).toBe("#!/bin/sh\necho compiled\n")
+  })
+
+  test("moves current from an older release to the newest installed one", async () => {
+    const t = await fixture()
+    const older = join(t.data, "releases", "v1.0.0", "iter8")
+    const newer = join(t.data, "releases", "v9.0.0", "iter8")
+    for (const path of [older, newer]) {
+      await mkdir(join(path, ".."), { recursive: true })
+      await writeFile(path, "release")
+      await chmod(path, 0o755)
+    }
+    await symlink(older, join(t.data, "current"))
+    await t.run()
+    expect(await readlink(join(t.data, "current"))).toBe(newer)
+  })
+
+  test("points current at its own version when that is the newest installed", async () => {
+    const t = await fixture()
+    const older = join(t.data, "releases", "v1.0.0", "iter8")
+    await mkdir(join(t.data, "releases", "v1.0.0"), { recursive: true })
+    await writeFile(older, "older")
+    await chmod(older, 0o755)
+    await symlink(older, join(t.data, "current"))
+    await t.run()
+    expect(await readlink(join(t.data, "current"))).toBe(t.binary)
+  })
+
+  test("installs the copy as 755 whatever mode the source binary has", async () => {
+    const t = await fixture()
+    await chmod(t.downloaded, 0o700)
+    await t.run()
+    expect(t.exits).toEqual([ExitCode.ok])
+    expect((await stat(t.binary)).mode & 0o777).toBe(0o755)
+  })
+
   test("a second run succeeds and rewrites the same launcher", async () => {
     const t = await fixture()
     await t.run()
@@ -351,7 +396,8 @@ describe("a host on Linux", () => {
     expect(t.spawned).toEqual([
       [...ssh, "devbox", "true"],
       ["systemctl", "--user", "daemon-reload"],
-      ["systemctl", "--user", "enable", "--now", "iter8-connect.service"],
+      ["systemctl", "--user", "enable", "iter8-connect.service"],
+      ["systemctl", "--user", "restart", "iter8-connect.service"],
     ])
     expect(await readFile(t.unit, "utf8")).toBe(
       [
@@ -424,6 +470,49 @@ describe("a host on Linux", () => {
     expect(t.exits).toEqual([ExitCode.failure])
     expect(t.stderr).toEqual(["Failed to connect to bus: No medium found\n"])
     expect(t.stdout.join("")).not.toContain("now runs at login")
+  })
+
+  test("restarts the running unit with the new host when setup is run again for another host", async () => {
+    const t = await fixture()
+    await t.run("alpha")
+    t.spawned.length = 0
+    await t.run("bravo")
+    expect(t.exits).toEqual([ExitCode.ok, ExitCode.ok])
+    expect(t.spawned).toEqual([
+      [...ssh, "bravo", "true"],
+      ["systemctl", "--user", "daemon-reload"],
+      ["systemctl", "--user", "enable", "iter8-connect.service"],
+      ["systemctl", "--user", "restart", "iter8-connect.service"],
+    ])
+    const unit = await readFile(t.unit, "utf8")
+    expect(unit).toContain("ExecStart=%h/.local/bin/iter8 connect bravo\n")
+    expect(unit).not.toContain("alpha")
+  })
+
+  test("stops at a failing daemon-reload, surfaces its stderr and runs no later systemctl", async () => {
+    const t = await fixture({
+      reply: (argv) =>
+        argv.includes("daemon-reload") ? { code: 1, stderr: "Failed to reload: no bus\n" } : {},
+    })
+    await t.run("devbox")
+    expect(t.exits).toEqual([ExitCode.failure])
+    expect(t.stderr).toEqual(["Failed to reload: no bus\n"])
+    expect(t.spawned).toEqual([
+      [...ssh, "devbox", "true"],
+      ["systemctl", "--user", "daemon-reload"],
+    ])
+    expect(t.stdout.join("")).not.toContain("now runs at login")
+  })
+
+  test("leaves an existing unit byte-identical and runs no systemctl when ssh needs a password", async () => {
+    const t = await fixture({ reply: (argv) => (argv[0] === "ssh" ? { code: 255 } : {}) })
+    const before = Buffer.from("[Unit]\nDescription=hand edited \u00e9\n\u0000\nkeep\n")
+    await mkdir(join(t.unit, ".."), { recursive: true })
+    await writeFile(t.unit, before)
+    await t.run("devbox")
+    expect(t.exits).toEqual([ExitCode.failure])
+    expect(Buffer.compare(await readFile(t.unit), before)).toBe(0)
+    expect(t.spawned.map((argv) => argv[0])).toEqual(["ssh"])
   })
 
   test("exits 1 naming the tool when it cannot be started", async () => {
@@ -516,6 +605,70 @@ describe("a host on macOS", () => {
     }
     expect(open).toEqual([])
     expect(t.spawned[2]).toEqual(["launchctl", "bootstrap", "gui/501", t.plist])
+  })
+
+  test("round-trips XML metacharacters in the home path, the host and SSH_AUTH_SOCK", async () => {
+    const metacharacters = `&<>"'`
+    const t = await fixture({
+      platform: "darwin",
+      env: {
+        PATH: `/a${metacharacters}b:/usr/bin`,
+        SSH_AUTH_SOCK: `/tmp/s${metacharacters}/agent.sock`,
+      },
+    })
+    t.system.home = join(t.root, `home${metacharacters}`)
+    t.system.env.ITER8_HOME = join(t.root, `state${metacharacters}`)
+    const host = `user${metacharacters}@box`
+    await t.run(host)
+    expect(t.exits).toEqual([ExitCode.ok])
+    const plist = join(t.system.home, "Library", "LaunchAgents", "dev.iter8.connect.plist")
+    const text = await readFile(plist, "utf8")
+    expect(text).not.toMatch(/&(?!(amp|lt|gt|quot|apos);)/)
+    const entities: Record<string, string> = {
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+    }
+    const values = [...text.matchAll(/<(key|string)>([^<]*)<\/\1>/g)].map(([, , raw = ""]) =>
+      raw.replace(/&(amp|lt|gt|quot|apos);/g, (_all, name: string) => entities[name] ?? ""),
+    )
+    const log = join(t.system.env.ITER8_HOME, "connect.log")
+    expect(values).toEqual([
+      "Label",
+      "dev.iter8.connect",
+      "ProgramArguments",
+      join(t.system.home, ".local", "bin", "iter8"),
+      "connect",
+      host,
+      "RunAtLoad",
+      "KeepAlive",
+      "EnvironmentVariables",
+      "PATH",
+      `/a${metacharacters}b:/usr/bin`,
+      "SSH_AUTH_SOCK",
+      `/tmp/s${metacharacters}/agent.sock`,
+      "StandardOutPath",
+      log,
+      "StandardErrorPath",
+      log,
+    ])
+    expect(t.spawned[2]).toEqual(["launchctl", "bootstrap", "gui/501", plist])
+  })
+
+  test("leaves an existing launch agent byte-identical and runs no launchctl when ssh needs a password", async () => {
+    const t = await fixture({
+      platform: "darwin",
+      reply: (argv) => (argv[0] === "ssh" ? { code: 255 } : {}),
+    })
+    const before = Buffer.from("<plist>hand edited \u00e9\u0000</plist>\n")
+    await mkdir(join(t.plist, ".."), { recursive: true })
+    await writeFile(t.plist, before)
+    await t.run("devbox")
+    expect(t.exits).toEqual([ExitCode.failure])
+    expect(Buffer.compare(await readFile(t.plist), before)).toBe(0)
+    expect(t.spawned.map((argv) => argv[0])).toEqual(["ssh"])
   })
 
   test("omits SSH_AUTH_SOCK when the environment has none", async () => {
