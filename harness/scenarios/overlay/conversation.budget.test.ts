@@ -78,11 +78,15 @@ test("typing a chat message on the heavy page while messages arrive keeps every 
       field.evaluate((el) => (el.getRootNode() as ShadowRoot).activeElement === el),
     )
 
-    let next = SEEDED + 1
+    let last = SEEDED
+    let pushed = 0
     const frames = await startFrameProbe(o.page)
     const tasks = await startLongTaskProbe(o.page)
     pusher = setInterval(() => {
-      o.mock.pushMessage(message(next++))
+      // Above every held id: the mock numbers the typed message from the same sequence.
+      last = Math.max(last, ...o.mock.messages().map((m) => Number(m.id.slice(1)))) + 1
+      o.mock.pushMessage(message(last))
+      pushed++
     }, PUSH_EVERY_MS)
     const firstLive = rows.filter({ hasText: `Finished step ${SEEDED + 1}:` })
     await o.page.keyboard.type(TYPED.slice(0, 45), { delay: 25 })
@@ -98,8 +102,7 @@ test("typing a chat message on the heavy page while messages arrive keeps every 
     )
     clearInterval(pusher)
     pusher = null
-    const pushed = next - SEEDED - 1
-    const lastLive = rows.filter({ hasText: `Finished step ${next - 1}:` })
+    const lastLive = rows.filter({ hasText: `Finished step ${last}:` })
     await until("the last pushed message in the list", async () => (await lastLive.count()) === 1)
     const { longestMs, count } = await tasks.stop()
     const { late, worstMs } = await frames.stop()
