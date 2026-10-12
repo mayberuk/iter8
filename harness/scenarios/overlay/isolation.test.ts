@@ -316,6 +316,27 @@ describe("teardown", () => {
     await removeHostAndExpectBaseline(page, baseline)
   }, 30_000)
 
+  test("removing the host while a native dialog is open leaves the same listeners and no observer reseating it", async () => {
+    const { page, baseline } = await trackedOpen()
+    const mounted = await pageListeners(page)
+    expect(mounted).toContain("window:focusin:capture")
+    await page.evaluate(() => {
+      const dialog = document.createElement("dialog")
+      dialog.id = "page-dialog"
+      document.body.append(dialog)
+      dialog.showModal()
+    })
+    await until("the host to sit in the dialog", () =>
+      page.evaluate(
+        () => document.querySelector("iter8-overlay")?.parentElement?.id === "page-dialog",
+      ),
+    )
+    await removeHostAndExpectBaseline(page, baseline)
+    await page.evaluate(() => document.querySelector<HTMLDialogElement>("#page-dialog")?.close())
+    await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+    expect(await page.locator("iter8-overlay").count()).toBe(0)
+  }, 30_000)
+
   test("removing the host with the More menu open also removes the menu's pointer listener", async () => {
     const { page, overlay, baseline } = await trackedOpen()
     const closed = await pageListeners(page)

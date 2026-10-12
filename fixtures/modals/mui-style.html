@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A focus trap that pulls focus back into the modal, as MUI Modal does</title>
+  <link rel="stylesheet" href="./modal.css" />
+</head>
+<body>
+  <main id="app">
+    <h1>A focus trap that pulls focus back into the modal, as MUI Modal does</h1>
+    <button type="button" id="open">Open modal</button>
+    <button type="button" id="page-button">Page button</button>
+  </main>
+  <div id="backdrop" hidden></div>
+  <div id="modal" role="dialog" aria-modal="true" aria-label="Modal" tabindex="-1" hidden>
+    <h2>Modal</h2>
+    <p id="modal-target">Annotate me</p>
+    <input id="modal-input" aria-label="Modal field" />
+    <button type="button" id="close">Close modal</button>
+  </div>
+  <script>
+    const modal = document.getElementById("modal")
+    const backdrop = document.getElementById("backdrop")
+    window.__closedBy = []
+    window.__isOpen = () => !modal.hidden
+    window.__open = () => {
+      modal.hidden = backdrop.hidden = false
+      document.getElementById("modal-input").focus()
+    }
+    window.__close = () => {
+      modal.hidden = backdrop.hidden = true
+    }
+    document.addEventListener("focusin", () => {
+      if (!modal.hidden && !modal.contains(document.activeElement)) modal.focus()
+    })
+  </script>
+  <script src="./common.js"></script>
+</body>
+</html>

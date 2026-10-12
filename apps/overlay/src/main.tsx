@@ -10,6 +10,7 @@ import { adoptSheet, OverlayContext } from "./ui/context"
 import { NoticeDock } from "./ui/Dock"
 import { registerFonts } from "./ui/fonts"
 import { listenKeys } from "./ui/keys"
+import { listenPageModals } from "./ui/modals"
 import tokensCss from "./ui/tokens.css" with { type: "text" }
 
 /** The connection retries only after a socket closes, so a hello that never got through retries here. */
@@ -30,7 +31,7 @@ export function mount(input: OverlayBoot): () => void {
 
   const generation = createRenderGeneration()
   const errorBuffer = startErrorBuffer()
-  const disposers: (() => void)[] = []
+  const disposers: (() => void)[] = [listenPageModals({ host, root, onHostRemoved: teardown })]
   let model: OverlayModel | null = null
   let retry: ReturnType<typeof setTimeout> | null = null
   let savedPrefs = ""
