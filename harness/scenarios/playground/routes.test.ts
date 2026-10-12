@@ -149,37 +149,49 @@ test("every playground route mounts the overlay with no page errors, and client-
 
     const main = page.getByRole("navigation", { name: "Main", exact: true })
     const app = page.getByRole("navigation", { name: "App", exact: true })
-    const steps: [() => Promise<void>, string][] = [
-      [() => main.getByRole("link", { name: "Pricing" }).click(), "/pricing"],
-      [() => main.getByRole("link", { name: "Heavy mode" }).click(), "/heavy"],
-      [() => page.getByRole("link", { name: "Open app" }).click(), "/app"],
-      [() => app.getByRole("link", { name: "Customers" }).click(), "/app/customers"],
-      [() => app.getByRole("link", { name: "Settings" }).click(), "/app/settings"],
-      [() => app.getByRole("link", { name: "Dashboard" }).click(), "/app"],
-    ]
-    for (const [click, path] of steps) {
-      await click()
+    const arrivedAt = async (path: string, own: Marker) => {
       await waitFor(
         `the client router to reach ${path}`,
         async () => (pathOf(page) === path ? true : null),
-        {
-          timeoutMs: 10_000,
-        },
+        { timeoutMs: 10_000 },
       )
+      await waitFor(
+        `the ${own} page content to render on ${path}`,
+        async () => ((await markersOf(page))[own] ? true : null),
+        { timeoutMs: MOUNT_TIMEOUT_MS, everyMs: 100 },
+      )
+      expect(await markersOf(page)).toEqual({
+        home: false,
+        pricing: false,
+        dashboard: false,
+        customers: false,
+        settings: false,
+        heavy: false,
+        [own]: true,
+      })
       expect(await page.evaluate(() => document.documentElement.dataset.noReload)).toBe("true")
       expect(await page.locator("iter8-overlay").count()).toBe(1)
       await overlayMounted(page, `the overlay to stay mounted on ${path}`)
     }
 
+    const steps: [() => Promise<void>, string, Marker][] = [
+      [() => main.getByRole("link", { name: "Pricing" }).click(), "/pricing", "pricing"],
+      [() => main.getByRole("link", { name: "Heavy mode" }).click(), "/heavy", "heavy"],
+      [() => page.getByRole("link", { name: "Open app" }).click(), "/app", "dashboard"],
+      [() => app.getByRole("link", { name: "Customers" }).click(), "/app/customers", "customers"],
+      [() => app.getByRole("link", { name: "Settings" }).click(), "/app/settings", "settings"],
+      [() => app.getByRole("link", { name: "Dashboard" }).click(), "/app", "dashboard"],
+    ]
+    for (const [click, path, own] of steps) {
+      await click()
+      await arrivedAt(path, own)
+    }
+
     await page.goBack()
-    await waitFor(
-      "popstate to return to the previous route",
-      async () => (pathOf(page) === "/app/settings" ? true : null),
-      {
-        timeoutMs: 10_000,
-      },
-    )
-    expect(await page.evaluate(() => document.documentElement.dataset.noReload)).toBe("true")
+    await arrivedAt("/app/settings", "settings")
+
+    await page.getByRole("link", { name: "Back to site" }).click()
+    await arrivedAt("/", "home")
     expect(errors).toEqual([])
   })
 }, 240_000)
