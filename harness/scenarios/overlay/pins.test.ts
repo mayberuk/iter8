@@ -716,6 +716,113 @@ describe("note pins", () => {
   }, 30_000)
 })
 
+describe("lost-notes panel", () => {
+  const lostCard = (o: Opened) => o.overlay.locator(".lost:not(.collapsed)")
+  const chip = (o: Opened, text: string) => o.overlay.getByRole("button", { name: text })
+  const removeCard = (page: Page) =>
+    page.evaluate(() => document.querySelector('p[data-source-target="card"]')?.remove())
+  const opacityOf = (panel: Locator) => panel.evaluate((el) => Number(getComputedStyle(el).opacity))
+  const isAway = (panel: Locator) => panel.evaluate((el) => el.classList.contains("away"))
+
+  async function openLost(extra: Note[] = []) {
+    const o = await open(seed([draft("N21", CARD), ...extra]))
+    await removeCard(o.page)
+    const panel = lostCard(o)
+    await until("the lost panel", () => panel.isVisible())
+    return { o, panel }
+  }
+
+  test("a click on the panel's body reaches the page beneath it, and Re-pick still takes the click", async () => {
+    const { o, panel } = await openLost()
+    const heading = await panel.getByRole("heading").boundingBox()
+    if (!heading) throw new Error("the panel has no heading box")
+    const at = { x: heading.x + heading.width / 2, y: heading.y + heading.height / 2 }
+    await o.page.evaluate(({ x, y }) => {
+      const under = document.createElement("div")
+      under.id = "under-the-panel"
+      under.style.cssText = `position:fixed;left:${x - 30}px;top:${y - 15}px;width:60px;height:30px`
+      under.addEventListener("click", () => {
+        under.dataset.clicks = String(Number(under.dataset.clicks ?? 0) + 1)
+      })
+      document.body.append(under)
+    }, at)
+
+    await o.page.mouse.click(at.x, at.y)
+    await until(
+      "the click to reach the page",
+      async () => (await o.page.locator("#under-the-panel").getAttribute("data-clicks")) === "1",
+    )
+
+    const pickTool = o.overlay.getByRole("button", { name: "Pick element" })
+    expect(await pickTool.getAttribute("aria-pressed")).toBe("false")
+    await panel.getByRole("button", { name: "Re-pick" }).click()
+    await until("pick mode", async () => (await pickTool.getAttribute("aria-pressed")) === "true")
+    expect(await o.page.locator("#under-the-panel").getAttribute("data-clicks")).toBe("1")
+  }, 30_000)
+
+  test("the panel fades while the pointer is over it and returns when the pointer leaves, with a few pixels of slack", async () => {
+    const { o, panel } = await openLost()
+    const box = await panel.boundingBox()
+    const view = o.page.viewportSize()
+    if (!box || !view) throw new Error("no panel box")
+    const middle = box.y + box.height / 2
+    expect(await opacityOf(panel)).toBe(1)
+
+    await o.page.mouse.move(box.x + box.width / 2, middle)
+    await until("the fade", async () => (await opacityOf(panel)) < 0.2)
+    expect(await opacityOf(panel)).toBeCloseTo(0.15, 1)
+
+    await o.page.mouse.move(box.x - 2, middle)
+    await o.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)))
+    expect(await isAway(panel)).toBe(true)
+
+    await o.page.mouse.move(box.x - 12, middle)
+    await until("the panel to return", async () => !(await isAway(panel)))
+    await until("full opacity", async () => (await opacityOf(panel)) === 1)
+
+    await o.page.mouse.move(box.x + box.width / 2, middle)
+    await until("the fade again", async () => (await opacityOf(panel)) < 0.2)
+    const pickTool = o.overlay.getByRole("button", { name: "Pick element" })
+    await panel.getByRole("button", { name: "Re-pick" }).click()
+    await until("pick mode", async () => (await pickTool.getAttribute("aria-pressed")) === "true")
+  }, 30_000)
+
+  test("the x collapses the panel to a chip in the same corner, and the chip brings the panel back", async () => {
+    const { o, panel } = await openLost()
+    const was = await panel.boundingBox()
+    if (!was) throw new Error("no panel box")
+
+    await panel.getByRole("button", { name: "Hide" }).click()
+    await until("the chip", () => chip(o, "1 lost").isVisible())
+    expect(await lostCard(o).count()).toBe(0)
+    expect(await o.overlay.getByText("1 note lost its element").count()).toBe(0)
+    const small = await chip(o, "1 lost").boundingBox()
+    if (!small) throw new Error("no chip box")
+    expect(small.width).toBeLessThan(was.width / 2)
+    expect(Math.abs(small.x + small.width - (was.x + was.width))).toBeLessThanOrEqual(1)
+
+    await chip(o, "1 lost").click()
+    await until("the panel", () => lostCard(o).isVisible())
+    expect(await chip(o, "1 lost").count()).toBe(0)
+    expect(await o.overlay.getByText("1 note lost its element").isVisible()).toBe(true)
+  }, 30_000)
+
+  test("a note that becomes lost after the dismissal brings the panel back", async () => {
+    const { o, panel } = await openLost([draft("N22", DETAILS)])
+    await panel.getByRole("button", { name: "Hide" }).click()
+    await until("the chip", () => chip(o, "1 lost").isVisible())
+
+    await o.page.evaluate(() => {
+      const el = document.querySelector("h2#details-heading")
+      if (el) el.textContent = `${el.textContent} (reworded)`
+    })
+    await until("the panel to return", () =>
+      o.overlay.getByText("2 notes lost their element").isVisible(),
+    )
+    expect(await o.overlay.getByRole("button", { name: /^\d+ lost$/ }).count()).toBe(0)
+  }, 40_000)
+})
+
 describe("agent pins", () => {
   test("a pushed agent note appears as an avatar pin on its element and can be removed", async () => {
     const o = await open(seed())
@@ -885,6 +992,76 @@ describe("resolved notes", () => {
     expect(await list.getByRole("listitem").innerText()).toContain("Moved")
     expect(await pin.count()).toBe(0)
   }, 30_000)
+
+  async function pushRound(
+    o: Opened,
+    stage: "announced" | "claimed",
+    resolutions: Record<string, Note["resolution"]>,
+    landed: () => Promise<boolean>,
+  ) {
+    const [sent] = o.mock.rounds()
+    if (sent?.state.stage !== "queued") throw new Error("the sent round is not queued")
+    const { queuedAt, idempotencyKey } = sent.state
+    const announced = {
+      queuedAt,
+      idempotencyKey,
+      announcedAt: "2026-10-09T18:35:00.000Z",
+      generation: LIVE.generation,
+    }
+    const state =
+      stage === "announced"
+        ? { stage, ...announced }
+        : { stage, ...announced, claimedAt: "2026-10-09T18:36:00.000Z" }
+    const round = Round.parse({
+      ...sent,
+      state,
+      notes: sent.notes.map((note) => ({
+        ...note,
+        resolution: resolutions[note.id] ?? note.resolution,
+      })),
+    })
+    await pushUntil(o, { type: "round", round }, landed)
+  }
+
+  test("a delivered note's pin and History stamp show a working ring only while its session is busy on an open note", async () => {
+    const o = await open(seed([draft("N21", OVERVIEW)]))
+    const sheet = await sendFromSheet(o)
+    await sheet.getByRole("tab", { name: /^History/ }).click()
+    const pin = o.overlay.locator(".pin.sent")
+    const stamp = sheet.locator(".sframe .stamp")
+    await until(
+      "the sent pin and stamp",
+      async () => (await pin.isVisible()) && (await stamp.isVisible()),
+    )
+    const status = (name: string) => sheet.getByRole("status", { name, exact: true })
+    const working = async () => ({
+      pin: await o.overlay.locator(".pin.sent.working").count(),
+      stamp: await sheet.locator(".sframe .stamp.working").count(),
+    })
+    const ringOf = (locator: Locator) =>
+      locator.evaluate((el) => getComputedStyle(el, "::before").animationName)
+
+    await pushRound(o, "announced", {}, () => status("delivered").isVisible())
+    expect(await working()).toEqual({ pin: 0, stamp: 0 })
+
+    await pushRound(o, "claimed", {}, () => status("working").isVisible())
+    expect(await working()).toEqual({ pin: 0, stamp: 0 })
+
+    const busy = Pairing.parse({ ...LIVE, state: { status: "busy" } })
+    await pushUntil(o, { type: "pairing", pairing: busy }, async () => (await working()).pin === 1)
+    expect(await working()).toEqual({ pin: 1, stamp: 1 })
+    expect(await ringOf(pin)).toBe("orbit")
+    expect(await ringOf(stamp)).toBe("stamp-orbit")
+
+    await pushUntil(o, { type: "pairing", pairing: LIVE }, async () => (await working()).pin === 0)
+    expect(await working()).toEqual({ pin: 0, stamp: 0 })
+    expect(await ringOf(pin)).toBe("none")
+
+    await pushUntil(o, { type: "pairing", pairing: busy }, async () => (await working()).pin === 1)
+    await pushRound(o, "claimed", { N21: DONE }, async () => (await working()).pin === 0)
+    expect(await working()).toEqual({ pin: 0, stamp: 0 })
+    expect(await pin.count()).toBe(1)
+  }, 40_000)
 })
 
 describe("pin visibility", () => {

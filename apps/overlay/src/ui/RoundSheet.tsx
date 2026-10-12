@@ -13,6 +13,7 @@ import {
   canSendNow,
   type DisplayNoteState,
   displayNoteState,
+  isBeingWorked,
   nextRoundNumber,
   roundOutcome,
   type SheetTab,
@@ -559,6 +560,8 @@ function StripFrame(props: { round: Round; note: Note; index: number; root: Shad
   const { round, note, index, root } = props
   const screenshot = useScreenshotUrl(note.capture?.screenshot?.ref)
   const state = displayNoteState(round, note)
+  const { model } = useOverlay()
+  const working = isBeingWorked(round, note, model.pairing.value)
   const finished = state === "done" || state === "answered"
   const colour = finished
     ? "var(--keep)"
@@ -578,7 +581,9 @@ function StripFrame(props: { round: Round; note: Note; index: number; root: Shad
     >
       {screenshot ? <img src={screenshot} alt={`Screenshot of note ${index + 1}`} /> : null}
       <span class="fn">{number(index)}</span>
-      <span class="stamp">{finished ? <Icon name="check" size={8} /> : null}</span>
+      <span class={working ? "stamp working" : "stamp"}>
+        {finished ? <Icon name="check" size={8} /> : null}
+      </span>
     </button>
   )
 }

@@ -123,6 +123,17 @@ export function displayNoteState(round: Round, note: Note): DisplayNoteState {
   return STAGE_DISPLAY[round.state.stage]
 }
 
+export function isBeingWorked(round: Round, note: Note, pairing: Pairing | null): boolean {
+  const { stage } = round.state
+  return (
+    (stage === "claimed" || stage === "announced") &&
+    note.resolution.status === "open" &&
+    pairing !== null &&
+    pairing.owner === round.owner &&
+    pairing.state.status === "busy"
+  )
+}
+
 export function dockState(
   pairing: Pairing | null,
   deliveredUntil: number | null,
@@ -296,6 +307,8 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
 
   const anchors = signal<Map<NoteId, AnchorResolution>>(new Map())
 
+  /** Notes whose lost-element panel the user collapsed; a note lost after that is not in it. */
+  const lostDismissed = signal<ReadonlySet<NoteId>>(new Set())
   const lastSentNoteIds = signal<NoteId[]>([])
   /** One in-flight guard and one key for every surface that sends, so overlapping sends make one round. */
   const sending: { inFlight: boolean; key: { revision: string; key: IdempotencyKey } | null } = {
@@ -909,6 +922,7 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
     reloadNow,
     upstreamFailures,
     anchors,
+    lostDismissed,
     lastSentNoteIds,
     sending,
     deliveredUntil,
