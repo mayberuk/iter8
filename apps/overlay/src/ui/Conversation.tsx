@@ -488,8 +488,14 @@ function MessageList() {
 
   // Read before this render commits: a scroll in the same task as a push has no scroll event yet.
   // Only a scroll upward leaves the bottom: a row that grows under the pin moves the gap too.
+  // Sampling lastTop here keeps a clamp from a shrinking row from reading as a scroll up once the
+  // container resizes before the clamp's scroll event.
   const shown = list.current
-  if (shown) stick.current = shown.scrollHeight - shown.scrollTop - shown.clientHeight <= STICK_PX
+  if (shown) {
+    const near = shown.scrollHeight - shown.scrollTop - shown.clientHeight <= STICK_PX
+    stick.current = near || (stick.current && shown.scrollTop >= lastTop.current)
+    lastTop.current = shown.scrollTop
+  }
 
   // A row enters with motion only when it arrives after the first page: the first page and any
   // earlier page are already history.
@@ -717,7 +723,7 @@ function ChatInput({ name, focus }: { name: string; focus: { current: boolean } 
     setEmpty(el.value.trim() === "")
     if (focus.current) {
       focus.current = false
-      el.focus()
+      if (!model.paletteOpen.peek()) el.focus()
     }
   }, [model, focus])
 

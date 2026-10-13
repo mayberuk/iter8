@@ -25,3 +25,4 @@ playwright-report/
 .svelte-kit/
 .svelte-kit-*/
 .astro/
+.claude/reviews/

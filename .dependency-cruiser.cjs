@@ -55,6 +55,14 @@ module.exports = {
       to: { path: "^fixtures/" },
     },
     {
+      name: "nothing-imports-playground",
+      comment:
+        "The playground is a test site served by a dev server and must not become an application dependency.",
+      severity: "error",
+      from: {},
+      to: { path: "^playground/" },
+    },
+    {
       name: "no-circular",
       comment: "Circular imports make module initialization depend on evaluation order.",
       severity: "error",
@@ -75,7 +83,7 @@ module.exports = {
     parser: "swc",
     exclude: "(^|/)(dist|docs|\\.claude)(/|$)",
     // Excluding these paths would erase the imports that the boundary rules must reject.
-    doNotFollow: { path: "(^|/)(node_modules|fixtures)(/|$)" },
+    doNotFollow: { path: "(^|/)(node_modules|fixtures|playground)(/|$)" },
     enhancedResolveOptions: {
       extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
       exportsFields: ["exports"],

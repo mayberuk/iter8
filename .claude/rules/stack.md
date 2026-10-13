@@ -25,6 +25,7 @@ One language, one toolchain, one schema. Each pick and its rejected alternatives
 | Tests | `bun test`; fast-check for invariants; Playwright driving Chromium for anything in a browser | Jest, Vitest, a DOM emulator for overlay behaviour |
 | Phases that drive Chromium or a fixture dev server | pinned `engine="claude"` in the spec | the Codex sandbox, which cannot reach the Playwright browser path or write a temp dir there |
 | Dates | `Intl.*` | dayjs, date-fns |
+| Playground styling | Tailwind 4.3.3 through `@tailwindcss/vite`, in `playground/` only | Tailwind in `apps/` or `packages/` (the overlay's CSS lives in its shadow root) |
 
 ## Always
 - Pin exact versions (no `^` or `~`); commit `bun.lock`.

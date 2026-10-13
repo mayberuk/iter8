@@ -117,8 +117,13 @@ type Script = {
   tailscale?: string
   tailscaleStatus?: unknown
   localPool?: (ports: number[]) => number[] | null
-  status?: (call: number) => ChildOutput | undefined
+  status?: (call: number, argv: string[]) => ChildOutput | undefined
   tunnel?: (child: FakeChild, call: number) => boolean
+  remote?: { version: string; build: string }
+  self?: NonNullable<ConnectSystem["self"]>
+  newest?: () => { version: string; path: string } | null
+  install?: (version: string) => Promise<string>
+  versionOutput?: (binary: string) => ChildOutput
 }
 
 async function freePorts(count: number): Promise<number[]> {
@@ -161,8 +166,8 @@ async function setup(script: Script = {}) {
   let nonces = 0
   const statusJson = JSON.stringify({
     state: "ready",
-    version: "0.1.0",
-    build: "devbox-build",
+    version: script.remote?.version ?? "0.1.0",
+    build: script.remote?.build ?? "devbox-build",
     protocolVersion: 2,
     schemaVersion: 3,
     machineId: MACHINE_ID,
@@ -194,11 +199,15 @@ async function setup(script: Script = {}) {
     })
   }
 
+  const socket = join(home, `connect-${process.pid}.sock`)
+  const installs: string[] = []
+  const restarts: { binary: string; argv: string[]; socketGone: boolean; sshAlive: number }[] = []
   const count = (match: (child: FakeChild) => boolean) => spawns.filter(match).length
   const isConfig = (child: FakeChild) => child.argv[1] === "-G"
   const isStatus = (child: FakeChild) => child.argv[0] === "ssh" && child.argv.at(-1) === "--json"
   const isTunnel = (child: FakeChild) => child.argv[1] === "-N"
   const isOpener = (child: FakeChild) => ["open", "xdg-open"].includes(child.argv[0] ?? "")
+  const isVersion = (child: FakeChild) => child.argv[1] === "--version"
 
   const system: ConnectSystem = {
     spawn(argv) {
@@ -211,12 +220,19 @@ async function setup(script: Script = {}) {
         if (script.tailscaleStatus === undefined) child.exit(1)
         else child.exit(0, { stdout: JSON.stringify(script.tailscaleStatus) })
       } else if (isStatus(child)) {
-        const result = script.status?.(count(isStatus)) ?? { code: 0, stdout: statusJson }
+        const result = script.status?.(count(isStatus), argv) ?? { code: 0, stdout: statusJson }
         child.exit(result.code, result)
       } else if (isTunnel(child)) {
         if (!script.tunnel?.(child, count(isTunnel))) for (const port of ports) bind(child, port)
       } else if (isOpener(child)) {
         child.exit(0)
+      } else if (isVersion(child)) {
+        const binary = argv[0] ?? ""
+        const result = script.versionOutput?.(binary) ?? {
+          code: 0,
+          stdout: `iter8 ${/\/v([^/]+)\/iter8$/.exec(binary)?.[1]}\n`,
+        }
+        child.exit(result.code, result)
       }
       return child
     },
@@ -233,6 +249,28 @@ async function setup(script: Script = {}) {
       interrupt = stop
       if (interrupted) stop()
     },
+    ...(script.self === undefined
+      ? {}
+      : {
+          self: script.self,
+          releases: {
+            newest: async () => script.newest?.() ?? null,
+            install: async (version: string) => {
+              installs.push(version)
+              if (!script.install) throw new Error("no install scripted")
+              return script.install(version)
+            },
+          },
+          restart: async (binary: string, argv: string[]) => {
+            restarts.push({
+              binary,
+              argv,
+              socketGone: !existsSync(socket),
+              sshAlive: spawns.filter((child) => child.exitCode === null).length,
+            })
+            return 7
+          },
+        }),
   }
 
   let exitCode: number | undefined
@@ -262,7 +300,9 @@ async function setup(script: Script = {}) {
     accepted,
     run,
     bind,
-    socket: join(home, `connect-${process.pid}.sock`),
+    socket,
+    installs,
+    restarts,
     forwarding: `Forwarding ${first}–${last} from ${HOST} (devbox-name). Pages opened there open here.`,
     exitCode: () => exitCode,
     interrupt: requestInterrupt,
@@ -270,6 +310,7 @@ async function setup(script: Script = {}) {
     statuses: () => spawns.filter(isStatus),
     tunnels: () => spawns.filter(isTunnel),
     openers: () => spawns.filter(isOpener).map((child) => child.argv),
+    versionChecks: () => spawns.filter(isVersion).map((child) => child.argv),
     forwards: (bindAddress = "") =>
       ports.flatMap((port) => ["-L", `${bindAddress}${port}:127.0.0.1:${port}`]),
     tunnel(index: number): FakeChild {
@@ -517,10 +558,6 @@ test("authentication, host-key and missing-iter8 failures print their fix and ex
       SSH_REFUSED,
     ],
     [
-      { status: () => ({ code: 127, stderr: "bash: line 1: iter8: command not found\n" }) },
-      `iter8 was not found on ${HOST}'s PATH for non-interactive SSH.`,
-    ],
-    [
       {
         tunnel(child) {
           child.exit(255, { stderr: "Host key verification failed.\n" })
@@ -602,4 +639,263 @@ test("an interrupt in the middle of an attempt stops its ssh and starts no furth
   expect(rig.configs()[0]?.kills).toEqual(["SIGTERM"])
   expect(rig.spawns).toHaveLength(1)
   expect(rig.lines).toEqual([])
+})
+
+const statusArgv = (iter8: string) => ["ssh", ...SSH_OPTIONS, "--", HOST, iter8, "status", "--json"]
+const NOT_FOUND = `iter8 was not found on ${HOST} (PATH or ~/.local/bin). Run iter8 setup there.`
+const notFoundOnPath = (_call: number, argv: string[]): ChildOutput | undefined =>
+  argv.at(-3) === "iter8"
+    ? { code: 127, stderr: "bash: line 1: iter8: command not found\n" }
+    : undefined
+
+test("an iter8 missing from the non-interactive PATH is retried once as .local/bin/iter8 with the same arguments", async () => {
+  const rig = await setup({ status: notFoundOnPath })
+  await forwarded(rig)
+  expect(rig.statuses().map((child) => child.argv)).toEqual([
+    statusArgv("iter8"),
+    statusArgv(".local/bin/iter8"),
+  ])
+  expect(rig.lines).toEqual([CONNECTING, rig.forwarding])
+})
+
+test("once .local/bin/iter8 answers, a reconnect asks it first", async () => {
+  const rig = await setup({ status: notFoundOnPath })
+  await forwarded(rig)
+  rig.tunnel(0).exit(255, { stderr: "Connection reset by peer\n" })
+  await until(() => rig.clock.pending === 2, "the reconnect timer")
+  await rig.clock.advance(1_000)
+  await forwarded(rig, 2)
+  expect(rig.statuses().map((child) => child.argv.at(-3))).toEqual([
+    "iter8",
+    ".local/bin/iter8",
+    ".local/bin/iter8",
+  ])
+})
+
+test("a .local/bin/iter8 whose service is down is remembered while waiting for it", async () => {
+  const rig = await setup({
+    status: (call, argv) => notFoundOnPath(call, argv) ?? (call === 2 ? { code: 5 } : undefined),
+  })
+  await until(() => rig.clock.pending === 2, "the service retry")
+  await rig.clock.advance(3_000)
+  await forwarded(rig)
+  expect(rig.statuses().map((child) => child.argv.at(-3))).toEqual([
+    "iter8",
+    ".local/bin/iter8",
+    ".local/bin/iter8",
+  ])
+})
+
+test("iter8 missing both on PATH and in ~/.local/bin says so and stops retrying", async () => {
+  const rig = await setup({
+    status: () => ({ code: 127, stderr: "bash: line 1: not found\n" }),
+  })
+  expect(await rig.run).toBe(1)
+  expect(rig.lines).toEqual([CONNECTING, NOT_FOUND])
+  expect(rig.statuses().map((child) => child.argv)).toEqual([
+    statusArgv("iter8"),
+    statusArgv(".local/bin/iter8"),
+  ])
+  await rig.clock.advance(60_000)
+  expect(rig.configs()).toHaveLength(1)
+  expect(rig.tunnels()).toHaveLength(0)
+})
+
+test("a failure other than not-found on PATH is not retried in ~/.local/bin", async () => {
+  const rig = await setup({
+    status: () => ({ code: 255, stderr: "biruk@devbox: Permission denied (publickey).\n" }),
+  })
+  expect(await rig.run).toBe(1)
+  expect(rig.lines).toEqual([CONNECTING, SSH_REFUSED])
+  expect(rig.statuses().map((child) => child.argv.at(-3))).toEqual(["iter8"])
+})
+
+const SELF = {
+  version: "0.3.0",
+  build: "compiled",
+  execPath: "/data/releases/v0.3.0/iter8",
+} as const
+const UPDATING = `${HOST} runs iter8 0.4.0; updating this computer…`
+const binaryFor = (version: string) => `/data/releases/v${version}/iter8`
+
+test("a devbox on a newer compiled release is downloaded, then connect restarts on it once the tunnel is down", async () => {
+  const rig = await setup({
+    self: SELF,
+    remote: { version: "0.4.0", build: "compiled" },
+    install: async (version) => binaryFor(version),
+  })
+  expect(await rig.run).toBe(7)
+  expect(rig.installs).toEqual(["0.4.0"])
+  expect(rig.lines).toContain(UPDATING)
+  expect(rig.lines.at(-1)).toBe("Updated to iter8 0.4.0. Restarting.")
+  expect(rig.lines.indexOf(UPDATING)).toBeLessThan(rig.lines.length - 1)
+  expect(rig.versionChecks()).toEqual([[binaryFor("0.4.0"), "--version"]])
+  expect(rig.restarts).toEqual([
+    { binary: binaryFor("0.4.0"), argv: ["connect", HOST], socketGone: true, sshAlive: 0 },
+  ])
+  for (const tunnel of rig.tunnels()) expect(tunnel.kills).toEqual(["SIGTERM"])
+})
+
+test.each([
+  [
+    "this computer runs from source",
+    { ...SELF, build: "source" },
+    { version: "0.4.0", build: "compiled" },
+  ],
+  ["the devbox runs from source", SELF, { version: "0.4.0", build: "source" }],
+  ["the devbox is older", SELF, { version: "0.2.9", build: "compiled" }],
+  ["the devbox is the same version", SELF, { version: "0.3.0", build: "compiled" }],
+  [
+    "the devbox is a prerelease of this version",
+    SELF,
+    { version: "0.3.0-rc.1", build: "compiled" },
+  ],
+  ["the devbox's version is not a release", SELF, { version: "dev", build: "compiled" }],
+  ["the devbox's version climbs out of the data dir", SELF, { version: "../x", build: "compiled" }],
+  [
+    "the devbox's version hides a path after a newer release",
+    SELF,
+    { version: "9.9.9/../../../x", build: "compiled" },
+  ],
+  ["the devbox's version carries a line break", SELF, { version: "9.9.9\nrm", build: "compiled" }],
+] as const)("nothing is downloaded when %s", async (_case, self, remote) => {
+  const rig = await setup({ self, remote, install: async (version) => binaryFor(version) })
+  await forwarded(rig)
+  await rig.clock.advance(0)
+  expect(rig.installs).toEqual([])
+  expect(rig.restarts).toEqual([])
+  expect(rig.lines).toEqual([CONNECTING, rig.forwarding])
+})
+
+test("a failed update keeps the tunnel up and is reported once for that version", async () => {
+  const rig = await setup({
+    self: SELF,
+    remote: { version: "0.4.0", build: "compiled" },
+    install: async () => {
+      throw new Error("gh release download v0.4.0 failed: release not found")
+    },
+  })
+  const failed = `Couldn't update to iter8 0.4.0: gh release download v0.4.0 failed: release not found. Staying on 0.3.0.`
+  await forwarded(rig)
+  await until(() => rig.lines.includes(failed), "the failure line")
+  expect(rig.tunnel(0).kills).toEqual([])
+  expect(rig.tunnel(0).exitCode).toBeNull()
+
+  rig.tunnel(0).exit(255, { stderr: "Connection reset by peer\n" })
+  await until(() => rig.lines.some((line) => line.startsWith("Lost ")), "the Lost line")
+  await rig.clock.advance(1_000)
+  await forwarded(rig, 2)
+  expect(rig.installs).toEqual(["0.4.0"])
+  expect(rig.lines.filter((line) => line === UPDATING)).toHaveLength(1)
+  expect(rig.lines.filter((line) => line === failed)).toHaveLength(1)
+  expect(rig.restarts).toEqual([])
+  expect(rig.exitCode()).toBeUndefined()
+})
+
+test("a newer release already installed here is restarted onto at start, with no download and no ssh", async () => {
+  const rig = await setup({
+    self: SELF,
+    newest: () => ({ version: "0.5.0", path: binaryFor("0.5.0") }),
+  })
+  expect(await rig.run).toBe(7)
+  expect(rig.lines).toEqual(["Updated to iter8 0.5.0. Restarting."])
+  expect(rig.installs).toEqual([])
+  expect(rig.spawns.map((child) => child.argv)).toEqual([[binaryFor("0.5.0"), "--version"]])
+  expect(rig.restarts).toEqual([
+    { binary: binaryFor("0.5.0"), argv: ["connect", HOST], socketGone: true, sshAlive: 0 },
+  ])
+})
+
+test.each([
+  ["another version", { code: 0, stdout: "iter8 0.3.0\n" }],
+  ["extra output", { code: 0, stdout: "iter8 0.5.0\nmore\n" }],
+  ["a failing exit", { code: 1, stdout: "iter8 0.5.0\n" }],
+])(
+  "an installed release whose --version prints %s is reported once and never restarted onto",
+  async (_case, versionOutput) => {
+    const rig = await setup({
+      self: SELF,
+      newest: () => ({ version: "0.5.0", path: binaryFor("0.5.0") }),
+      versionOutput: () => versionOutput,
+    })
+    const refused = `Couldn't update to iter8 0.5.0: ${binaryFor("0.5.0")} --version printed ${JSON.stringify(
+      versionOutput.code === 0 ? versionOutput.stdout.trim() : "",
+    )} instead of "iter8 0.5.0". Staying on 0.3.0.`
+    await forwarded(rig)
+    await rig.clock.advance(600_000)
+    await Bun.sleep(10)
+    rig.tunnel(0).exit(255, { stderr: "Connection reset by peer\n" })
+    await until(() => rig.lines.some((line) => line.startsWith("Lost ")), "the Lost line")
+    await rig.clock.advance(1_000)
+    await forwarded(rig, 2)
+    expect(rig.restarts).toEqual([])
+    expect(rig.versionChecks()).toEqual([[binaryFor("0.5.0"), "--version"]])
+    expect(rig.lines.filter((line) => line === refused)).toHaveLength(1)
+    expect(rig.lines.filter((line) => line.startsWith("Updated"))).toEqual([])
+    expect(rig.exitCode()).toBeUndefined()
+  },
+)
+
+test("a downloaded release whose --version disagrees keeps the tunnel up and is reported once", async () => {
+  const rig = await setup({
+    self: SELF,
+    remote: { version: "0.4.0", build: "compiled" },
+    install: async (version) => binaryFor(version),
+    versionOutput: () => ({ code: 0, stdout: "iter8 0.3.0\n" }),
+  })
+  const refused = `Couldn't update to iter8 0.4.0: ${binaryFor("0.4.0")} --version printed "iter8 0.3.0" instead of "iter8 0.4.0". Staying on 0.3.0.`
+  await forwarded(rig)
+  await until(() => rig.lines.includes(refused), "the refusal line")
+  expect(rig.tunnel(0).kills).toEqual([])
+  expect(rig.tunnel(0).exitCode).toBeNull()
+  expect(rig.restarts).toEqual([])
+  expect(rig.versionChecks()).toEqual([[binaryFor("0.4.0"), "--version"]])
+})
+
+test("a newer release installed here while connect runs is restarted onto within 300 s", async () => {
+  let newest: { version: string; path: string } | null = null
+  const rig = await setup({ self: SELF, newest: () => newest })
+  await forwarded(rig)
+  newest = { version: "0.5.0", path: binaryFor("0.5.0") }
+
+  await rig.clock.advance(299_999)
+  await Bun.sleep(10)
+  expect(rig.restarts).toEqual([])
+  await rig.clock.advance(1)
+  expect(await rig.run).toBe(7)
+  expect(rig.installs).toEqual([])
+  expect(rig.restarts.map((restart) => restart.binary)).toEqual([binaryFor("0.5.0")])
+  expect(rig.lines).toEqual([CONNECTING, rig.forwarding, "Updated to iter8 0.5.0. Restarting."])
+  expect(rig.tunnel(0).kills).toEqual(["SIGTERM"])
+})
+
+test("an installed release no newer than this one, or this very binary, is not restarted onto", async () => {
+  for (const newest of [
+    { version: "0.3.0", path: binaryFor("0.3.0-other") },
+    { version: "0.2.0", path: binaryFor("0.2.0") },
+    { version: "0.5.0", path: SELF.execPath },
+  ]) {
+    const rig = await setup({ self: SELF, newest: () => newest })
+    await forwarded(rig)
+    await rig.clock.advance(300_000)
+    await Bun.sleep(10)
+    expect(rig.restarts).toEqual([])
+    expect(rig.lines).toEqual([CONNECTING, rig.forwarding])
+  }
+})
+
+test("a source build never looks for installed releases", async () => {
+  let asked = 0
+  const rig = await setup({
+    self: { ...SELF, build: "source" },
+    newest: () => {
+      asked++
+      return { version: "0.5.0", path: binaryFor("0.5.0") }
+    },
+  })
+  await forwarded(rig)
+  await rig.clock.advance(600_000)
+  await Bun.sleep(10)
+  expect(asked).toBe(0)
+  expect(rig.restarts).toEqual([])
 })

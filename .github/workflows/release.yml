@@ -112,3 +112,73 @@ jobs:
         run: |
           sha256sum --check SHA256SUMS
           gh release create "$TAG" --verify-tag iter8-linux-x64 iter8-darwin-arm64 SHA256SUMS
+
+  pin-plugin:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      # A job-level `if` cannot read secrets, so the gate step turns the token's presence into an output.
+      - name: Check for cc-plugins token
+        id: gate
+        env:
+          TOKEN: ${{ secrets.CC_PLUGINS_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::CC_PLUGINS_TOKEN is not set; skipping the cc-plugins pin bump"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          repository: mayberuk/cc-plugins
+          token: ${{ secrets.CC_PLUGINS_TOKEN }}
+          path: cc-plugins
+      - name: Decide whether to pin
+        id: decide
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: cc-plugins
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          if [[ "$VERSION" == *-* ]]; then
+            echo "::notice::$GITHUB_REF_NAME is a prerelease; skipping the cc-plugins pin bump"
+            echo "pin=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CURRENT=$(jq -er .version plugins/iter8/release.json)
+          IFS=. read -ra NEW <<< "${VERSION%%+*}"
+          IFS=. read -ra OLD <<< "${CURRENT%%[-+]*}"
+          PIN=false
+          for i in 0 1 2; do
+            if (( 10#${NEW[i]} > 10#${OLD[i]} )); then PIN=true; break; fi
+            if (( 10#${NEW[i]} < 10#${OLD[i]} )); then break; fi
+          done
+          if [ "$PIN" = false ]; then
+            echo "::notice::$VERSION is not newer than the pinned $CURRENT; skipping the cc-plugins pin bump"
+          fi
+          echo "pin=$PIN" >> "$GITHUB_OUTPUT"
+      - name: Pin release checksums
+        if: steps.gate.outputs.enabled == 'true' && steps.decide.outputs.pin == 'true'
+        working-directory: cc-plugins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          git switch -c "iter8-pin-$VERSION"
+          plugins/iter8/scripts/pin-release.sh "$VERSION"
+      - name: Open the pin pull request
+        if: steps.gate.outputs.enabled == 'true' && steps.decide.outputs.pin == 'true'
+        working-directory: cc-plugins
+        env:
+          GH_TOKEN: ${{ secrets.CC_PLUGINS_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          scripts/release.sh iter8 patch "Pin iter8 $VERSION."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Pin iter8 $VERSION"
+          git push -u origin HEAD
+          gh pr create --repo mayberuk/cc-plugins --title "Pin iter8 $VERSION" --body "Pins the iter8 plugin to release v$VERSION."
+          gh pr merge --repo mayberuk/cc-plugins --auto --squash || echo "::notice::auto-merge is not enabled on cc-plugins; merge the PR by hand"

@@ -1,24 +1,48 @@
 import { randomBytes } from "node:crypto"
 import { existsSync } from "node:fs"
-import { hostname } from "node:os"
+import { homedir, hostname } from "node:os"
 import { CLI_SURFACE, ServiceStatus } from "@iter8/protocol"
 import { type CommandDef, defineCommand } from "citty"
 import { TAILSCALE_MAC_APP } from "../../connect/route"
 import { type ConnectSystem, runConnect } from "../../connect/run"
 import { resolvePaths } from "../../home"
+import {
+  dataDir,
+  installRelease,
+  newestInstalled,
+  type Platform,
+  pointCurrent,
+} from "../../install/releases"
+import { BUILD, VERSION } from "../../service/lifecycle"
 import { type CliDeps, caller, commandArgs, request, runCli } from "../client"
 
-function liveSystem(deps: CliDeps): ConnectSystem {
+const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const
+
+function releasePlatform(platform: "darwin" | "linux"): Platform {
+  return platform === "darwin" ? "darwin-arm64" : "linux-x64"
+}
+
+export function liveSystem(
+  deps: CliDeps,
+  boundaries: {
+    spawn: typeof Bun.spawn
+    env: Record<string, string | undefined>
+    home: string
+    execPath: string
+  },
+): ConnectSystem {
+  const { spawn, env, home, execPath } = boundaries
   const platform = process.platform
   if (platform !== "darwin" && platform !== "linux") {
     throw new Error("iter8 connect runs on macOS and Linux")
   }
+  const data = dataDir(env, home)
   return {
-    spawn: (argv) => Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "pipe" }),
+    spawn: (argv) => spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "pipe" }),
     clock: { now: Date.now, setTimeout, clearTimeout },
     platform,
     laptopName: hostname().split(".")[0] ?? "",
-    home: resolvePaths(process.env).home,
+    home: resolvePaths(env).home,
     forwardAddress: null,
     tailscale: () =>
       Bun.which("tailscale") ??
@@ -37,9 +61,33 @@ function liveSystem(deps: CliDeps): ConnectSystem {
     },
     nonce: () => randomBytes(4).toString("hex"),
     out: (line) => deps.stdout(`${line}\n`),
+    // A terminal's Ctrl-C reaches a restarted connect twice, from the terminal and from the
+    // parent forwarding it; a once-listener would leave the second to kill it mid-cleanup.
     onInterrupt: (stop) => {
-      process.once("SIGINT", stop)
-      process.once("SIGTERM", stop)
+      for (const signal of FORWARDED_SIGNALS) process.on(signal, stop)
+    },
+    self: { version: VERSION, build: BUILD, execPath },
+    releases: {
+      newest: () => newestInstalled(data),
+      install: async (version) => {
+        const installed = await installRelease(data, version, {
+          spawn,
+          platform: releasePlatform(platform),
+          pid: process.pid,
+          sleep: Bun.sleep,
+        })
+        return (await pointCurrent(data)) ?? installed
+      },
+    },
+    restart: async (binary, argv) => {
+      const child = spawn([binary, ...argv], { stdio: ["inherit", "inherit", "inherit"] })
+      const forward = (signal: NodeJS.Signals) => child.kill(signal)
+      for (const signal of FORWARDED_SIGNALS) process.on(signal, forward)
+      try {
+        return await child.exited
+      } finally {
+        for (const signal of FORWARDED_SIGNALS) process.off(signal, forward)
+      }
     },
   }
 }
@@ -50,6 +98,15 @@ export const connect = (deps: CliDeps, system?: ConnectSystem): CommandDef =>
     args: commandArgs("connect"),
     run: ({ rawArgs }) =>
       runCli(deps, "connect", rawArgs, ({ positionals }) =>
-        runConnect(positionals[0] ?? "", system ?? liveSystem(deps)),
+        runConnect(
+          positionals[0] ?? "",
+          system ??
+            liveSystem(deps, {
+              spawn: Bun.spawn,
+              env: process.env,
+              home: homedir(),
+              execPath: process.execPath,
+            }),
+        ),
       ),
   })

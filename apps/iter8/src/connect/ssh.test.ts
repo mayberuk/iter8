@@ -6,6 +6,7 @@ import {
   classifyFailure,
   configArgs,
   type Forward,
+  REMOTE_ITER8,
   remoteCommandArgs,
   SSH_OPTIONS,
   type SshFailure,
@@ -212,6 +213,7 @@ test.each([
     { kind: "socket-forward-refused" },
   ],
   [127, "sh: iter8: command not found\n", { kind: "no-iter8" }],
+  [127, "bash: line 1: .local/bin/iter8: No such file or directory\n", { kind: "no-iter8" }],
   [5, "iter8 service is unavailable\n", { kind: "service-down" }],
   [
     255,
@@ -234,3 +236,10 @@ test.each([
     expect(classifyFailure(exitCode, stderr)).toEqual(expected)
   },
 )
+
+test("the devbox's iter8 is tried on PATH, then in ~/.local/bin by a path relative to the login directory", () => {
+  expect(REMOTE_ITER8).toEqual(["iter8", ".local/bin/iter8"])
+  expect(
+    remoteCommandArgs("devbox", { kind: "ssh" }, [REMOTE_ITER8[1], "status", "--json"]),
+  ).toEqual([...SSH_OPTIONS, "--", "devbox", ".local/bin/iter8", "status", "--json"])
+})

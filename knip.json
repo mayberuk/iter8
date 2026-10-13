@@ -1,7 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignore": [".claude/**"],
-  "ignoreWorkspaces": ["fixtures/*"],
+  "ignoreWorkspaces": ["fixtures/*", "playground"],
+  "ignoreBinaries": ["iter8"],
   "workspaces": {
     ".": {
       "entry": [

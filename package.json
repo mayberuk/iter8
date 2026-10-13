@@ -2,14 +2,18 @@
   "name": "iter8",
   "private": true,
   "type": "module",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "packageManager": "bun@1.4.2",
   "workspaces": [
     "packages/*",
     "harness",
-    "fixtures/*"
+    "fixtures/*",
+    "playground"
   ],
   "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "dev:claude": "ITER8_BIN=$PWD/scripts/iter8-dev claude",
+    "prod": "iter8 run playground",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "biome check .",
     "knip": "knip",

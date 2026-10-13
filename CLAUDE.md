@@ -17,6 +17,7 @@ harness/stubs/       stand-ins for what the gate cannot run for real: an agent s
 harness/scenarios/   scenario tests, one folder per part
 fixtures/            the fixture apps: static HTML folder, Vite + React, Next (Turbopack and webpack),
                      SvelteKit, Vue, Astro
+playground/          the permanent test site: Vite + React + Tailwind app plus a static mock/
 scripts/             the gate and the release build
 ```
 Nothing else becomes a package until a second app imports it. `packages/source` is the one

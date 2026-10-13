@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lumen — release notes that write themselves</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="index.html">Lumen</a>
+      <nav>
+        <a href="index.html" aria-current="page">Product</a>
+        <a href="pricing.html">Pricing</a>
+        <a href="#">Docs</a>
+      </nav>
+      <a class="button ghost" href="#">Sign in</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">New in 2.0</p>
+        <h1 class="gradient-text">Ship faster with release notes that write themselves</h1>
+        <p class="lede">
+          Lumen reads your merged pull requests and drafts customer-facing notes in your voice,
+          ready for review before every deploy.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="pricing.html">Start free trial</a>
+          <a class="button faint" href="#">Watch the demo</a>
+        </div>
+      </section>
+
+      <section class="features">
+        <article class="feature">
+          <h2>Reads every merge</h2>
+          <p>Connect GitHub or GitLab once. Lumen follows every branch you ship from.</p>
+        </article>
+        <article class="feature">
+          <h2>Writes in your voice</h2>
+          <p>Feed it three past announcements and it matches tone, length and formatting.</p>
+        </article>
+        <article class="feature">
+          <h2>Never ships unread</h2>
+          <p>Every draft waits for a human. Nothing posts until someone presses publish.</p>
+        </article>
+      </section>
+
+      <section class="signup">
+        <h2>Get the monthly changelog digest</h2>
+        <form onsubmit="event.preventDefault(); this.querySelector('.status').textContent = 'Thanks — check your inbox.'">
+          <label for="email">Work email</label>
+          <div class="row">
+            <input id="email" type="email" placeholder="you@company.com" required />
+            <button type="submit" class="button primary">Submit</button>
+          </div>
+          <p class="status" role="status"></p>
+        </form>
+      </section>
+    </main>
+
+    <footer>© 2026 Lumen Labs · <a href="#">Privacy</a> · <a href="#">Terms</a></footer>
+  </body>
+</html>

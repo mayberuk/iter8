@@ -615,4 +615,356 @@ describe("service connection", () => {
     expect(JSON.parse(String(calls.at(-1)?.init.body)).body).toBe("latest")
     await connection.flush()
   })
+
+  describe("draft writes across a service outage", () => {
+    const putCalls = (calls: { path: string; init: RequestInit }[]) =>
+      calls.filter((call) => call.init.method === "PUT" && call.path.includes("/drafts/"))
+    const bodyOf = (call?: { init: RequestInit }) => JSON.parse(String(call?.init.body)).body
+
+    function serviceThatCanGoDown(options: { putStatus?: number } = {}) {
+      const state = { down: false }
+      const harness = setup((path, init) => {
+        if (state.down) throw new TypeError("fetch failed")
+        if (options.putStatus !== undefined && init.method === "PUT")
+          return new Response("failed", { status: options.putStatus })
+        return fixtureResponse(path, init)
+      })
+      return { ...harness, state }
+    }
+
+    async function reconnect(Socket: { instances: { close(): void }[] }) {
+      Socket.instances.at(-1)?.close()
+      jest.advanceTimersByTime(1000)
+      await microtasks()
+    }
+
+    test("a put that failed because the service was unreachable is sent after the next hello", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, { ...draft, body: "edited while down" })
+      await expect(connection.flush()).rejects.toThrow("putDraft status 0: network failure")
+      expect(putCalls(calls)).toHaveLength(1)
+
+      state.down = false
+      await reconnect(Socket)
+
+      expect(calls.map((call) => `${call.init.method} ${call.path}`)).toEqual([
+        "POST /__iter8/hello",
+        "PUT /__iter8/drafts/N12",
+        "POST /__iter8/hello",
+        "PUT /__iter8/drafts/N12",
+      ])
+      expect(bodyOf(calls.at(-1))).toBe("edited while down")
+      await connection.flush()
+    })
+
+    test("edits made during an outage send only the newest body after reconnecting", async () => {
+      jest.useFakeTimers()
+      let failFirst!: (reason: Error) => void
+      const first = new Promise<Response>((_, reject) => {
+        failFirst = reject
+      })
+      let puts = 0
+      const state = { down: false }
+      const { connection, calls, Socket } = setup((path, init) => {
+        if (init.method === "PUT" && ++puts === 1) return first
+        if (state.down) throw new TypeError("fetch failed")
+        return fixtureResponse(path, init)
+      })
+      await connection.start()
+      connection.putDraft(note.id, { ...draft, body: "one" })
+      connection.putDraft(note.id, { ...draft, body: "two" })
+      connection.putDraft(note.id, { ...draft, body: "three" })
+      state.down = true
+      failFirst(new TypeError("fetch failed"))
+      await expect(connection.flush()).rejects.toThrow("putDraft status 0: network failure")
+
+      state.down = false
+      const before = putCalls(calls).length
+      await reconnect(Socket)
+
+      const resent = putCalls(calls).slice(before)
+      expect(resent.map(bodyOf)).toEqual(["three"])
+      await connection.flush()
+    })
+
+    test("a newer edit made before the reconnect replaces the queued one and is sent once", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, { ...draft, body: "stale" })
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      connection.putDraft(note.id, { ...draft, body: "fresh" })
+      await connection.flush()
+      await reconnect(Socket)
+
+      expect(putCalls(calls).map(bodyOf)).toEqual(["stale", "fresh"])
+    })
+
+    test("prefs and drafts queued during an outage are each sent once", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, draft)
+      connection.savePrefs({ ...prefs, theme: "dark" })
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      await reconnect(Socket)
+
+      const resent = calls.slice(3)
+      expect(resent.map((call) => `${call.init.method} ${call.path}`).sort()).toEqual([
+        "POST /__iter8/hello",
+        "PUT /__iter8/drafts/N12",
+        "PUT /__iter8/prefs",
+      ])
+    })
+
+    test("a create that failed during an outage is not replayed after reconnecting", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      await expect(connection.createDraft(draft)).rejects.toThrow(
+        "createDraft status 0: network failure",
+      )
+
+      state.down = false
+      await reconnect(Socket)
+
+      expect(calls.filter((call) => call.path === "/__iter8/drafts")).toHaveLength(1)
+      expect(calls.filter((call) => call.path === "/__iter8/hello")).toHaveLength(2)
+    })
+
+    test("flush reports a queued write that fails again after the retry", async () => {
+      jest.useFakeTimers()
+      const state = { down: false }
+      const { connection, calls, Socket } = setup((path, init) => {
+        if (state.down) throw new TypeError("fetch failed")
+        if (init.method === "PUT") return new Response("failed", { status: 500 })
+        return fixtureResponse(path, init)
+      })
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("putDraft status 0: network failure")
+
+      state.down = false
+      await reconnect(Socket)
+
+      expect(putCalls(calls)).toHaveLength(2)
+      await expect(connection.flush()).rejects.toThrow("putDraft status 500")
+      await connection.flush()
+    })
+
+    test("flush keeps reporting a write that is still queued", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, state } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("network failure")
+      await expect(connection.flush()).rejects.toThrow("network failure")
+      expect(putCalls(calls)).toHaveLength(1)
+    })
+
+    test("a server error drops the write instead of retrying it on every reconnect", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, Socket } = serviceThatCanGoDown({ putStatus: 404 })
+      await connection.start()
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("putDraft status 404")
+
+      await reconnect(Socket)
+
+      expect(putCalls(calls)).toHaveLength(1)
+      await connection.flush()
+    })
+
+    test("a retry that succeeds clears the stored error, so a later flush resolves", async () => {
+      jest.useFakeTimers()
+      const { connection, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      await reconnect(Socket)
+
+      await connection.flush()
+      await connection.flush()
+    })
+
+    test("flush waits for a retry that is still in flight instead of throwing the old error", async () => {
+      jest.useFakeTimers()
+      const retry = deferred<Response>()
+      let puts = 0
+      const state = { down: false }
+      const { connection, Socket } = setup((path, init) => {
+        if (init.method === "PUT" && state.down) throw new TypeError("fetch failed")
+        if (init.method === "PUT" && ++puts === 2) return retry.promise
+        return fixtureResponse(path, init)
+      })
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      puts = 1
+      await reconnect(Socket)
+      let settled = false
+      const flushed = connection.flush().then(() => {
+        settled = true
+      })
+      await microtasks()
+      expect(settled).toBe(false)
+
+      retry.resolve(Response.json(noteFixture))
+      await flushed
+    })
+
+    test("a queued put that gets a 404 on retry is dropped and not sent on the next reconnect", async () => {
+      jest.useFakeTimers()
+      const state = { down: false, gone: false }
+      const { connection, calls, Socket } = setup((path, init) => {
+        if (init.method === "PUT" && state.down) throw new TypeError("fetch failed")
+        if (init.method === "PUT" && state.gone) return new Response("gone", { status: 404 })
+        return fixtureResponse(path, init)
+      })
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      state.gone = true
+      await reconnect(Socket)
+      await expect(connection.flush()).rejects.toThrow("putDraft status 404")
+      expect(putCalls(calls)).toHaveLength(2)
+
+      await reconnect(Socket)
+      expect(putCalls(calls)).toHaveLength(2)
+      await connection.flush()
+    })
+
+    test("a server error is not queued for a later reconnect", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, Socket } = serviceThatCanGoDown({ putStatus: 500 })
+      await connection.start()
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("putDraft status 500")
+
+      await reconnect(Socket)
+
+      expect(putCalls(calls)).toHaveLength(1)
+    })
+
+    test("deleting a draft drops its queued put and the error it left", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      connection.putDraft(note.id, draft)
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      await connection.deleteDraft(note.id)
+      await reconnect(Socket)
+
+      expect(putCalls(calls)).toHaveLength(1)
+      await connection.flush()
+    })
+
+    test("a put still in flight when its draft is deleted is not queued after it fails", async () => {
+      jest.useFakeTimers()
+      const inflight = deferred<Response>()
+      const state = { held: false }
+      const { connection, calls, Socket } = setup((path, init) => {
+        if (init.method === "PUT" && state.held) return inflight.promise
+        return fixtureResponse(path, init)
+      })
+      await connection.start()
+      state.held = true
+      connection.putDraft(note.id, draft)
+      await connection.deleteDraft(note.id)
+      state.held = false
+      inflight.resolve(Promise.reject(new TypeError("fetch failed")) as never)
+      await microtasks()
+
+      await reconnect(Socket)
+
+      expect(putCalls(calls)).toHaveLength(1)
+      await connection.flush()
+    })
+
+    test("an accepted send drops the queued puts of the notes it sent", async () => {
+      jest.useFakeTimers()
+      const { connection, calls, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      connection.putDraft(sendRequest.noteIds[0] as NoteId, draft)
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      const result = await connection.send(sendRequest)
+      expect(result.outcome).toBe("accepted")
+      await reconnect(Socket)
+
+      expect(putCalls(calls)).toHaveLength(1)
+      await connection.flush()
+    })
+
+    test("the hello reported as ready carries a put that was still in flight", async () => {
+      jest.useFakeTimers()
+      const hung = deferred<Response>()
+      const state = { held: false }
+      const { connection, events, Socket } = setup((path, init) => {
+        if (init.method === "PUT" && state.held) return hung.promise
+        return fixtureResponse(path, init)
+      })
+      await connection.start()
+      state.held = true
+      const queued = NoteId.parse("N14")
+      connection.putDraft(queued, { ...draft, body: "typed just before the drop" })
+
+      await reconnect(Socket)
+
+      const ready = events.at(-1)
+      if (ready?.kind !== "ready") throw new Error("expected a ready event")
+      expect(ready.hello.state.drafts.find((candidate) => candidate.id === queued)?.body).toBe(
+        "typed just before the drop",
+      )
+      hung.resolve(Response.json(noteFixture))
+      await connection.flush()
+    })
+
+    test("the hello reported as ready carries the queued draft text and prefs", async () => {
+      jest.useFakeTimers()
+      const { connection, events, state, Socket } = serviceThatCanGoDown()
+      await connection.start()
+      state.down = true
+      const queued = NoteId.parse("N14")
+      connection.putDraft(queued, { ...draft, body: "edited while down" })
+      connection.savePrefs({ ...prefs, theme: "dark" })
+      await expect(connection.flush()).rejects.toThrow("network failure")
+
+      state.down = false
+      await reconnect(Socket)
+
+      const ready = events.at(-1)
+      if (ready?.kind !== "ready") throw new Error("expected a ready event")
+      expect(ready.hello.state.drafts.find((candidate) => candidate.id === queued)?.body).toBe(
+        "edited while down",
+      )
+      expect(ready.hello.state.prefs.theme).toBe("dark")
+    })
+  })
 })
