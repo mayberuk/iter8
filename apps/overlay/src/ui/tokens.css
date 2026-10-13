@@ -1047,7 +1047,13 @@ kbd {
   transform-box: view-box;
   transform-origin: 17px 17px;
 }
-.status-ring .av {
+.status-ring .av.claude {
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.status-ring .av.agent {
+  border-radius: 50%;
   box-shadow: none;
 }
 .status-ring .rt {

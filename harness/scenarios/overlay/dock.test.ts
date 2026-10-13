@@ -1438,6 +1438,15 @@ describe("the session status ring", () => {
     expect(ready.moving.flat()).toEqual(["ring-breathe"])
   }, 30_000)
 
+  test("Claude's mark sits bare inside the ring, with no tile behind it", async () => {
+    const o = await open({ pairing: LIVE })
+    const tile = await o.overlay.locator(".dock .status-ring .av.claude").evaluate((av) => {
+      const style = getComputedStyle(av)
+      return { fill: style.backgroundColor, border: style.borderTopWidth, shadow: style.boxShadow }
+    })
+    expect(tile).toEqual({ fill: "rgba(0, 0, 0, 0)", border: "0px", shadow: "none" })
+  }, 30_000)
+
   test("an ended session's ring is dashed grey and its avatar greyed", async () => {
     const o = await open({ pairing: GONE })
     const seen = await o.overlay.locator(".dock .status-ring").evaluate((ring) => ({

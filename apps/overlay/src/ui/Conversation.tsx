@@ -368,19 +368,29 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
   )
 }
 
-function RoundDivider(props: { roundId: RoundId; enter: boolean; open: (id: RoundId) => void }) {
+function RoundDivider(props: {
+  roundId: RoundId
+  final: boolean
+  enter: boolean
+  open: (id: RoundId) => void
+}) {
   const { model } = useOverlay()
   const round = model.rounds.value.find((held) => held.id === props.roundId)
   const state = round ? roundDisplayState(round) : null
+  const live = props.final && (state === "queued" || state === "delivered" || state === "working")
   const number = props.roundId.slice(1)
   return (
     <button
       type="button"
-      class={cls("cv-round", state, props.enter && "enter")}
+      class={cls("cv-round", state, live && "live", props.enter && "enter")}
       aria-label={state ? `Round ${number}, ${state}` : `Round ${number}`}
       onClick={() => props.open(props.roundId)}
     >
-      <span class="rn">{state ? `Round ${number} · ${state}` : `Round ${number}`}</span>
+      <span class="rn">
+        {state ? <StatusGlyph state={state} /> : null}
+        Round {number}
+        <Icon name="right" size={12} />
+      </span>
     </button>
   )
 }
@@ -597,6 +607,9 @@ function MessageList() {
 
   const loading = load.status === "loading" || (load.status === "ready" && load.olderLoading)
   const firstUnread = view.firstUnread.value
+  const finalDivider = entries.findLastIndex(
+    (entry, index) => entry.roundId !== null && entry.roundId !== entries[index - 1]?.roundId,
+  )
 
   return (
     <div class="cv-stage">
@@ -656,7 +669,12 @@ function MessageList() {
             return (
               <Fragment key={entry.key}>
                 {entry.roundId !== null && entry.roundId !== entries[index - 1]?.roundId ? (
-                  <RoundDivider roundId={entry.roundId} enter={enter !== null} open={showRound} />
+                  <RoundDivider
+                    roundId={entry.roundId}
+                    final={index === finalDivider}
+                    enter={enter !== null}
+                    open={showRound}
+                  />
                 ) : null}
                 {entry.key === firstUnread ? (
                   // biome-ignore lint/a11y/useSemanticElements: an hr cannot carry the "New" label

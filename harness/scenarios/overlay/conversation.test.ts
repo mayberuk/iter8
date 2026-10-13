@@ -507,13 +507,13 @@ describe("conversation: finished messages", () => {
     )
     expect(sequence).toEqual([
       "Agent message 1",
-      "Round 1 · done",
+      "Round 1",
       "Agent message 2",
       "Agent message 3",
       "Agent message 4",
-      "Round 1 · done",
+      "Round 1",
       "Agent message 5",
-      "Round 2 · done",
+      "Round 2",
       "Agent message 6",
       "Agent message 7",
     ])
@@ -1737,7 +1737,7 @@ describe("conversation: how messages look", () => {
     expect(await articles(panel).nth(1).locator(".cv-foot .sg-delivered").count()).toBe(1)
   }, 30_000)
 
-  test("a round divider is a hairline either side of a small centred sentence-case label", async () => {
+  test("a round divider is a hairline either side of a small centred chip with the round's status glyph", async () => {
     const round = Round.parse({
       ...roundJson,
       id: "R1",
@@ -1750,7 +1750,7 @@ describe("conversation: how messages look", () => {
     })
     const panel = await openConversation(o)
     await untilCount(panel, 1)
-    const divider = panel.getByRole("button", { name: /^Round 1/ })
+    const divider = panel.getByRole("button", { name: "Round 1, done" })
     const seen = await divider.evaluate((el) => {
       const label = el.querySelector(".rn") as HTMLElement
       const box = el.getBoundingClientRect()
@@ -1760,6 +1760,7 @@ describe("conversation: how messages look", () => {
       const style = getComputedStyle(label)
       return {
         text: label.textContent,
+        glyph: label.querySelector("svg.sg")?.getAttribute("class") ?? null,
         centre: labelBox.left + labelBox.width / 2 - (box.left + box.width / 2),
         hairlines: [before.height, after.height],
         fill: style.backgroundColor,
@@ -1770,11 +1771,12 @@ describe("conversation: how messages look", () => {
         size: Number.parseFloat(style.fontSize),
       }
     })
-    expect(seen.text).toBe("Round 1 · done")
+    expect(seen.text).toBe("Round 1")
+    expect(seen.glyph).toBe("sg sg-done")
     expect(Math.abs(seen.centre)).toBeLessThanOrEqual(1)
     expect(seen.hairlines).toEqual(["1px", "1px"])
-    expect(seen.fill).toBe("rgba(0, 0, 0, 0)")
-    expect(seen.border).toBe("0px")
+    expect(seen.fill).not.toBe("rgba(0, 0, 0, 0)")
+    expect(seen.border).toBe("1px")
     expect(seen.transform).toBe("none")
     expect(seen.spacing).toBe("normal")
     expect(seen.family).not.toContain("JetBrains")
