@@ -7,6 +7,11 @@ import { buildOverlayBundles } from "./build"
 const READY_LIMIT_MS = 30_000
 const READY_POLL_MS = 200
 
+/** The service drains itself after ten idle minutes; a clean exit sooner means another service holds the pool. */
+export function afterServiceExit(code: number | null, ranMs: number): "restart" | "fail" {
+  return code === 0 && ranMs >= READY_LIMIT_MS ? "restart" : "fail"
+}
+
 type Readiness = {
   status: (timeoutMs: number) => Promise<string | null>
   start: () => void
@@ -89,7 +94,8 @@ async function dev(): Promise<void> {
       building = null
     })
   }
-  const start = (argv: string[]) => {
+  const start = (argv: string[], restartWhenIdle = false) => {
+    const startedAt = Date.now()
     const child = Bun.spawn(argv, {
       cwd: root,
       env,
@@ -100,7 +106,13 @@ async function dev(): Promise<void> {
     children.add(child)
     void child.exited.then((code) => {
       children.delete(child)
-      if (!stopping) fail(`${argv.join(" ")} exited (${code})`)
+      if (stopping) return
+      if (restartWhenIdle && afterServiceExit(code, Date.now() - startedAt) === "restart") {
+        console.error("The dev service stopped while idle; starting it again.")
+        start(argv, true)
+        return
+      }
+      fail(`${argv.join(" ")} exited (${code})`)
     })
     return child
   }
@@ -118,7 +130,7 @@ async function dev(): Promise<void> {
       watcher.on("error", fail)
       watchers.push(watcher)
     }
-    start([process.execPath, "--watch", "apps/iter8/src/main.ts", "serve"])
+    start([process.execPath, "--watch", "apps/iter8/src/main.ts", "serve"], true)
     await startWhenReady({
       status: async (timeoutMs) => {
         const probe = Bun.spawn([launcher, "status", "--json"], {

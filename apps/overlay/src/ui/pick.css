@@ -161,3 +161,11 @@
 .chip .comp.tag {
   color: var(--ink-2);
 }
+.layer.pick.over {
+  z-index: 1;
+}
+.chip .hints + .hints {
+  margin-top: 4px;
+  padding-top: 0;
+  border-top: 0;
+}

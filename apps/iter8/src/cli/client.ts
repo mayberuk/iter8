@@ -25,6 +25,7 @@ export type CliDeps = {
   pid: number
   ancestry: () => ProcessKey[]
   processStart: (pid: number) => string | null
+  readStdin: () => Promise<string>
   makeTempDir: () => Promise<string>
   version: string
 }

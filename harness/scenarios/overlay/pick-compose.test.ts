@@ -633,8 +633,11 @@ describe("the window listeners", () => {
       }
       const expected = [
         "auxclick capture",
+        "blur capture passive",
         "click capture",
         "dblclick capture",
+        "keydown capture passive",
+        "keyup capture passive",
         "mousedown capture",
         "mouseup capture",
         "pointerdown capture",
@@ -646,7 +649,15 @@ describe("the window listeners", () => {
       expect(added("region")).toEqual(expected)
       expect(added("shot")).toEqual(
         expected
-          .filter((listener) => listener !== "scroll capture passive")
+          .filter(
+            (listener) =>
+              ![
+                "scroll capture passive",
+                "blur capture passive",
+                "keydown capture passive",
+                "keyup capture passive",
+              ].includes(listener),
+          )
           .concat("pointercancel capture passive")
           .sort(),
       )
@@ -908,9 +919,12 @@ describe("the inspector chip", () => {
       expect(await hoverChip(o).locator(".c1 .dim").textContent()).toBe(
         `${Math.round(box?.width ?? 0)} × ${Math.round(box?.height ?? 0)}`,
       )
-      const hints = (await hoverChip(o).locator(".hints").textContent()) ?? ""
+      const hints = (await hoverChip(o).locator(".hints").first().textContent()) ?? ""
       for (const part of ["↑", "↓", "climb", "⇧", "click to add", "drag for region", "↵", "note"])
         expect(hints).toContain(part)
+      expect(await hoverChip(o).locator(".hints").nth(1).textContent()).toBe(
+        "hold ⌥ to pick iter8 itself",
+      )
       expect(await hoverChip(o).locator(".src").count()).toBe(0)
     },
     TEST_MS,

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import { randomBytes } from "node:crypto"
 import {
+  type BackgroundWork,
   type HookEndReason,
   type HookSource,
   type LiveSession,
@@ -25,6 +26,7 @@ export type OwnerEvent =
   | { kind: "ended"; reason: HookEndReason }
   | { kind: "busy" }
   | { kind: "idle" }
+  | { kind: "stopped"; work: BackgroundWork }
   | { kind: "checked"; process: "alive" | "dead" | "restarted" | "unreadable" }
 
 export function nextPairingState(
@@ -43,7 +45,11 @@ export function nextPairingState(
     case "busy":
       return { status: "busy" }
     case "idle":
-      return { status: "live" }
+      return state.status === "background" ? state : { status: "live" }
+    case "stopped":
+      return event.work.agents + event.work.tasks > 0
+        ? { status: "background", ...event.work }
+        : { status: "live" }
     case "checked":
       switch (event.process) {
         case "alive":
@@ -69,6 +75,7 @@ export type Owners = {
   byPid(pid: number): OwnerId | null
   resolve(identities: ProcessKey[], explicit: OwnerId | null): OwnerId | null
   setBusy(ownerId: OwnerId, busy: boolean): void
+  setStopped(ownerId: OwnerId, work: BackgroundWork): void
   state(ownerId: OwnerId): PairingState
   pairing(ownerId: OwnerId, generation: PairingGeneration, listener: "armed" | "none"): Pairing
   liveSessions(): LiveSession[]
@@ -124,6 +131,9 @@ export function createOwners(db: Database, deps: OwnersDeps): Owners {
     "UPDATE owners SET gone_reason = ? WHERE id = ? AND gone_reason IS NULL",
   )
 
+  // Not persisted: every Stop hook restates it, and a stored column would make the schema
+  // version incompatible with the CLIs of sessions still on older plugins.
+  const background = new Map<OwnerId, BackgroundWork>()
   const lastSwept = new Map<OwnerId, PairingState>()
   for (const row of selectAll.all()) {
     if (row.gone_reason !== null) lastSwept.set(OwnerId.parse(row.id), storedState(row))
@@ -133,6 +143,8 @@ export function createOwners(db: Database, deps: OwnersDeps): Owners {
     if (row.gone_reason !== null) {
       return PairingState.parse({ status: "gone", reason: row.gone_reason })
     }
+    const work = background.get(OwnerId.parse(row.id))
+    if (work) return { status: "background", ...work }
     return { status: row.busy ? "busy" : "live" }
   }
 
@@ -184,6 +196,16 @@ export function createOwners(db: Database, deps: OwnersDeps): Owners {
     return toPairing(requireRow(ownerId), ownerGeneration(ownerId), "none")
   }
 
+  function apply(ownerId: OwnerId, event: OwnerEvent) {
+    const row = requireRow(ownerId)
+    const next = nextPairingState(storedState(row), row.relabel_pending === 1, event)
+    if (next.status === "gone") return
+    db.query("UPDATE owners SET busy = ? WHERE id = ?").run(next.status === "busy" ? 1 : 0, ownerId)
+    if (next.status === "background")
+      background.set(ownerId, { agents: next.agents, tasks: next.tasks })
+    else background.delete(ownerId)
+  }
+
   function byPid(pid: number): OwnerId | null {
     const startedAt = deps.processStart(pid)
     const row =
@@ -211,6 +233,7 @@ export function createOwners(db: Database, deps: OwnersDeps): Owners {
             "UPDATE owners SET label = ?, relabel_pending = 0, gone_reason = NULL WHERE id = ?",
           ).run(input.label, existing.id)
           const ownerId = OwnerId.parse(existing.id)
+          background.delete(ownerId)
           if (lastSwept.get(ownerId)?.status === "gone") lastSwept.delete(ownerId)
           return ownerPairing(ownerId)
         }
@@ -258,15 +281,11 @@ export function createOwners(db: Database, deps: OwnersDeps): Owners {
     },
 
     setBusy(ownerId, busy) {
-      const row = requireRow(ownerId)
-      const next = nextPairingState(storedState(row), row.relabel_pending === 1, {
-        kind: busy ? "busy" : "idle",
-      })
-      if (next.status === "gone") return
-      db.query("UPDATE owners SET busy = ? WHERE id = ?").run(
-        next.status === "busy" ? 1 : 0,
-        ownerId,
-      )
+      apply(ownerId, { kind: busy ? "busy" : "idle" })
+    },
+
+    setStopped(ownerId, work) {
+      apply(ownerId, { kind: "stopped", work })
     },
 
     state(ownerId) {

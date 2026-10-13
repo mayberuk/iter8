@@ -1047,7 +1047,13 @@ kbd {
   transform-box: view-box;
   transform-origin: 17px 17px;
 }
-.status-ring .av {
+.status-ring .av.claude {
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.status-ring .av.agent {
+  border-radius: 50%;
   box-shadow: none;
 }
 .status-ring .rt {
@@ -1077,6 +1083,18 @@ kbd {
 .ring-busy .rb {
   stroke-dasharray: 14 84;
   animation-duration: 1.7s;
+}
+.ring-background .rt {
+  opacity: 1;
+}
+.ring-background .ra {
+  stroke: var(--change);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-dasharray: 30 68;
+  animation:
+    ring-orbit 5s linear infinite,
+    ring-breathe 5s ease-in-out infinite;
 }
 .ring-delivered .ra {
   stroke: var(--cobalt);

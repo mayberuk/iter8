@@ -342,11 +342,62 @@ p.cv-text {
   animation: cv-draw 0.45s var(--out) backwards;
 }
 .cv-round .rn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 7px 0 7px;
+  border-radius: 8px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 0 var(--edge);
+  margin-bottom: 2px;
   white-space: nowrap;
+  transition: transform 0.09s var(--press);
 }
-.cv-round:hover,
-.cv-round:focus-visible {
-  color: var(--ink-2);
+.cv-round .rn .sg {
+  width: 15px;
+  height: 15px;
+}
+.cv-round .rn .ic {
+  width: 12px;
+  height: 12px;
+  margin-left: -3px;
+  opacity: 0;
+  transform: translateX(-3px);
+  transition:
+    opacity 0.12s,
+    transform 0.16s var(--out);
+}
+.cv-round:hover .rn,
+.cv-round:focus-visible .rn {
+  background: var(--raised);
+  color: var(--ink);
+}
+.cv-round:hover .rn .ic,
+.cv-round:focus-visible .rn .ic {
+  opacity: 1;
+  transform: none;
+}
+.cv-round:active .rn {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--edge);
+}
+.cv-round.queued .sg,
+.cv-round.working .sg {
+  color: var(--amber-t);
+}
+.cv-round.delivered .sg {
+  color: var(--cobalt-t);
+}
+.cv-round.done .sg {
+  color: var(--keep-t);
+}
+.cv-round.failed .sg {
+  color: var(--fix-t);
+}
+.cv-round:not(.live) .sg * {
+  animation: none;
 }
 
 .cv-newline {
@@ -517,6 +568,16 @@ p.cv-text {
 }
 .cv-work .cv-sess {
   flex: none;
+}
+.cv-bg {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 4px;
+  font-size: 12px;
+  color: var(--mute);
+  animation: cv-rise 0.22s var(--out) backwards;
 }
 .cv-bars {
   display: flex;

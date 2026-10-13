@@ -141,14 +141,14 @@ export async function pruneFor(
 }
 
 /** The smallest element containing the whole of `clip` (page coordinates), across shadow roots. */
-function smallestContaining(clip: DOMRectReadOnly, exclude: Element): Element {
+function smallestContaining(clip: DOMRectReadOnly, exclude: Element | null): Element {
   const slack = 0.5
   const left = clip.left - window.scrollX
   const top = clip.top - window.scrollY
   let el =
     document
       .elementsFromPoint(left + clip.width / 2, top + clip.height / 2)
-      .find((candidate) => candidate !== exclude && !exclude.contains(candidate)) ??
+      .find((candidate) => candidate !== exclude && !exclude?.contains(candidate)) ??
     document.documentElement
   for (;;) {
     const box = el.getBoundingClientRect()
@@ -166,7 +166,7 @@ function smallestContaining(clip: DOMRectReadOnly, exclude: Element): Element {
 }
 
 /** Counts elements, open shadow roots included and `skip` excluded, stopping once past `limit`. */
-function countElements(root: Element, limit: number, skip: Element): number {
+function countElements(root: Element, limit: number, skip: Element | null): number {
   const pending: (Element | ShadowRoot)[] = [root]
   let seen = 0
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
@@ -203,9 +203,18 @@ function backdropOf(root: Element): string {
 }
 
 type Shot = { png: Blob; width: number; height: number } | { omitted: string }
-type Opts = { signal: AbortSignal; exclude: Element }
+type Opts = {
+  signal: AbortSignal
+  exclude: Element | null
+  /** Draws the root in normal flow: the dock is placed by a `translate`, which would carry its clone out of the clip. */
+  inFlow?: boolean
+}
 
-async function render(root: Element, within: Rect, { signal, exclude }: Opts): Promise<Shot> {
+async function render(
+  root: Element,
+  within: Rect,
+  { signal, exclude, inFlow = false }: Opts,
+): Promise<Shot> {
   signal.throwIfAborted()
   const origin = root.getBoundingClientRect()
   const crop = intersect(origin, within)
@@ -265,7 +274,14 @@ async function render(root: Element, within: Rect, { signal, exclude }: Opts): P
       includeStyleProperties: styleProperties,
       width: view.width,
       height: view.height,
-      style: { margin: "0", width: `${origin.width}px`, height: `${origin.height}px` },
+      style: {
+        margin: "0",
+        width: `${origin.width}px`,
+        height: `${origin.height}px`,
+        ...(inFlow
+          ? { position: "relative", inset: "auto", translate: "none", transform: "none" }
+          : {}),
+      },
       onCreateForeignObjectSvg: (svg) => {
         svg.setAttribute("viewBox", `${view.left} ${view.top} ${view.width} ${view.height}`)
         const frame = svg.querySelector("foreignObject")
@@ -273,7 +289,7 @@ async function render(root: Element, within: Rect, { signal, exclude }: Opts): P
         frame?.setAttribute("height", `${origin.height}`)
       },
       filter: (node) => {
-        if (exclude.contains(node) || dropped.has(node)) return false
+        if (exclude?.contains(node) || dropped.has(node)) return false
         const owner = node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode
         return owner === null || !stubs.has(owner)
       },
@@ -349,5 +365,14 @@ export function captureRegion(clip: DOMRectReadOnly, opts: Opts): Promise<Shot> 
       height: clip.height,
     },
     opts,
+  )
+}
+
+/** Renders one overlay part with the overlay left in. Answers as `captureCrop` does. */
+export function capturePart(part: Element, signal: AbortSignal): Promise<Shot> {
+  return render(
+    part,
+    { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
+    { signal, exclude: null, inFlow: true },
   )
 }

@@ -1,6 +1,7 @@
 import {
   type AnchorStatus,
   type AttachResult,
+  type BackgroundWork,
   type Box,
   type Capture,
   type ChatSetting,
@@ -54,7 +55,15 @@ export const DisplayNoteState = z.enum([
 ])
 export type DisplayNoteState = z.infer<typeof DisplayNoteState>
 
-export const DockState = z.enum(["live", "busy", "gone", "checking", "delivered", "unattached"])
+export const DockState = z.enum([
+  "live",
+  "busy",
+  "background",
+  "gone",
+  "checking",
+  "delivered",
+  "unattached",
+])
 export type DockState = z.infer<typeof DockState>
 
 export const ConnectionState = z.discriminatedUnion("status", [
@@ -150,6 +159,13 @@ export function dockState(
   if (deliveredUntil !== null && now < deliveredUntil) return "delivered"
   if (pairing.state.status === "unknown") return "checking"
   return pairing.state.status
+}
+
+export function backgroundWords({ agents, tasks }: BackgroundWork): string {
+  const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`
+  if (tasks === 0) return `${count(agents, "agent")} running`
+  if (agents === 0) return `${count(tasks, "background task")} running`
+  return `${count(agents, "agent")} and ${count(tasks, "task")} running`
 }
 
 /** Pairing is checked before the draft count, so a gone or absent session always says why. */

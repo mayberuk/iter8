@@ -10,6 +10,7 @@ import { type ComponentChildren, Fragment } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { z } from "zod"
 import { type Mode, nextRoundNumber, type SheetTab, sessionName } from "../model"
+import { part } from "../parts"
 import { useOverlay, useSheet } from "./context"
 import { useSendRound } from "./Dock"
 import { Icon, type IconName, IntentGlyph } from "./glyphs"
@@ -47,6 +48,7 @@ const COACH_EDGE = 12
 
 function targetLabel(note: Note): string {
   const { target } = note
+  if (target.kind === "iter8") return `iter8 · ${target.part.name}`
   if (target.kind === "region") {
     const size = `${Math.round(target.box.width)}×${Math.round(target.box.height)}`
     return note.capture?.screenshot ? `screenshot ${size}` : `region ${size}`
@@ -331,6 +333,7 @@ function CommandPalette({ sendRound }: { sendRound: SendRound }) {
         class="palette"
         role="dialog"
         aria-label="Command palette"
+        {...part("palette")}
         onKeyDown={onKeyDown}
         onMouseDown={(event) => {
           if (event.target !== inputRef.current) event.preventDefault()
@@ -458,6 +461,9 @@ function ShortcutSheet() {
               <kbd>↑</kbd>
               <kbd>↓</kbd>
             </Row>
+            <Row label="Pick iter8 itself">
+              hold <kbd>⌥</kbd>
+            </Row>
             <Row label="Add to selection">
               <kbd>⇧</kbd> click
             </Row>
@@ -535,7 +541,7 @@ const COACH_STEPS = [
     body: (
       <>
         Press <kbd>C</kbd> to pick. Hover shows the component and its source file; <kbd>↑</kbd>{" "}
-        climbs to the parent.
+        climbs to the parent. Hold <kbd>⌥</kbd> to point at iter8 itself.
       </>
     ),
   },

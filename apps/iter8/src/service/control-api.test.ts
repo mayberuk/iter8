@@ -883,6 +883,7 @@ describe("send-now hook pointers", () => {
         pid: cliPid,
         ancestry: () => [],
         processStart: (pid) => `linux:1:${pid}`,
+        readStdin: async () => "",
         makeTempDir: async () => {
           throw new Error("Unexpected temporary directory")
         },
@@ -1680,6 +1681,41 @@ describe("hook waits and prompts, in depth", () => {
       { owner_id: a.ownerId, round_id: roundA.id },
       { owner_id: b.ownerId, round_id: roundB.id },
     ])
+  })
+
+  test("hook stop records the background counts it is given, and none as live", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    await t.post("/hook/prompt", { pid: session.pid })
+    expect((await t.post("/hook/stop", { pid: session.pid, agents: 2, tasks: 1 })).status).toBe(200)
+    expect(t.owners.state(session.ownerId)).toEqual({ status: "background", agents: 2, tasks: 1 })
+    await t.post("/hook/prompt", { pid: session.pid })
+    expect(t.owners.state(session.ownerId)).toEqual({ status: "busy" })
+    await t.post("/hook/stop", { pid: session.pid, agents: 0, tasks: 3 })
+    expect(t.owners.state(session.ownerId)).toEqual({ status: "background", agents: 0, tasks: 3 })
+    await t.post("/hook/stop", { pid: session.pid })
+    expect(t.owners.state(session.ownerId)).toEqual({ status: "live" })
+  })
+
+  test("hook stop refuses counts that are negative or not whole", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    expect((await t.post("/hook/stop", { pid: session.pid, agents: -1 })).status).toBe(400)
+    expect((await t.post("/hook/stop", { pid: session.pid, tasks: 1.5 })).status).toBe(400)
+  })
+
+  test("a round queued behind a busy turn is delivered when the turn ends with background work running", async () => {
+    const t = setup()
+    const session = await t.startSession(4821, "larkspur-session")
+    const { page } = await t.openServer(session)
+    await t.post("/hook/prompt", { pid: session.pid })
+    const round = t.sendRound(page.id, "Mid-turn round")
+    const waiting = t.client.hook.wait.$get({
+      query: { pid: String(session.pid), timeoutSeconds: "25" },
+    })
+    await t.post("/hook/stop", { pid: session.pid, agents: 1, tasks: 0 })
+    const pointer = { roundId: round.id, pageId: page.id, noteCount: 1 }
+    expect(await (await waiting).json()).toEqual({ outcome: "woken", pointers: [pointer] })
   })
 
   test("hook stop and end answer ok", async () => {

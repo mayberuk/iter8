@@ -15,6 +15,7 @@ import {
   IdempotencyKey,
   Intent,
   LANDING_PATH,
+  type NoteTarget,
   OpenResult,
   type OwnerId,
   type PageId,
@@ -147,6 +148,7 @@ async function setup() {
       return response
     },
   })
+  let stdin: () => Promise<string> = async () => ""
   const deps: CliDeps = {
     connect: async (options) => {
       connections.push(options)
@@ -159,8 +161,12 @@ async function setup() {
     pid,
     ancestry: () => [{ pid, startedAt: starts.get(pid) ?? "" }],
     processStart: (pid) => starts.get(pid) ?? null,
+    readStdin: () => stdin(),
     makeTempDir: tempDir,
     version: "0.1.0",
+  }
+  function pipeStdin(read: () => Promise<string>) {
+    stdin = read
   }
   function clear() {
     stdout.length = 0
@@ -205,15 +211,18 @@ async function setup() {
     clear()
     return opened.page
   }
-  function sendMany(pageId: PageId, drafts: Array<{ body: string; capture?: Capture }>) {
-    const notes = drafts.map(({ body, capture }) =>
+  function sendMany(
+    pageId: PageId,
+    drafts: Array<{ body: string; capture?: Capture; target?: NoteTarget }>,
+  ) {
+    const notes = drafts.map(({ body, capture, target }) =>
       inbox.createDraft(
         pageId,
         DraftBody.parse({
           intent: "fix",
           body,
           anchorStatus: "anchored",
-          target: {
+          target: target ?? {
             kind: "element",
             anchor: {
               selector: ["h1"],
@@ -240,6 +249,7 @@ async function setup() {
     client,
     app,
     run,
+    pipeStdin,
     failStatus,
     clear,
     start,
@@ -639,6 +649,61 @@ describe("hook commands", () => {
       expect(state.stdout[1]).toContain("2 notes")
     },
   )
+
+  describe("hook stop with the hook JSON on stdin", () => {
+    const stopWith = async (read: () => Promise<string>) => {
+      const state = await setup()
+      const pairing = await state.start()
+      await state.run("hook", ["prompt", "--pid", "9001"])
+      state.clear()
+      state.pipeStdin(read)
+      await state.run("hook", ["stop", "--pid", "9001"])
+      return { state, owner: pairing.owner }
+    }
+    const tasks = (...types: string[]) =>
+      JSON.stringify({
+        hook_event_name: "Stop",
+        stop_hook_active: false,
+        background_tasks: types.map((type, index) => ({
+          id: `task-${index}`,
+          type,
+          status: "running",
+          description: "work",
+        })),
+        session_crons: [],
+      })
+
+    test("two agents and a shell command leave the session in the background with those counts", async () => {
+      const { state, owner } = await stopWith(async () => tasks("subagent", "shell", "teammate"))
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(state.requests[0]?.body).toMatchObject({ pid: 9001, agents: 2, tasks: 1 })
+      expect(state.owners.state(owner)).toEqual({ status: "background", agents: 2, tasks: 1 })
+    })
+
+    test("an empty task list leaves the session live", async () => {
+      const { state, owner } = await stopWith(async () => tasks())
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.owners.state(owner)).toEqual({ status: "live" })
+    })
+
+    test.each([
+      ["no input", async () => ""],
+      ["input that is not JSON", async () => "{not json"],
+      ["JSON of another shape", async () => JSON.stringify({ background_tasks: "none" })],
+      [
+        "a stream that fails",
+        async () => {
+          throw new Error("stdin closed")
+        },
+      ],
+    ])("%s leaves the session live and the hook successful", async (_name, read) => {
+      const { state, owner } = await stopWith(read)
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(state.owners.state(owner)).toEqual({ status: "live" })
+    })
+  })
 
   test("prompt, stop and end update the registered owner without extra output", async () => {
     const state = await setup()
@@ -1250,6 +1315,57 @@ describe("show text output", () => {
       expect(text).toContain(authored.body)
     }
     expect(text).not.toContain("undefined")
+  })
+})
+
+describe("show for a note about iter8", () => {
+  const iter8Target: NoteTarget = {
+    kind: "iter8",
+    part: { key: "dock.ring", name: "Dock status ring", source: "apps/overlay/src/ui/Dock.tsx" },
+    iter8Version: "0.4.4",
+    box: { x: 1096, y: 842, width: 34, height: 34 },
+    viewport: { width: 1440, height: 900, devicePixelRatio: 2 },
+  }
+
+  test("goes through the service and prints the part, its source and that it is not about the page", async () => {
+    const state = await setup()
+    await state.start()
+    const page = await state.openPage()
+    const capture: Capture = {
+      completeness: "complete",
+      omittedParts: [],
+      url: `${page.origin}/pricing`,
+      viewport: iter8Target.viewport,
+      theme: "light",
+    }
+    const round = state.sendMany(page.id, [
+      { body: "More room around the ring", target: iter8Target, capture },
+      { body: "A page note" },
+    ])
+
+    await state.run("show", [round.id, "--json"])
+    const data = ShowResult.parse(JSON.parse(state.stdout.join("")))
+    expect(data.notes[0]?.authored.target).toEqual(iter8Target)
+    expect(data.notes[0]?.untrustedCapture).toEqual(capture)
+    state.clear()
+
+    await state.run("show", [round.id])
+    expect(state.exits).toEqual([ExitCode.ok])
+    const text = state.stdout.join("")
+    const [iter8Section = "", pageSection = ""] = text.split(/\n## /).slice(1)
+    expect(iter8Section).toContain(
+      [
+        "Target: iter8 · Dock status ring",
+        "This note is about iter8 itself, not the page it was left on.",
+        "Source: apps/overlay/src/ui/Dock.tsx",
+        "iter8 version: 0.4.4",
+      ].join("\n"),
+    )
+    expect(iter8Section).not.toContain("Selector hops")
+    expect(iter8Section).not.toContain("Source lead")
+    expect(iter8Section).not.toContain("Computed styles")
+    expect(pageSection).toContain("Target: element")
+    expect(pageSection).not.toContain("about iter8 itself")
   })
 })
 

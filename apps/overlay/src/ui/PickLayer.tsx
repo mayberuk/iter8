@@ -9,9 +9,10 @@ import type {
 import { batch, computed, effect, untracked, useComputed } from "@preact/signals"
 import type { JSX } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
-import { enrich } from "../enrich/run"
+import { enrich, enrichPart } from "../enrich/run"
 import { loadSourceLookup } from "../enrich/source"
 import { type Mode, toDraftBody } from "../model"
+import { findPart, PARTS, partTarget, resolvePart } from "../parts"
 import { parentAcrossShadow, resolveAnchor, resolveSelector } from "../pick/anchor"
 import { identityOf, regionTarget, snapshotElement } from "../pick/snapshot"
 import { Composer, shake } from "./Composer"
@@ -117,6 +118,7 @@ function anchorsOf(target: NoteTarget): readonly ElementAnchor[] {
     case "elements":
       return target.anchors
     case "region":
+    case "iter8":
       return []
   }
 }
@@ -143,7 +145,17 @@ function tagOf(el: Element): string {
   return first ? `${el.localName}.${first}` : el.localName
 }
 
-function describe(el: Element, rect: Rect) {
+function describe(el: Element, rect: Rect, root: ShadowRoot) {
+  const found = root.contains(el) ? resolvePart(el) : null
+  if (found) {
+    return {
+      tag: "iter8",
+      dims: `${Math.round(rect.w)} × ${Math.round(rect.h)}`,
+      name: PARTS[found.key].name,
+      path: [PARTS[found.key].source],
+      part: true,
+    }
+  }
   const { name, text } = identityOf(el)
   const path: Element[] = []
   for (
@@ -157,6 +169,7 @@ function describe(el: Element, rect: Rect) {
     dims: `${Math.round(rect.w)} × ${Math.round(rect.h)}`,
     name: name ?? text,
     path: path.map(tagOf),
+    part: false,
   }
 }
 
@@ -168,6 +181,7 @@ async function afterPaint(): Promise<void> {
 export function PickLayer(): JSX.Element | null {
   useSheet(pickCss)
   const { model, connection, root, host, boot, errors, renderGeneration } = useOverlay()
+  const layerRef = useRef<HTMLDivElement>(null)
   const ringRef = useRef<HTMLDivElement>(null)
   const veilRef = useRef<HTMLDivElement>(null)
   const chipRef = useRef<HTMLDivElement>(null)
@@ -248,6 +262,23 @@ export function PickLayer(): JSX.Element | null {
       try {
         await afterPaint()
         signal.throwIfAborted()
+        if (current.target.kind === "iter8") {
+          if (!first) return
+          current.capture = await enrichPart(first, {
+            signal,
+            uploadScreenshot: (png) => {
+              if (shown()) setThumb(URL.createObjectURL(png))
+              return connection.uploadScreenshot(png)
+            },
+            idleSinceInput: () => performance.now() - current.lastInput,
+          })
+          if (shown() && current.capture.screenshot === undefined) {
+            setAttach(false)
+            setUnavailable(true)
+          }
+          deliver(current)
+          return
+        }
         const el = current.target.kind === "region" ? elementAt(current.target.box) : first
         const anchor = anchorsOf(current.target)[0]
         if (!el) {
@@ -315,11 +346,18 @@ export function PickLayer(): JSX.Element | null {
         ...[model.hover.peek(), ...model.multi.peek()].flatMap((ref) => ref?.deref() ?? []),
       ]
       picked.current = []
-      targets.current = anchorsOf(composer.target).map((anchor) => {
-        const matches = resolveSelector(anchor.selector)
-        return candidates.find((el) => matches.includes(el)) ?? matches[0] ?? null
-      })
-      setLead(composer.target.kind === "region" ? null : "pending")
+      targets.current =
+        composer.target.kind === "iter8"
+          ? [candidates.find((el) => root.contains(el)) ?? null]
+          : anchorsOf(composer.target).map((anchor) => {
+              const matches = resolveSelector(anchor.selector)
+              return candidates.find((el) => matches.includes(el)) ?? matches[0] ?? null
+            })
+      setLead(
+        composer.target.kind === "element" || composer.target.kind === "elements"
+          ? "pending"
+          : null,
+      )
       setThumb(null)
       setAttach(true)
       setUnavailable(false)
@@ -333,11 +371,18 @@ export function PickLayer(): JSX.Element | null {
     }) {
       const { editing, capture } = composer
       stored.current = capture
-      targets.current = anchorsOf(composer.target).map((anchor) => {
-        const resolved = resolveAnchor(anchor)
-        return resolved.kind === "anchored" ? resolved.el : null
-      })
-      setLead(composer.target.kind === "region" ? null : (capture?.sourceLead ?? null))
+      targets.current =
+        composer.target.kind === "iter8"
+          ? [findPart(root, composer.target.part.key)]
+          : anchorsOf(composer.target).map((anchor) => {
+              const resolved = resolveAnchor(anchor)
+              return resolved.kind === "anchored" ? resolved.el : null
+            })
+      setLead(
+        composer.target.kind === "element" || composer.target.kind === "elements"
+          ? (capture?.sourceLead ?? null)
+          : null,
+      )
       setThumb(null)
       setAttach(capture?.screenshot !== undefined)
       setUnavailable(capture?.omittedParts.includes("screenshot") ?? false)
@@ -390,11 +435,12 @@ export function PickLayer(): JSX.Element | null {
       run.current?.controller.abort()
       run.current = null
     }
-  }, [model, connection, host, boot, errors, renderGeneration])
+  }, [model, connection, host, boot, errors, renderGeneration, root])
 
   useEffect(() => {
     const ring = ringRef.current
     const veil = veilRef.current
+    const layer = layerRef.current
     if (!ring || !veil) return
     const reduced = matchMedia("(prefers-reduced-motion: reduce)")
 
@@ -409,6 +455,9 @@ export function PickLayer(): JSX.Element | null {
       let pending: { raw: Element | null } | null = null
       let pointer: { x: number; y: number } | null = null
       let lastRaw: Element | null = null
+      let alt = false
+      let partGesture = false
+      let partDown: Element | null = null
       let spring: { cur: Rect; vel: Rect } | null = null
       let candidate: Element | null = null
       let candidateSince = 0
@@ -439,17 +488,44 @@ export function PickLayer(): JSX.Element | null {
         return event.composedPath().includes(host)
       }
 
+      function partAt(node: EventTarget | null | undefined) {
+        return node instanceof Element && root.contains(node) ? resolvePart(node) : null
+      }
+
+      function setAlt(next: boolean) {
+        if (alt === next) return
+        alt = next
+        lastRaw = null
+        pending = { raw: null }
+        if (next || model.mode.peek() !== "pick") return
+        const held = model.hover.peek()?.deref()
+        if (held && root.contains(held))
+          batch(() => {
+            model.hover.value = null
+            model.climbStack.value = []
+          })
+      }
+
+      function onModifier(event: KeyboardEvent) {
+        if (event.key === "Alt") setAlt(event.type === "keydown")
+      }
+
+      function onBlur(event: FocusEvent) {
+        if (event.target === window) setAlt(false)
+      }
+
       function swallow(event: Event) {
         event.preventDefault()
         event.stopImmediatePropagation()
       }
 
       function onSwallowed(event: Event) {
-        if (!ours(event)) swallow(event)
+        if (!ours(event) || partGesture) swallow(event)
       }
 
       function onMove(event: PointerEvent) {
         pointer = { x: event.clientX, y: event.clientY }
+        setAlt(event.altKey)
         if (drag) {
           const moved =
             drag.rect !== null ||
@@ -463,7 +539,10 @@ export function PickLayer(): JSX.Element | null {
           }
           return
         }
-        if (ours(event)) return
+        if (ours(event)) {
+          if (alt) pending = { raw: null }
+          return
+        }
         pending = { raw: usable(event.composedPath()[0]) }
       }
 
@@ -494,9 +573,18 @@ export function PickLayer(): JSX.Element | null {
       }
 
       function onDown(event: PointerEvent) {
-        if (ours(event)) return
+        setAlt(event.altKey)
+        partGesture = false
+        if (ours(event)) {
+          if (!alt || event.button !== 0 || model.mode.peek() !== "pick") return
+          partGesture = true
+          partDown = partAt(event.composedPath()[0])?.el ?? null
+          swallow(event)
+          return
+        }
         swallow(event)
         if (event.button !== 0) return
+        if (alt && model.mode.peek() === "pick") return
         if (model.mode.peek() === "compose") {
           const composer = model.composer.peek()
           if (composer && composer.body.trim() === "" && !composer.saving) {
@@ -514,8 +602,25 @@ export function PickLayer(): JSX.Element | null {
         }
       }
 
+      function openPart(found: NonNullable<ReturnType<typeof partAt>>) {
+        picked.current = [found.el]
+        batch(() => {
+          model.hover.value = new WeakRef(found.el)
+          model.climbStack.value = []
+        })
+        model.openComposer({ target: partTarget(found, model.serviceVersion.peek()) })
+      }
+
       function onUp(event: PointerEvent) {
-        if (ours(event)) return
+        if (partGesture) setTimeout(() => (partGesture = false))
+        if (ours(event)) {
+          if (!partGesture) return
+          swallow(event)
+          const found = partAt(event.composedPath()[0])
+          if (found && found.el === partDown && model.mode.peek() === "pick") openPart(found)
+          partDown = null
+          return
+        }
         swallow(event)
         const done = drag
         drag = null
@@ -563,6 +668,16 @@ export function PickLayer(): JSX.Element | null {
         const next = pending
         pending = null
         if (!next || drag || model.mode.peek() !== "pick") return
+        if (alt) {
+          const hit = pointer ? root.elementFromPoint(pointer.x, pointer.y) : null
+          const el = (hit && resolvePart(hit)?.el) ?? null
+          if (el === (model.hover.peek()?.deref() ?? null)) return
+          batch(() => {
+            model.hover.value = el ? new WeakRef(el) : null
+            model.climbStack.value = []
+          })
+          return
+        }
         const raw =
           next.raw ??
           (pointer ? usable(document.elementFromPoint(pointer.x, pointer.y) ?? undefined) : null)
@@ -574,19 +689,29 @@ export function PickLayer(): JSX.Element | null {
         })
       }
 
-      function lens(): { rect: Rect; region: boolean; tags: boolean; el?: Element } | null {
+      function lens(): {
+        rect: Rect
+        region: boolean
+        tags: boolean
+        el?: Element
+        inside?: boolean
+      } | null {
         if (drag?.rect) return { rect: drag.rect, region: true, tags: true }
         const mode = model.mode.peek()
         if (mode === "pick") {
           const el = model.hover.peek()?.deref()
-          return el?.isConnected ? { rect: viewRect(el), region: false, tags: true, el } : null
+          return el?.isConnected
+            ? { rect: viewRect(el), region: false, tags: true, el, inside: root.contains(el) }
+            : null
         }
         if (mode !== "compose") return null
         const composer = model.composer.peek()
         if (composer?.target.kind === "region")
           return { rect: boxRect(composer.target.box), region: true, tags: true }
         const el = targets.current[0]
-        return el?.isConnected ? { rect: viewRect(el), region: false, tags: false } : null
+        return el?.isConnected
+          ? { rect: viewRect(el), region: false, tags: false, inside: root.contains(el) }
+          : null
       }
 
       function step(target: Rect, dt: number, snap: boolean): Rect {
@@ -648,6 +773,10 @@ export function PickLayer(): JSX.Element | null {
           composer.target.kind === "region"
             ? [boxRect(composer.target.box)]
             : targets.current.flatMap((el) => (el?.isConnected ? [viewRect(el)] : []))
+        if (rects.length === 0 && composer.target.kind === "iter8") {
+          const { x, y, width, height } = composer.target.box
+          rects.push({ x, y, w: width, h: height })
+        }
         if (rects.length === 0) return null
         const { dock: anchor, collapsed } = model.prefs.peek()
         const dockBox = root
@@ -677,6 +806,7 @@ export function PickLayer(): JSX.Element | null {
         const panel = panelRef.current
         const spot = panel ? measureComposer(panel) : null
         const hovered = target?.el ?? null
+        if (layer) setClass(layer, target?.inside ? "layer pick over" : "layer pick")
         if (hovered !== candidate) {
           candidate = hovered
           candidateSince = time
@@ -684,7 +814,7 @@ export function PickLayer(): JSX.Element | null {
         if (hovered !== described && (!hovered || time - candidateSince >= CHIP_DWELL_MS)) {
           described = hovered
           describedAt = time
-          setInfo(hovered && target ? describe(hovered, target.rect) : null)
+          setInfo(hovered && target ? describe(hovered, target.rect, root) : null)
         }
 
         let hole: Rect | null = null
@@ -743,6 +873,9 @@ export function PickLayer(): JSX.Element | null {
           )
       }
 
+      window.addEventListener("keydown", onModifier, { capture: true, passive: true })
+      window.addEventListener("keyup", onModifier, { capture: true, passive: true })
+      window.addEventListener("blur", onBlur, { capture: true, passive: true })
       window.addEventListener("pointermove", onMove, { capture: true, passive: true })
       window.addEventListener("scroll", onScroll, { capture: true, passive: true })
       window.addEventListener("pointerdown", onDown, { capture: true })
@@ -751,6 +884,9 @@ export function PickLayer(): JSX.Element | null {
       frame = requestAnimationFrame(tick)
 
       return () => {
+        window.removeEventListener("keydown", onModifier, { capture: true })
+        window.removeEventListener("keyup", onModifier, { capture: true })
+        window.removeEventListener("blur", onBlur, { capture: true })
         window.removeEventListener("pointermove", onMove, { capture: true })
         window.removeEventListener("scroll", onScroll, { capture: true })
         window.removeEventListener("pointerdown", onDown, { capture: true })
@@ -759,6 +895,7 @@ export function PickLayer(): JSX.Element | null {
           window.removeEventListener(type, onSwallowed, { capture: true })
         cancelAnimationFrame(frame)
         if (ring) setClass(ring, "ring")
+        if (layer) setClass(layer, "layer pick")
         if (veil) setClass(veil, "veil")
         if (chipRef.current) setClass(chipRef.current, "chip")
         setInfo(null)
@@ -807,7 +944,7 @@ export function PickLayer(): JSX.Element | null {
 
   return (
     <>
-      <div class="layer pick">
+      <div ref={layerRef} class="layer pick">
         <div ref={veilRef} class="veil">
           <i />
           <i />
@@ -857,28 +994,44 @@ export function PickLayer(): JSX.Element | null {
                   </span>
                 ))}
               </div>
-              <div class="hints">
-                {multi.length > 0 ? (
-                  <>
-                    <span class="count">{multi.length} selected</span>
-                    <span>click adds and opens</span>
-                  </>
-                ) : (
-                  <>
+              {info.part ? (
+                <div class="hints">
+                  <span>click for a note about iter8</span>
+                  <span>
+                    release <kbd>⌥</kbd> for the page
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <div class="hints">
+                    {multi.length > 0 ? (
+                      <>
+                        <span class="count">{multi.length} selected</span>
+                        <span>click adds and opens</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>
+                          <kbd>↑</kbd>
+                          <kbd>↓</kbd> climb
+                        </span>
+                        <span>
+                          <kbd>⇧</kbd> click to add
+                        </span>
+                        <span>drag for region</span>
+                        <span>
+                          <kbd>↵</kbd> note
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div class="hints">
                     <span>
-                      <kbd>↑</kbd>
-                      <kbd>↓</kbd> climb
+                      hold <kbd>⌥</kbd> to pick iter8 itself
                     </span>
-                    <span>
-                      <kbd>⇧</kbd> click to add
-                    </span>
-                    <span>drag for region</span>
-                    <span>
-                      <kbd>↵</kbd> note
-                    </span>
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>

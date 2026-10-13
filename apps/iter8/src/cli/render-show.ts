@@ -33,6 +33,16 @@ export function renderShow(show: ShowResult, screenshotPaths: ReadonlyMap<NoteId
         `Target: region at (${box.x}, ${box.y}), ${box.width} × ${box.height} CSS px`,
         `Target viewport: ${viewport.width} × ${viewport.height}, device pixel ratio ${viewport.devicePixelRatio}`,
       )
+    } else if (target.kind === "iter8") {
+      const { part, box, viewport } = target
+      lines.push(
+        `Target: iter8 · ${part.name}`,
+        "This note is about iter8 itself, not the page it was left on.",
+        `Source: ${part.source}`,
+        `iter8 version: ${target.iter8Version}`,
+        `Target at (${box.x}, ${box.y}), ${box.width} × ${box.height} CSS px in the viewport`,
+        `Target viewport: ${viewport.width} × ${viewport.height}, device pixel ratio ${viewport.devicePixelRatio}`,
+      )
     } else {
       const anchors = target.kind === "element" ? [target.anchor] : target.anchors
       lines.push(`Target: ${target.kind}`)
@@ -61,35 +71,41 @@ export function renderShow(show: ShowResult, screenshotPaths: ReadonlyMap<NoteId
         `URL: ${capture.url}`,
         `Viewport: ${capture.viewport.width} × ${capture.viewport.height} CSS px, device pixel ratio ${capture.viewport.devicePixelRatio}`,
         `Theme: ${capture.theme}`,
-        `Landmark: ${capture.landmark ?? "none"}`,
-        `Surrounding text: ${capture.surroundingText ?? "none"}`,
-        "Computed styles:",
       )
-      const styles = Object.entries(capture.computedStyles ?? {})
-      capturedLines.push(
-        ...(styles.length === 0 ? ["  none"] : styles.map(([k, v]) => `  ${k}: ${v}`)),
-      )
-      capturedLines.push("Console errors:")
-      const errors = capture.consoleErrors ?? []
-      capturedLines.push(
-        ...(errors.length === 0
-          ? ["  none"]
-          : errors.map(
-              (error) =>
-                `  ${error.at} — ${error.message}${error.source === undefined ? "" : ` (${error.source})`}`,
-            )),
-      )
-      const lead = capture.sourceLead
-      capturedLines.push(
-        `Source lead: ${
-          lead === undefined
-            ? "none (not captured)"
-            : lead.confidence === "none"
-              ? `none (${lead.reason})`
-              : `${lead.file}${lead.line === undefined ? "" : `:${lead.line}`} (${lead.confidence}) — a lead to confirm`
-        }`,
-        `Screenshot: ${screenshotPaths.get(authored.id) ?? "none"}`,
-      )
+      if (target.kind === "iter8") {
+        capturedLines.push(`Screenshot: ${screenshotPaths.get(authored.id) ?? "none"}`)
+      } else {
+        capturedLines.push(
+          `Landmark: ${capture.landmark ?? "none"}`,
+          `Surrounding text: ${capture.surroundingText ?? "none"}`,
+          "Computed styles:",
+        )
+        const styles = Object.entries(capture.computedStyles ?? {})
+        capturedLines.push(
+          ...(styles.length === 0 ? ["  none"] : styles.map(([k, v]) => `  ${k}: ${v}`)),
+        )
+        capturedLines.push("Console errors:")
+        const errors = capture.consoleErrors ?? []
+        capturedLines.push(
+          ...(errors.length === 0
+            ? ["  none"]
+            : errors.map(
+                (error) =>
+                  `  ${error.at} — ${error.message}${error.source === undefined ? "" : ` (${error.source})`}`,
+              )),
+        )
+        const lead = capture.sourceLead
+        capturedLines.push(
+          `Source lead: ${
+            lead === undefined
+              ? "none (not captured)"
+              : lead.confidence === "none"
+                ? `none (${lead.reason})`
+                : `${lead.file}${lead.line === undefined ? "" : `:${lead.line}`} (${lead.confidence}) — a lead to confirm`
+          }`,
+          `Screenshot: ${screenshotPaths.get(authored.id) ?? "none"}`,
+        )
+      }
     }
 
     if (capturedLines.length > 0) {

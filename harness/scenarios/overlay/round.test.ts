@@ -347,6 +347,22 @@ describe("round sheet: this round", () => {
     )
   }, 30_000)
 
+  test("a session with background work still takes a Send, names the work, and wears the background ring", async () => {
+    const o = await open({
+      pairing: { ...LIVE, state: { status: "background", agents: 2, tasks: 0 } },
+      pageState: THREE,
+    })
+    const sheet = await openSheet(o)
+    expect(await sheet.getByRole("button", { name: "Send round" }).isEnabled()).toBe(true)
+    expect(await sheet.getByRole("button", { name: "Queue round" }).count()).toBe(0)
+    expect(await sheet.locator(".busyline").innerText()).toBe("2 agents running")
+    expect(await sheet.locator(".busyline .status-ring.ring-background").count()).toBe(1)
+    expect(await sheet.locator(".sh-h .sub .status-ring").getAttribute("class")).toContain(
+      "ring-background",
+    )
+    expect(await sheet.innerText()).not.toContain("is mid-turn")
+  }, 30_000)
+
   test("a note whose element left the page says Moved; the others do not", async () => {
     const o = await open({
       pairing: LIVE,

@@ -7,7 +7,7 @@ import {
   PageId,
   Pairing,
   PairingGeneration,
-  type PairingState,
+  PairingState,
 } from "@iter8/protocol"
 import type { Subprocess } from "bun"
 import fc from "fast-check"
@@ -52,6 +52,7 @@ function insertPage(db: Database, id: string): PageId {
 const live: PairingState = { status: "live" }
 const busy: PairingState = { status: "busy" }
 const unknown: PairingState = { status: "unknown" }
+const running: PairingState = { status: "background", agents: 2, tasks: 1 }
 
 describe("nextPairingState", () => {
   test.each<[PairingState, boolean, OwnerEvent, PairingState]>([
@@ -81,6 +82,34 @@ describe("nextPairingState", () => {
     ],
     [busy, true, { kind: "ended", reason: "other" }, { status: "gone", reason: "ended" }],
     [live, false, { kind: "relabelled" }, live],
+    [busy, false, { kind: "stopped", work: { agents: 2, tasks: 1 } }, running],
+    [
+      live,
+      false,
+      { kind: "stopped", work: { agents: 0, tasks: 3 } },
+      { status: "background", agents: 0, tasks: 3 },
+    ],
+    [
+      unknown,
+      false,
+      { kind: "stopped", work: { agents: 1, tasks: 0 } },
+      { status: "background", agents: 1, tasks: 0 },
+    ],
+    [busy, false, { kind: "stopped", work: { agents: 0, tasks: 0 } }, live],
+    [running, false, { kind: "stopped", work: { agents: 0, tasks: 0 } }, live],
+    [
+      running,
+      false,
+      { kind: "stopped", work: { agents: 1, tasks: 0 } },
+      { status: "background", agents: 1, tasks: 0 },
+    ],
+    [running, false, { kind: "idle" }, running],
+    [running, false, { kind: "busy" }, busy],
+    [running, false, { kind: "checked", process: "alive" }, running],
+    [running, false, { kind: "checked", process: "dead" }, { status: "gone", reason: "crashed" }],
+    [running, false, { kind: "checked", process: "unreadable" }, unknown],
+    [running, false, { kind: "ended", reason: "resume" }, running],
+    [running, false, { kind: "ended", reason: "logout" }, { status: "gone", reason: "ended" }],
   ])("%o with relabel pending %p on %o gives %o", (state, pending, event, expected) => {
     expect(nextPairingState(state, pending, event)).toEqual(expected)
   })
@@ -97,12 +126,60 @@ const anyEvent = fc.oneof(
   fc.constant<OwnerEvent>({ kind: "busy" }),
   fc.constant<OwnerEvent>({ kind: "idle" }),
   fc
+    .record({ agents: fc.nat(3), tasks: fc.nat(3) })
+    .map((work): OwnerEvent => ({ kind: "stopped", work })),
+  fc
     .constantFrom(...HookEndReason.options)
     .map((reason): OwnerEvent => ({ kind: "ended", reason })),
   fc
     .constantFrom(...(["alive", "dead", "restarted", "unreadable"] as const))
     .map((process): OwnerEvent => ({ kind: "checked", process })),
 )
+
+describe("background work", () => {
+  test("a stop yields background with exactly its counts when any are running, and live otherwise", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom<PairingState>(live, busy, unknown, running),
+        fc.record({ agents: fc.nat(5), tasks: fc.nat(5) }),
+        (state, work) => {
+          const next = nextPairingState(state, false, { kind: "stopped", work })
+          expect(next).toEqual(
+            work.agents + work.tasks > 0 ? { status: "background", ...work } : live,
+          )
+        },
+      ),
+    )
+  })
+
+  test("a mod's idle report never ends background work, and a new prompt always does", () => {
+    fc.assert(
+      fc.property(
+        fc.record({ agents: fc.nat(5), tasks: fc.nat(5) }).filter((w) => w.agents + w.tasks > 0),
+        (work) => {
+          const state = nextPairingState(live, false, { kind: "stopped", work })
+          expect(nextPairingState(state, false, { kind: "idle" })).toEqual(state)
+          expect(nextPairingState(state, false, { kind: "busy" })).toEqual(busy)
+        },
+      ),
+    )
+  })
+
+  test("every state any event sequence reaches is a valid pairing state", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.record({ pending: fc.boolean(), event: anyEvent }), { maxLength: 30 }),
+        (steps) => {
+          let state: PairingState = live
+          for (const { pending, event } of steps) {
+            state = nextPairingState(state, pending, event)
+            expect(PairingState.safeParse(state).success).toBe(true)
+          }
+        },
+      ),
+    )
+  })
+})
 
 describe("gone is never left", () => {
   test("no event sequence moves a gone state anywhere else", () => {
@@ -135,6 +212,11 @@ describe("gone is never left", () => {
     const operation = fc.oneof(
       fc.record({ op: fc.constant("busy" as const), busy: fc.boolean() }),
       fc.record({
+        op: fc.constant("stop" as const),
+        agents: fc.nat(2),
+        tasks: fc.nat(2),
+      }),
+      fc.record({
         op: fc.constant("end" as const),
         reason: fc.constantFrom(...HookEndReason.options),
       }),
@@ -148,6 +230,8 @@ describe("gone is never left", () => {
         let gone: PairingState | null = null
         for (const step of operations) {
           if (step.op === "busy") owners.setBusy(ownerId, step.busy)
+          else if (step.op === "stop")
+            owners.setStopped(ownerId, { agents: step.agents, tasks: step.tasks })
           else if (step.op === "end") owners.end(100, "first", step.reason)
           else if (step.start === null) starts.delete(100)
           else starts.set(100, step.start)
@@ -383,6 +467,50 @@ describe("liveness", () => {
     expect(owners.state(ownerId)).toEqual(busy)
     owners.setBusy(ownerId, false)
     expect(owners.state(ownerId)).toEqual(live)
+  })
+
+  test("a stop with running work shows background, a later idle report keeps it, and a stop with none clears it", () => {
+    const { starts, owners } = setup()
+    starts.set(100, "s1")
+    const ownerId = owners.register(input(100)).owner
+    owners.setBusy(ownerId, true)
+    owners.setStopped(ownerId, { agents: 1, tasks: 2 })
+    expect(owners.state(ownerId)).toEqual({ status: "background", agents: 1, tasks: 2 })
+    expect(owners.liveSessions()[0]?.state).toEqual({ status: "background", agents: 1, tasks: 2 })
+    owners.setBusy(ownerId, false)
+    expect(owners.state(ownerId)).toEqual({ status: "background", agents: 1, tasks: 2 })
+    owners.setBusy(ownerId, true)
+    expect(owners.state(ownerId)).toEqual(busy)
+    owners.setStopped(ownerId, { agents: 0, tasks: 1 })
+    owners.setStopped(ownerId, { agents: 0, tasks: 0 })
+    expect(owners.state(ownerId)).toEqual(live)
+  })
+
+  test("background work ends with the session and is not carried into a later registration", () => {
+    const { starts, owners } = setup()
+    starts.set(100, "s1")
+    const ownerId = owners.register(input(100)).owner
+    owners.setStopped(ownerId, { agents: 1, tasks: 0 })
+    owners.end(100, "first", "logout")
+    expect(owners.state(ownerId)).toEqual({ status: "gone", reason: "ended" })
+    owners.register(input(100, { label: "second" }))
+    expect(owners.state(ownerId)).toEqual(live)
+  })
+
+  test("a change in background counts is reported once by the sweep", () => {
+    const { starts, owners } = setup()
+    starts.set(100, "s1")
+    const a = owners.register(input(100)).owner
+    owners.sweep()
+    owners.setStopped(a, { agents: 1, tasks: 0 })
+    expect(owners.sweep()).toEqual([
+      { ownerId: a, state: { status: "background", agents: 1, tasks: 0 } },
+    ])
+    expect(owners.sweep()).toEqual([])
+    owners.setStopped(a, { agents: 2, tasks: 0 })
+    expect(owners.sweep()).toEqual([
+      { ownerId: a, state: { status: "background", agents: 2, tasks: 0 } },
+    ])
   })
 
   test("a real child process is live while running and crashed once killed", async () => {

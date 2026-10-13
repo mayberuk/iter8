@@ -12,7 +12,8 @@ import { type Signal, signal } from "@preact/signals"
 import { Fragment, type RefObject } from "preact"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 import { authorIdentity, groupRuns, type PendingMessage, type PostFailure } from "../conversation"
-import { roundDisplayState } from "../model"
+import { backgroundWords, roundDisplayState } from "../model"
+import { part } from "../parts"
 import { useOverlay, useSheet } from "./context"
 import conversationCss from "./conversation.css" with { type: "text" }
 import { SessionRows } from "./Dock"
@@ -310,6 +311,7 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
       )}
       style={enter !== null ? { "--i": enter } : undefined}
       aria-label={`${label}, ${time}`}
+      {...(agent ? part("chat.agent-message") : {})}
     >
       {head && who.kind === "agent" ? (
         <header class="cv-meta">
@@ -321,7 +323,7 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
       ) : (
         <span class="cv-sr">{label}</span>
       )}
-      <div class={agent ? "cv-prose" : "cv-bubble"}>
+      <div class={agent ? "cv-prose" : "cv-bubble"} {...(agent ? {} : part("chat.user-bubble"))}>
         {agent ? <Markdown text={entry.text} /> : <p class="cv-text">{entry.text}</p>}
         <div class="cv-tools">
           {agent && !head ? <time dateTime={entry.at}>{time}</time> : null}
@@ -368,19 +370,30 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
   )
 }
 
-function RoundDivider(props: { roundId: RoundId; enter: boolean; open: (id: RoundId) => void }) {
+function RoundDivider(props: {
+  roundId: RoundId
+  final: boolean
+  enter: boolean
+  open: (id: RoundId) => void
+}) {
   const { model } = useOverlay()
   const round = model.rounds.value.find((held) => held.id === props.roundId)
   const state = round ? roundDisplayState(round) : null
+  const live = props.final && (state === "queued" || state === "delivered" || state === "working")
   const number = props.roundId.slice(1)
   return (
     <button
       type="button"
-      class={cls("cv-round", state, props.enter && "enter")}
+      class={cls("cv-round", state, live && "live", props.enter && "enter")}
+      {...part("chat.round-divider")}
       aria-label={state ? `Round ${number}, ${state}` : `Round ${number}`}
       onClick={() => props.open(props.roundId)}
     >
-      <span class="rn">{state ? `Round ${number} · ${state}` : `Round ${number}`}</span>
+      <span class="rn">
+        {state ? <StatusGlyph state={state} /> : null}
+        Round {number}
+        <Icon name="right" size={12} />
+      </span>
     </button>
   )
 }
@@ -445,9 +458,18 @@ function Empty({ name }: { name: string }) {
   )
 }
 
+function BackgroundLine({ agent, words }: { agent: string; words: string }) {
+  return (
+    <div class="cv-bg" aria-hidden="true" {...part("chat.background")}>
+      <StatusRing state="background" agent={agent} size={16} />
+      <span>{words}</span>
+    </div>
+  )
+}
+
 function Working({ agent }: { agent: string }) {
   return (
-    <div class="cv-work" aria-hidden="true">
+    <div class="cv-work" aria-hidden="true" {...part("chat.working")}>
       <div class="cv-meta">
         <Avatar agent={agent} size={18} />
         <b class="cv-who">{agent === "claude" ? "Claude" : agent}</b>
@@ -471,6 +493,8 @@ function MessageList() {
   const name = model.name.value
   const pairing = model.pairing.value
   const busyPairing = pairing?.state.status === "busy" ? pairing : null
+  const backgroundWork =
+    pairing?.state.status === "background" && load.status === "ready" ? pairing : null
   const list = useRef<HTMLDivElement>(null)
   const body = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -597,11 +621,15 @@ function MessageList() {
 
   const loading = load.status === "loading" || (load.status === "ready" && load.olderLoading)
   const firstUnread = view.firstUnread.value
+  const finalDivider = entries.findLastIndex(
+    (entry, index) => entry.roundId !== null && entry.roundId !== entries[index - 1]?.roundId,
+  )
 
   return (
     <div class="cv-stage">
       <div
         class="cv-list"
+        {...part("chat.messages")}
         role="log"
         aria-label="Messages"
         ref={list}
@@ -656,7 +684,12 @@ function MessageList() {
             return (
               <Fragment key={entry.key}>
                 {entry.roundId !== null && entry.roundId !== entries[index - 1]?.roundId ? (
-                  <RoundDivider roundId={entry.roundId} enter={enter !== null} open={showRound} />
+                  <RoundDivider
+                    roundId={entry.roundId}
+                    final={index === finalDivider}
+                    enter={enter !== null}
+                    open={showRound}
+                  />
                 ) : null}
                 {entry.key === firstUnread ? (
                   // biome-ignore lint/a11y/useSemanticElements: an hr cannot carry the "New" label
@@ -675,10 +708,20 @@ function MessageList() {
             )
           })}
           {forming ? <Working agent={busyPairing.agent} /> : null}
+          {backgroundWork?.state.status === "background" ? (
+            <BackgroundLine
+              agent={backgroundWork.agent}
+              words={backgroundWords(backgroundWork.state)}
+            />
+          ) : null}
         </div>
       </div>
       <div class="cv-sr" role="status">
-        {busyPairing ? `${name} is working` : ""}
+        {busyPairing
+          ? `${name} is working`
+          : backgroundWork?.state.status === "background"
+            ? `${name}: ${backgroundWords(backgroundWork.state)}`
+            : ""}
       </div>
       <JumpPill view={view} list={list} />
     </div>
@@ -748,7 +791,7 @@ function ChatInput({ name, focus }: { name: string; focus: { current: boolean } 
   }
 
   return (
-    <div class="cv-compose">
+    <div class="cv-compose" {...part("chat.composer")}>
       <div class={cls("cv-field", over > 0 && "over")}>
         <textarea
           ref={field}

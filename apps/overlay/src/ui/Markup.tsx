@@ -4,6 +4,7 @@ import type { JSX } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { captureRegion } from "../enrich/crop"
 import { type MarkupTool, type Shape, toDraftBody } from "../model"
+import { part } from "../parts"
 import { regionTarget } from "../pick/snapshot"
 import { useOverlay, useSheet } from "./context"
 import { Icon } from "./glyphs"
@@ -540,6 +541,7 @@ function MarkupDialog({ view }: { view: Signal<View> }): JSX.Element | null {
       class={entered ? "markup on" : "markup"}
       role="dialog"
       aria-label="Mark up screenshot"
+      {...part("markup")}
       tabIndex={-1}
       ref={dialog}
     >

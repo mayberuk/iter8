@@ -9,9 +9,19 @@ export const ProcessIdentity = z.object({
 })
 export type ProcessIdentity = z.infer<typeof ProcessIdentity>
 
+const BackgroundCount = z.number().int().nonnegative()
+
+/** What a session that ended its turn still has running: agents and teammates, and other tasks. */
+export const BackgroundWork = z.object({ agents: BackgroundCount, tasks: BackgroundCount })
+export type BackgroundWork = z.infer<typeof BackgroundWork>
+
 export const PairingState = z.discriminatedUnion("status", [
   z.object({ status: z.literal("live") }),
   z.object({ status: z.literal("busy") }),
+  BackgroundWork.extend({ status: z.literal("background") }).refine(
+    (work) => work.agents + work.tasks > 0,
+    "background work has at least one agent or task",
+  ),
   z.object({ status: z.literal("unknown") }),
   z.object({
     status: z.literal("gone"),

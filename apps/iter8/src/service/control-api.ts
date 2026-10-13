@@ -5,6 +5,7 @@ import {
   AgentNoteResult,
   AgentState,
   AgentWaitResult,
+  BackgroundWork,
   DoneResult,
   ElementAnchor,
   formatPageMessage,
@@ -69,6 +70,8 @@ const Caller = z.object({
 type Caller = z.infer<typeof Caller>
 
 const HookPid = z.object({ pid: ProcessIdentity.shape.pid })
+
+const HookStop = HookPid.extend(BackgroundWork.partial().shape)
 
 const HookStart = z.object({
   pid: ProcessIdentity.shape.pid,
@@ -236,11 +239,11 @@ export function createControlApi(deps: ControlApiDeps) {
       pushPairing(ownerId)
       return c.json(HookPointers.parse({ pointers }), 200)
     })
-    .post("/hook/stop", zValidator("json", HookPid), (c) => {
-      const { pid } = c.req.valid("json")
+    .post("/hook/stop", zValidator("json", HookStop), (c) => {
+      const { pid, agents = 0, tasks = 0 } = c.req.valid("json")
       const ownerId = deps.owners.byPid(pid)
       if (!ownerId) return c.text(`No owner registered for pid ${pid}`, 404)
-      deps.owners.setBusy(ownerId, false)
+      deps.owners.setStopped(ownerId, { agents, tasks })
       deps.waiters.wake(ownerId)
       pushPairing(ownerId)
       return c.json(Ok.parse({ ok: true }), 200)

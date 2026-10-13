@@ -95,6 +95,7 @@ function setup(options: Options = {}) {
     pid: options.cliPid ?? process.pid,
     ancestry: () => [],
     processStart: readProcessStart,
+    readStdin: async () => "",
     makeTempDir: async () => {
       throw new Error("unused")
     },

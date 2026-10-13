@@ -507,13 +507,13 @@ describe("conversation: finished messages", () => {
     )
     expect(sequence).toEqual([
       "Agent message 1",
-      "Round 1 · done",
+      "Round 1",
       "Agent message 2",
       "Agent message 3",
       "Agent message 4",
-      "Round 1 · done",
+      "Round 1",
       "Agent message 5",
-      "Round 2 · done",
+      "Round 2",
       "Agent message 6",
       "Agent message 7",
     ])
@@ -1387,6 +1387,75 @@ describe("conversation: what the panel shows", () => {
     expect(await work.count()).toBe(0)
   }, 30_000)
 
+  describe("background work", () => {
+    const working = (agents: number, tasks: number) =>
+      ({ ...LIVE, state: { status: "background", agents, tasks } }) as const
+
+    test("a quiet line with the small ring and the plain words ends the list, with no forming-draft bars", async () => {
+      const o = await open({ pairing: working(2, 1), messages: [agentMessage(1)] })
+      const panel = await openConversation(o)
+      await untilCount(panel, 1)
+      const line = log(panel).locator(".cv-bg")
+      await until("the background line", () => line.isVisible())
+      expect(await line.innerText()).toBe("2 agents and 1 task running")
+      expect(await line.locator(".status-ring.ring-background").count()).toBe(1)
+      expect(await line.evaluate((el) => el === el.parentElement?.lastElementChild)).toBe(true)
+      expect(await log(panel).locator(".cv-work, .cv-bars").count()).toBe(0)
+      expect(await articles(panel).count()).toBe(1)
+      const style = await line.evaluate((el) => {
+        const { textTransform, letterSpacing, fontFamily } = getComputedStyle(el)
+        return { textTransform, letterSpacing, fontFamily }
+      })
+      expect(style.textTransform).toBe("none")
+      expect(style.letterSpacing).toBe("normal")
+      expect(style.fontFamily).not.toContain("JetBrains")
+      const status = panel
+        .getByRole("status")
+        .filter({ hasText: `${NAME}: 2 agents and 1 task running` })
+      expect(await status.count()).toBe(1)
+      expect(await panel.getByRole("status").filter({ hasText: "is working" }).count()).toBe(0)
+    }, 30_000)
+
+    test("the line follows the pairing: busy replaces it with the draft bars, and idle removes it", async () => {
+      const o = await open({ pairing: working(1, 0), messages: [agentMessage(1)] })
+      const panel = await openConversation(o)
+      await untilCount(panel, 1)
+      const line = log(panel).locator(".cv-bg")
+      const work = log(panel).locator(".cv-work")
+      await until("the background line", () => line.isVisible())
+      expect(await line.innerText()).toBe("1 agent running")
+      const set = (pairing: typeof LIVE, shown: Locator, label: string) =>
+        waitFor(
+          label,
+          async () => {
+            o.mock.push({ type: "pairing", pairing })
+            return (await shown.count()) === 1 ? true : null
+          },
+          { timeoutMs: 5000, everyMs: 150 },
+        )
+      await set({ ...LIVE, state: { status: "busy" } }, work, "the draft placeholder")
+      expect(await line.count()).toBe(0)
+      await set(working(1, 2), line, "the background line again")
+      expect(await line.innerText()).toBe("1 agent and 2 tasks running")
+      await waitFor(
+        "the idle pairing",
+        async () => {
+          o.mock.push({ type: "pairing", pairing: LIVE })
+          return (await line.count()) === 0 ? true : null
+        },
+        { timeoutMs: 5000, everyMs: 150 },
+      )
+      expect(await work.count()).toBe(0)
+    }, 30_000)
+
+    test("an empty conversation still shows the line, and no draft bars", async () => {
+      const o = await open({ pairing: working(1, 0), messages: [] })
+      const panel = await openConversation(o)
+      await until("the background line", () => log(panel).locator(".cv-bg").isVisible())
+      expect(await log(panel).locator(".cv-work").count()).toBe(0)
+    }, 30_000)
+  })
+
   test("the placeholder returns when a session turns busy again, and shows nothing for an idle one", async () => {
     const o = await open({ messages: [agentMessage(1)] })
     const panel = await openConversation(o)
@@ -1737,7 +1806,7 @@ describe("conversation: how messages look", () => {
     expect(await articles(panel).nth(1).locator(".cv-foot .sg-delivered").count()).toBe(1)
   }, 30_000)
 
-  test("a round divider is a hairline either side of a small centred sentence-case label", async () => {
+  test("a round divider is a hairline either side of a small centred chip with the round's status glyph", async () => {
     const round = Round.parse({
       ...roundJson,
       id: "R1",
@@ -1750,7 +1819,7 @@ describe("conversation: how messages look", () => {
     })
     const panel = await openConversation(o)
     await untilCount(panel, 1)
-    const divider = panel.getByRole("button", { name: /^Round 1/ })
+    const divider = panel.getByRole("button", { name: "Round 1, done" })
     const seen = await divider.evaluate((el) => {
       const label = el.querySelector(".rn") as HTMLElement
       const box = el.getBoundingClientRect()
@@ -1760,6 +1829,7 @@ describe("conversation: how messages look", () => {
       const style = getComputedStyle(label)
       return {
         text: label.textContent,
+        glyph: label.querySelector("svg.sg")?.getAttribute("class") ?? null,
         centre: labelBox.left + labelBox.width / 2 - (box.left + box.width / 2),
         hairlines: [before.height, after.height],
         fill: style.backgroundColor,
@@ -1770,11 +1840,12 @@ describe("conversation: how messages look", () => {
         size: Number.parseFloat(style.fontSize),
       }
     })
-    expect(seen.text).toBe("Round 1 · done")
+    expect(seen.text).toBe("Round 1")
+    expect(seen.glyph).toBe("sg sg-done")
     expect(Math.abs(seen.centre)).toBeLessThanOrEqual(1)
     expect(seen.hairlines).toEqual(["1px", "1px"])
-    expect(seen.fill).toBe("rgba(0, 0, 0, 0)")
-    expect(seen.border).toBe("0px")
+    expect(seen.fill).not.toBe("rgba(0, 0, 0, 0)")
+    expect(seen.border).toBe("1px")
     expect(seen.transform).toBe("none")
     expect(seen.spacing).toBe("normal")
     expect(seen.family).not.toContain("JetBrains")

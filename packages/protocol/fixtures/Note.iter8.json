@@ -1,0 +1,50 @@
+{
+  "id": "N21",
+  "pageId": "larkspur",
+  "author": {
+    "kind": "user"
+  },
+  "intent": "change",
+  "body": "The ring is too close to the session name; give it more room.",
+  "target": {
+    "kind": "iter8",
+    "part": {
+      "key": "dock.ring",
+      "name": "Dock status ring",
+      "source": "apps/overlay/src/ui/Dock.tsx"
+    },
+    "iter8Version": "0.4.4",
+    "box": {
+      "x": 1096,
+      "y": 842,
+      "width": 34,
+      "height": 34
+    },
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 2
+    }
+  },
+  "anchorStatus": "anchored",
+  "createdAt": "2026-10-13T09:15:00.000Z",
+  "capture": {
+    "completeness": "complete",
+    "omittedParts": [],
+    "url": "http://larkspur.localhost:3990/pricing",
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 2
+    },
+    "theme": "light",
+    "screenshot": {
+      "ref": "shot_3d71c0b4",
+      "width": 68,
+      "height": 68
+    }
+  },
+  "resolution": {
+    "status": "open"
+  }
+}

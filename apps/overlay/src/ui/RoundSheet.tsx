@@ -10,6 +10,7 @@ import type { JSX } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { captureCrop } from "../enrich/crop"
 import {
+  backgroundWords,
   canSendNow,
   type DisplayNoteState,
   displayNoteState,
@@ -19,6 +20,7 @@ import {
   type SheetTab,
   sessionName,
 } from "../model"
+import { part } from "../parts"
 import { resolveAnchor } from "../pick/anchor"
 import { Conversation } from "./Conversation"
 import { useOverlay, useSheet } from "./context"
@@ -60,12 +62,14 @@ function anchorsOf(note: Note): readonly ElementAnchor[] {
     case "elements":
       return note.target.anchors
     case "region":
+    case "iter8":
       return []
   }
 }
 
 function targetLabel(note: Note): string {
   const { target } = note
+  if (target.kind === "iter8") return `iter8 · ${target.part.name}`
   if (target.kind === "region") {
     const size = `${Math.round(target.box.width)}×${Math.round(target.box.height)}`
     return note.capture?.screenshot ? `screenshot ${size}` : `region ${size}`
@@ -81,6 +85,17 @@ function targetLabel(note: Note): string {
   const name = first?.name ?? first?.text
   const base = name ? `${tag} “${name.length > 28 ? `${name.slice(0, 26)}…` : name}”` : tag
   return anchors.length > 1 ? `${base} ×${anchors.length}` : base
+}
+
+function TargetText({ note }: { note: Note }) {
+  const { target } = note
+  if (target.kind !== "iter8") return <>{targetLabel(note)}</>
+  return (
+    <>
+      <span class="iter8-tag">iter8</span>
+      {target.part.name}
+    </>
+  )
 }
 
 function sourceFile(note: Note): string | undefined {
@@ -207,6 +222,7 @@ function DraftRow(props: {
     <li
       id={`note-${note.id}`}
       class={classes.filter(Boolean).join(" ")}
+      {...part("sheet.note")}
       draggable
       aria-current={focused ? "true" : undefined}
       onClick={() => {
@@ -251,7 +267,9 @@ function DraftRow(props: {
           <span class="it">{INTENT_LABEL[note.intent]}</span>
         </div>
         <div class="txt">{note.body}</div>
-        <div class="tgt">{targetLabel(note)}</div>
+        <div class="tgt">
+          <TargetText note={note} />
+        </div>
         {moved ? (
           <span class="st-chip moved" role="status" aria-label="Moved">
             Moved
@@ -317,7 +335,7 @@ function RoundTab() {
   }
 
   return (
-    <ol class="notes" aria-label="Notes in this round">
+    <ol class="notes" aria-label="Notes in this round" {...part("sheet.round-list")}>
       {notes.map((note, index) => (
         <DraftRow key={note.id} note={note} index={index} drag={{ from, over, setOver }} />
       ))}
@@ -355,6 +373,12 @@ function Footer({ sending }: { sending: Sending }) {
         <div class="busyline">
           <StatusRing state="busy" agent={pairing?.agent} size={16} />
           {model.name.value} is mid-turn. This round delivers when its turn ends.
+        </div>
+      ) : null}
+      {model.dock.value === "background" && pairing?.state.status === "background" ? (
+        <div class="busyline">
+          <StatusRing state="background" agent={pairing.agent} size={16} />
+          {backgroundWords(pairing.state)}
         </div>
       ) : null}
       {nowAvailable ? (
@@ -473,7 +497,7 @@ function HistoryNote(props: { round: Round; note: Note; index: number; agentName
   const finished = state === "done" || state === "answered"
   const file = sourceFile(note)
   const before = note.capture?.screenshot?.ref
-  const comparable = before !== undefined
+  const comparable = before !== undefined && note.target.kind !== "iter8"
   const { resolution } = note
   const roundState = round.state
   const sent = roundState.stage === "draft" ? undefined : clock(roundState.queuedAt)
@@ -493,7 +517,11 @@ function HistoryNote(props: { round: Round; note: Note; index: number; agentName
   ].filter(Boolean)
 
   return (
-    <article class={`hn ${note.intent}`} id={`hn-${round.id}-${note.id}`}>
+    <article
+      class={`hn ${note.intent}`}
+      id={`hn-${round.id}-${note.id}`}
+      {...part("sheet.history-note")}
+    >
       <div class="num">
         <IntentGlyph intent={note.intent} size={20} />
         {number(index)}
@@ -517,7 +545,9 @@ function HistoryNote(props: { round: Round; note: Note; index: number; agentName
           </section>
         ) : null}
         <div class="prov">
-          <span class="cmp">{targetLabel(note)}</span>
+          <span class="cmp">
+            <TargetText note={note} />
+          </span>
           {file ? (
             <>
               <span class="sep">·</span>
@@ -696,8 +726,8 @@ function Sheet({ sending }: { sending: Sending }) {
   }
 
   return (
-    <aside class="sheet" aria-label="Round sheet">
-      <div class="sh-h">
+    <aside class="sheet" aria-label="Round sheet" {...part("sheet")}>
+      <div class="sh-h" {...part("sheet.header")}>
         <div>
           <h2>Round {nextRoundNumber(model.rounds.value)}</h2>
           <div class="sub">
@@ -727,7 +757,7 @@ function Sheet({ sending }: { sending: Sending }) {
           <Icon name="x" />
         </button>
       </div>
-      <div class="tabs" role="tablist">
+      <div class="tabs" role="tablist" {...part("sheet.tabs")}>
         <button
           type="button"
           class="tab"
@@ -760,6 +790,7 @@ function Sheet({ sending }: { sending: Sending }) {
         class={tab === "conversation" ? "sh-b conv" : "sh-b"}
         role="tabpanel"
         aria-label={TAB_LABEL[tab]}
+        {...(tab === "history" ? part("sheet.history") : {})}
       >
         {tab === "round" ? <RoundTab /> : null}
         {tab === "conversation" ? <Conversation /> : null}
