@@ -71,11 +71,7 @@ type Caller = z.infer<typeof Caller>
 
 const HookPid = z.object({ pid: ProcessIdentity.shape.pid })
 
-const HookStop = z.object({
-  pid: ProcessIdentity.shape.pid,
-  agents: BackgroundWork.shape.agents.optional(),
-  tasks: BackgroundWork.shape.tasks.optional(),
-})
+const HookStop = HookPid.extend(BackgroundWork.partial().shape)
 
 const HookStart = z.object({
   pid: ProcessIdentity.shape.pid,
