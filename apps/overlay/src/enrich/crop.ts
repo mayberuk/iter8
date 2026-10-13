@@ -25,6 +25,9 @@ const REACH_PX = 1
 
 const MAX_SHOT_BYTES = 2 * 1024 * 1024
 
+/** A shot over MAX_SHOT_BYTES is halved until it fits; below half a CSS pixel per pixel, text blurs past reading. */
+const MIN_SHOT_SCALE = 0.5
+
 type Size = { width: number; height: number }
 type Rect = { left: number; top: number; width: number; height: number }
 
@@ -293,18 +296,22 @@ async function render(root: Element, within: Rect, { signal, exclude }: Opts): P
     await pause()
     await image.decode()
     signal.throwIfAborted()
-    const backed = document.createElement("canvas")
-    backed.width = pixels.width
-    backed.height = pixels.height
-    const pen = backed.getContext("2d")
-    if (pen === null) return { omitted: "no 2d canvas" }
-    pen.fillStyle = backdropOf(root)
-    pen.fillRect(0, 0, backed.width, backed.height)
-    pen.drawImage(image, 0, 0, backed.width, backed.height)
-    const png = await new Promise<Blob | null>((resolve) => backed.toBlob(resolve, "image/png"))
-    if (png === null) return { omitted: "encode failed" }
-    if (png.size > MAX_SHOT_BYTES) return { omitted: "over 2 MiB" }
-    return { png, width: backed.width, height: backed.height }
+    for (let factor = 1; ; factor /= 2) {
+      const backed = document.createElement("canvas")
+      backed.width = Math.max(1, Math.round(pixels.width * factor))
+      backed.height = Math.max(1, Math.round(pixels.height * factor))
+      const pen = backed.getContext("2d")
+      if (pen === null) return { omitted: "no 2d canvas" }
+      pen.fillStyle = backdropOf(root)
+      pen.fillRect(0, 0, backed.width, backed.height)
+      pen.drawImage(image, 0, 0, backed.width, backed.height)
+      const png = await new Promise<Blob | null>((resolve) => backed.toBlob(resolve, "image/png"))
+      if (png === null) return { omitted: "encode failed" }
+      if (png.size <= MAX_SHOT_BYTES) return { png, width: backed.width, height: backed.height }
+      if ((scale * factor) / 2 < MIN_SHOT_SCALE) return { omitted: "over 2 MiB" }
+      signal.throwIfAborted()
+      await pause()
+    }
   } catch (error) {
     if (signal.aborted) throw signal.reason
     return { omitted: `render failed: ${error instanceof Error ? error.message : String(error)}` }
