@@ -50,9 +50,6 @@
   font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
-.sheet .sh-h .sub .meter {
-  margin-right: 2px;
-}
 .sheet .sh-h .sub .av {
   --s: 16px;
 }

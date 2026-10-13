@@ -94,7 +94,7 @@ function seeded(count: number): ConversationMessage[] {
 function authorLabel(message: ConversationMessage): string {
   switch (message.author.kind) {
     case "agent":
-      return `Claude · ${message.author.name}`
+      return `Claude · ${NAME}`
     case "user":
       return "You, in the terminal"
     case "page":
@@ -277,7 +277,10 @@ describe("conversation: finished messages", () => {
     expect(await articles(panel).first().textContent()).toContain(
       authorLabel(newest[0] as ConversationMessage),
     )
-    expect(await log(panel).getByText(`Claude · ${NAME}`).count()).toBeGreaterThan(0)
+    const heads = log(panel).locator(".cv-meta")
+    expect(await heads.count()).toBeGreaterThan(0)
+    expect(await heads.first().locator(".cv-who").textContent()).toBe("Claude")
+    expect(await heads.first().locator(".cv-sess").textContent()).toBe(NAME)
     expect((await listScroll(panel)).gap).toBeLessThanOrEqual(1)
 
     await scrollListTo(panel, "top")
@@ -504,13 +507,13 @@ describe("conversation: finished messages", () => {
     )
     expect(sequence).toEqual([
       "Agent message 1",
-      "Round 1",
+      "Round 1 · done",
       "Agent message 2",
       "Agent message 3",
       "Agent message 4",
-      "Round 1",
+      "Round 1 · done",
       "Agent message 5",
-      "Round 2",
+      "Round 2 · done",
       "Agent message 6",
       "Agent message 7",
     ])
@@ -1152,7 +1155,8 @@ describe("conversation: runs and following the latest", () => {
           last: el.classList.contains("last"),
           meta: el.querySelectorAll(".cv-meta").length,
           label: el.getAttribute("aria-label")?.startsWith(`Claude · ${author}`) ?? false,
-          text: el.textContent ?? "",
+          who: el.querySelector(".cv-who")?.textContent ?? null,
+          session: el.querySelector(".cv-sess")?.textContent ?? null,
         })),
       NAME,
     )
@@ -1163,7 +1167,12 @@ describe("conversation: runs and following the latest", () => {
       [true, true, 1],
     ])
     expect(rows.every((row) => row.label)).toBe(true)
-    expect(rows.every((row) => row.text.includes(`Claude · ${NAME}`))).toBe(true)
+    expect(rows.map((row) => [row.who, row.session])).toEqual([
+      ["Claude", NAME],
+      [null, null],
+      [null, null],
+      ["Claude", NAME],
+    ])
   }, 30_000)
 
   test("a history with rows far taller than their first estimate still opens pinned to the bottom", async () => {
@@ -1316,20 +1325,100 @@ describe("conversation: what the panel shows", () => {
     expect((await rendered()).again).toBe(true)
   }, 60_000)
 
-  test("while the session is busy the panel says each message appears when it finishes", async () => {
-    const o = await open({ pairing: { ...LIVE, state: { status: "busy" } } })
+  test("while the session is busy a placeholder in Claude's lane ends the list, and it goes when a message lands or the session goes idle", async () => {
+    const busy = { ...LIVE, state: { status: "busy" } } as const
+    const o = await open({ pairing: busy, messages: [agentMessage(1)] })
     const panel = await openConversation(o)
-    const busy = panel.getByText(`${NAME} is working — each message appears here when it finishes.`)
-    await until("the busy line", () => busy.isVisible())
-    expect(await busy.locator("svg.meter").count()).toBe(1)
+    await untilCount(panel, 1)
+    const work = log(panel).locator(".cv-work")
+    await until("the placeholder", () => work.isVisible())
+    expect(await panel.getByText("each message appears here when it finishes").count()).toBe(0)
+    expect(await panel.locator(".busyline, .meter").count()).toBe(0)
+    expect(await articles(panel).count()).toBe(1)
+
+    expect(await work.evaluate((el) => el === el.parentElement?.lastElementChild)).toBe(true)
+    expect(await work.locator(".cv-who").textContent()).toBe("Claude")
+    expect(await work.locator(".cv-sess").textContent()).toBe("writing")
+    expect(await work.locator("time").count()).toBe(0)
+    const bars = await work.locator(".cv-bars").evaluate((el) => {
+      const lane = el.getBoundingClientRect().width
+      return Array.from(el.children, (bar) => bar.getBoundingClientRect().width / lane)
+    })
+    expect(bars).toHaveLength(3)
+    const [first, second, third] = bars as [number, number, number]
+    expect(first).toBeCloseTo(0.94, 1)
+    expect(second).toBeCloseTo(0.8, 1)
+    expect(third).toBeCloseTo(0.52, 1)
+    const lanes = await log(panel).evaluate((el) => {
+      const left = (selector: string) =>
+        (el.querySelector(selector) as HTMLElement).getBoundingClientRect().left
+      return { prose: left(".cv-prose"), bars: left(".cv-bars") }
+    })
+    expect(Math.abs(lanes.prose - lanes.bars)).toBeLessThanOrEqual(1)
+
+    const fills = await work.locator(".cv-bars i").evaluateAll((bars) =>
+      bars.map((bar) => {
+        const fill = getComputedStyle(bar, "::after")
+        return {
+          animation: fill.animationName,
+          delay: fill.animationDelay,
+          origin: fill.transformOrigin.split(" ")[0],
+        }
+      }),
+    )
+    expect(fills.map((fill) => fill.animation)).toEqual(["cv-fill", "cv-fill", "cv-fill"])
+    expect(fills.map((fill) => fill.delay)).toEqual(["0s", "0.35s", "0.7s"])
+    expect(fills.map((fill) => fill.origin)).toEqual(["0px", "0px", "0px"])
+
+    const live = panel.getByRole("status").filter({ hasText: `${NAME} is working` })
+    expect(await live.count()).toBe(1)
+
+    await pushUntil(o, agentMessage(2), async () => (await articles(panel).count()) === 2)
+    await until("the placeholder to go with the message", async () => (await work.count()) === 0)
+
     await waitFor(
-      "the busy line to go",
+      "the idle pairing",
       async () => {
         o.mock.push({ type: "pairing", pairing: LIVE })
-        return (await busy.count()) === 0 ? true : null
+        return (await live.count()) === 0 ? true : null
       },
       { timeoutMs: 5000, everyMs: 150 },
     )
+    expect(await work.count()).toBe(0)
+  }, 30_000)
+
+  test("the placeholder returns when a session turns busy again, and shows nothing for an idle one", async () => {
+    const o = await open({ messages: [agentMessage(1)] })
+    const panel = await openConversation(o)
+    await untilCount(panel, 1)
+    const work = log(panel).locator(".cv-work")
+    expect(await work.count()).toBe(0)
+    const busy = { ...LIVE, state: { status: "busy" } } as const
+    await waitFor(
+      "the busy pairing",
+      async () => {
+        o.mock.push({ type: "pairing", pairing: busy })
+        return (await work.count()) === 1 ? true : null
+      },
+      { timeoutMs: 5000, everyMs: 150 },
+    )
+    expect(await work.isVisible()).toBe(true)
+  }, 30_000)
+
+  test("with reduced motion the placeholder bars stand still", async () => {
+    const o = await open({ pairing: { ...LIVE, state: { status: "busy" } }, messages: [] })
+    await o.page.emulateMedia({ reducedMotion: "reduce" })
+    const panel = await openConversation(o)
+    const work = log(panel).locator(".cv-work")
+    await until("the placeholder", () => work.isVisible())
+    expect(
+      await work.evaluate(
+        (el) =>
+          el
+            .getAnimations({ subtree: true })
+            .filter((a) => a instanceof CSSAnimation && a.animationName === "cv-fill").length,
+      ),
+    ).toBe(0)
   }, 30_000)
 
   test("message text keeps its whitespace and wraps anywhere; rows skip offscreen work; the input grows to a cap", async () => {
@@ -1358,7 +1447,7 @@ describe("conversation: what the panel shows", () => {
     const [spacedRow, unbrokenRow] = looks as [(typeof looks)[0], (typeof looks)[0]]
     for (const row of looks) {
       expect(row.contentVisibility).toBe("auto")
-      expect(row.intrinsicHeight).toBe("auto 92px")
+      expect(row.intrinsicHeight).toBe("auto 76px")
     }
     expect(spacedRow.firstLine).toBe("two  spaces")
     expect(spacedRow.height).toBeGreaterThanOrEqual(2 * spacedRow.lineHeight - 1)
@@ -1515,5 +1604,218 @@ describe("conversation: when chat cannot be used", () => {
       { timeoutMs: 5000, everyMs: 150 },
     )
     expect(await input(panel).count()).toBe(0)
+  }, 30_000)
+})
+
+describe("conversation: how messages look", () => {
+  const SESSION_ID = "da7e6daa-e3c9-4de2-ba84-17c5af642da4"
+
+  test("a header names the session the way the dock does, never its id", async () => {
+    const message = ConversationMessage.parse({
+      ...agentMessage(1),
+      author: { ...agentJson.author, name: SESSION_ID },
+    })
+    const o = await open({ messages: [message] })
+    const panel = await openConversation(o)
+    await untilCount(panel, 1)
+    const head = log(panel).locator(".cv-meta")
+    expect(await head.locator(".cv-who").textContent()).toBe("Claude")
+    expect(await head.locator(".cv-sess").textContent()).toBe(NAME)
+    expect(await head.locator(".cv-sess").textContent()).toBe(
+      await o.overlay.locator(".dock .proj").textContent(),
+    )
+    expect(await log(panel).textContent()).not.toContain(SESSION_ID)
+    expect(await articles(panel).first().getAttribute("aria-label")).not.toContain(SESSION_ID)
+  }, 30_000)
+
+  test("Claude's messages are unboxed prose under one header with a mark, the name and the time", async () => {
+    const o = await open({ messages: [agentMessage(1), agentMessage(2)] })
+    const panel = await openConversation(o)
+    await untilCount(panel, 2)
+    expect(await panel.locator(".cv-card").count()).toBe(0)
+    expect(await log(panel).locator(".cv-meta").count()).toBe(1)
+    const seen = await log(panel).evaluate((el) => {
+      const head = el.querySelector(".cv-meta") as HTMLElement
+      const mark = head.querySelector("[role=img]") as HTMLElement
+      const markBox = mark.getBoundingClientRect()
+      const who = head.querySelector(".cv-who") as HTMLElement
+      const time = head.querySelector("time") as HTMLElement
+      const article = el.querySelector("article") as HTMLElement
+      const prose = Array.from(el.querySelectorAll<HTMLElement>(".cv-prose"), (node) => {
+        const style = getComputedStyle(node)
+        return {
+          background: style.backgroundColor,
+          border: style.borderTopWidth,
+          shadow: style.boxShadow,
+          left: node.getBoundingClientRect().left,
+        }
+      })
+      const articleStyle = getComputedStyle(article)
+      return {
+        mark: markBox.width,
+        markBackground: getComputedStyle(mark).backgroundColor,
+        whoLeft: who.getBoundingClientRect().left,
+        timeRight: time.getBoundingClientRect().right,
+        headRight: head.getBoundingClientRect().right,
+        prose,
+        articleBorder: articleStyle.borderBottomWidth,
+        articleShadow: articleStyle.boxShadow,
+      }
+    })
+    expect(seen.mark).toBe(18)
+    expect(seen.markBackground).toBe("rgba(0, 0, 0, 0)")
+    expect(seen.timeRight).toBeCloseTo(seen.headRight, 0)
+    for (const prose of seen.prose) {
+      expect(prose.background).toBe("rgba(0, 0, 0, 0)")
+      expect(prose.border).toBe("0px")
+      expect(prose.shadow).toBe("none")
+      expect(Math.abs(prose.left - seen.whoLeft)).toBeLessThanOrEqual(1)
+    }
+    expect(seen.prose).toHaveLength(2)
+    expect(seen.articleBorder).toBe("0px")
+    expect(seen.articleShadow).toBe("none")
+  }, 30_000)
+
+  test("your own messages are compact right-aligned bubbles with the time and delivery below", async () => {
+    const delivered = ConversationMessage.parse({
+      ...pageMessage(2),
+      author: {
+        kind: "page",
+        idempotencyKey: "chat-seed-2",
+        delivery: { status: "delivered", at: at(3) },
+      },
+    })
+    const o = await open({ messages: [agentMessage(1), delivered, userMessage(3)] })
+    const panel = await openConversation(o)
+    await untilCount(panel, 3)
+    const rows = await articles(panel).evaluateAll((els) =>
+      els.map((el) => {
+        const list = el.closest("[role=log]") as HTMLElement
+        const bubble = el.querySelector(".cv-bubble") as HTMLElement | null
+        const foot = el.querySelector(".cv-foot") as HTMLElement | null
+        if (!bubble || !foot) return null
+        const box = bubble.getBoundingClientRect()
+        const listBox = list.getBoundingClientRect()
+        const style = getComputedStyle(bubble)
+        return {
+          rightGap: listBox.right - box.right,
+          leftGap: box.left - listBox.left,
+          corners: [
+            style.borderTopLeftRadius,
+            style.borderTopRightRadius,
+            style.borderBottomRightRadius,
+            style.borderBottomLeftRadius,
+          ],
+          fill: style.backgroundColor,
+          footBelow: foot.getBoundingClientRect().top >= box.bottom,
+          footRight: foot.getBoundingClientRect().right,
+          bubbleRight: box.right,
+          time: foot.querySelector("time")?.textContent ?? "",
+          glyphs: foot.querySelectorAll("svg").length,
+          round: Array.from(foot.querySelectorAll("*")).some(
+            (node) => getComputedStyle(node).borderRadius === "50%",
+          ),
+          header: el.querySelector(".cv-meta") !== null,
+        }
+      }),
+    )
+    expect(rows[0]).toBeNull()
+    for (const row of [rows[1], rows[2]]) {
+      if (!row) throw new Error("no bubble")
+      expect(row.corners).toEqual(["16px", "16px", "5px", "16px"])
+      expect(row.fill).not.toBe("rgba(0, 0, 0, 0)")
+      expect(row.rightGap).toBeLessThanOrEqual(14)
+      expect(row.leftGap).toBeGreaterThan(40)
+      expect(row.footBelow).toBe(true)
+      expect(Math.abs(row.footRight - row.bubbleRight)).toBeLessThanOrEqual(4)
+      expect(row.time).toBe(await clockTime(o, at(row === rows[1] ? 2 : 3)))
+      expect(row.glyphs).toBeGreaterThan(0)
+      expect(row.round).toBe(false)
+      expect(row.header).toBe(false)
+    }
+    expect(await deliveryLines(articles(panel).nth(1))).toEqual([`Taken by ${NAME}`])
+    expect(await articles(panel).nth(1).locator(".cv-foot .sg-delivered").count()).toBe(1)
+  }, 30_000)
+
+  test("a round divider is a hairline either side of a small centred sentence-case label", async () => {
+    const round = Round.parse({
+      ...roundJson,
+      id: "R1",
+      pageId: PAGE,
+      notes: roundJson.notes.map((note) => ({ ...note, pageId: PAGE })),
+    })
+    const o = await open({
+      pageState: { drafts: [], rounds: [round], agentNotes: [] },
+      messages: [agentMessage(1, { roundId: round.id })],
+    })
+    const panel = await openConversation(o)
+    await untilCount(panel, 1)
+    const divider = panel.getByRole("button", { name: /^Round 1/ })
+    const seen = await divider.evaluate((el) => {
+      const label = el.querySelector(".rn") as HTMLElement
+      const box = el.getBoundingClientRect()
+      const labelBox = label.getBoundingClientRect()
+      const before = getComputedStyle(el, "::before")
+      const after = getComputedStyle(el, "::after")
+      const style = getComputedStyle(label)
+      return {
+        text: label.textContent,
+        centre: labelBox.left + labelBox.width / 2 - (box.left + box.width / 2),
+        hairlines: [before.height, after.height],
+        fill: style.backgroundColor,
+        border: style.borderTopWidth,
+        transform: style.textTransform,
+        spacing: style.letterSpacing,
+        family: style.fontFamily,
+        size: Number.parseFloat(style.fontSize),
+      }
+    })
+    expect(seen.text).toBe("Round 1 · done")
+    expect(Math.abs(seen.centre)).toBeLessThanOrEqual(1)
+    expect(seen.hairlines).toEqual(["1px", "1px"])
+    expect(seen.fill).toBe("rgba(0, 0, 0, 0)")
+    expect(seen.border).toBe("0px")
+    expect(seen.transform).toBe("none")
+    expect(seen.spacing).toBe("normal")
+    expect(seen.family).not.toContain("JetBrains")
+    expect(seen.size).toBeLessThanOrEqual(12)
+  }, 30_000)
+
+  test("copy is reachable by hover and by keyboard focus on both sides, and retry stays reachable", async () => {
+    const o = await open({ messages: [agentMessage(1), pageMessage(2)] })
+    const panel = await openConversation(o)
+    await untilCount(panel, 2)
+    const opacity = (copy: Locator) =>
+      copy.evaluate((el) => getComputedStyle(el.parentElement as Element).opacity)
+    for (const row of [articles(panel).nth(0), articles(panel).nth(1)]) {
+      const copy = row.getByRole("button", { name: "Copy message" })
+      expect(await opacity(copy)).toBe("0")
+      await row.hover()
+      await until("the copy button", async () => (await opacity(copy)) === "1")
+      await o.page.mouse.move(0, 0)
+      await until("the copy button to hide", async () => (await opacity(copy)) === "0")
+      await copy.focus()
+      await until("the copy button on focus", async () => (await opacity(copy)) === "1")
+    }
+
+    o.mock.failNextPost({ outcome: "refused", reason: "session-gone" })
+    await input(panel).fill("Retry me")
+    await input(panel).press("Enter")
+    const row = articles(panel).filter({ hasText: "Retry me" })
+    await until("the not-sent row", async () =>
+      ((await row.textContent().catch(() => "")) ?? "").includes("Not sent"),
+    )
+    expect(await row.getByRole("button", { name: "Retry" }).isVisible()).toBe(true)
+    expect(await row.getByRole("button", { name: "Discard" }).isVisible()).toBe(true)
+  }, 30_000)
+
+  test("nothing in the panel renders the old meter or card", async () => {
+    const o = await open({
+      pairing: { ...LIVE, state: { status: "busy" } },
+      messages: seeded(6),
+    })
+    const panel = await openConversation(o)
+    await untilCount(panel, 6)
+    expect(await o.overlay.locator(".meter, .cv-card, .busyline, .vu").count()).toBe(0)
   }, 30_000)
 })

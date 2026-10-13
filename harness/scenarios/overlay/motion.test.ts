@@ -670,7 +670,7 @@ describe("motion: reduced motion", () => {
             .filter((animation) => animation.effect?.getComputedTiming().endTime === Infinity)
             .map((animation) => (animation.effect as KeyframeEffect | null)?.target),
         )
-        const glyphs = Array.from(root.querySelectorAll(".sg *, .meter *"))
+        const glyphs = Array.from(root.querySelectorAll(".sg *, .status-ring *"))
         return glyphs.map((el, index) => {
           const style = getComputedStyle(el)
           return {

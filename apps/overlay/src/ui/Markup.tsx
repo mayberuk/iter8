@@ -2,9 +2,8 @@ import type { Box, Capture, NoteId, Screenshot, Theme } from "@iter8/protocol"
 import { batch, type Signal, useSignal, useSignalEffect } from "@preact/signals"
 import type { JSX } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
-import { captureCrop } from "../enrich/crop"
+import { captureRegion } from "../enrich/crop"
 import { type MarkupTool, type Shape, toDraftBody } from "../model"
-import { parentAcrossShadow } from "../pick/anchor"
 import { regionTarget } from "../pick/snapshot"
 import { useOverlay, useSheet } from "./context"
 import { Icon } from "./glyphs"
@@ -24,8 +23,14 @@ const HEAD_BACK = 10.5
 const HEAD_FRONT = 4.5
 const HEAD_HALF = 7.5
 
-/** `captureCrop` words these omissions as caps; any other reason is a failed render. */
-const OVER_CAP = new Set(["too-large", "too-many-nodes", "over 2 MiB"])
+/** `captureRegion` words these omissions as caps; any other reason is a failed render. */
+const CAP_COPY = new Map([
+  ["too-large", "This area is too large to capture — try a smaller region"],
+  ["too-many-nodes", "This part of the page is too heavy to capture"],
+  ["over 2 MiB", "This capture is too big to keep — try a smaller region"],
+])
+
+const FAILED_COPY = "Couldn’t capture this area — try again"
 
 const TOOLS = [
   { tool: "arrow", label: "Arrow", key: "A" },
@@ -33,7 +38,7 @@ const TOOLS = [
   { tool: "hl", label: "Highlight", key: "H" },
 ] as const satisfies readonly { tool: MarkupTool; label: string; key: string }[]
 
-type Crop = Awaited<ReturnType<typeof captureCrop>>
+type Crop = Awaited<ReturnType<typeof captureRegion>>
 
 type Held = {
   region: Box
@@ -55,7 +60,7 @@ export const SHOT_READY = "iter8-shot-ready"
 type View =
   | { status: "capturing" }
   | { status: "ready"; url: string; width: number; height: number; background: string }
-  | { status: "omitted"; region: Box; overCap: boolean }
+  | { status: "omitted"; region: Box; message: string }
 
 function captureScale(): number {
   return Math.min(window.devicePixelRatio || 1, 2)
@@ -68,28 +73,6 @@ function useEntered(): boolean {
     return () => cancelAnimationFrame(frame)
   }, [])
   return entered
-}
-
-function smallestContaining(region: Box, exclude: Element): Element {
-  const slack = 0.5
-  const atCentre = document.elementsFromPoint(
-    region.x + region.width / 2,
-    region.y + region.height / 2,
-  )
-  let el = atCentre.find((candidate) => candidate !== exclude) ?? document.documentElement
-  for (;;) {
-    const box = el.getBoundingClientRect()
-    if (
-      box.left <= region.x + slack &&
-      box.top <= region.y + slack &&
-      box.right >= region.x + region.width - slack &&
-      box.bottom >= region.y + region.height - slack
-    )
-      return el
-    const parent = parentAcrossShadow(el)
-    if (parent === null) return el
-    el = parent
-  }
 }
 
 function pageBackground(): string {
@@ -568,11 +551,7 @@ function MarkupDialog({ view }: { view: Signal<View> }): JSX.Element | null {
       {header}
       {current.status === "omitted" || !markup ? (
         <>
-          <div class="mk-heavy">
-            {current.status === "omitted" && !current.overCap
-              ? "Couldn’t capture this area — try again"
-              : "This area is too heavy to capture — try a smaller region"}
-          </div>
+          <div class="mk-heavy">{current.status === "omitted" ? current.message : FAILED_COPY}</div>
           <div class="mk-f">
             <span class="spacer" />
             {retake}
@@ -667,11 +646,9 @@ export function Markup(): JSX.Element | null {
       region.width,
       region.height,
     )
-    const result = captureCrop(smallestContaining(region, host), {
-      signal: controller.signal,
-      exclude: host,
-      clip,
-    }).catch((): Crop => ({ omitted: "cancelled" }))
+    const result = captureRegion(clip, { signal: controller.signal, exclude: host }).catch(
+      (): Crop => ({ omitted: "cancelled" }),
+    )
     const current: Held = {
       region,
       controller,
@@ -693,7 +670,11 @@ export function Markup(): JSX.Element | null {
     void result.then((crop) => {
       if (held.current !== current) return
       if ("omitted" in crop) {
-        view.value = { status: "omitted", region, overCap: OVER_CAP.has(crop.omitted) }
+        view.value = {
+          status: "omitted",
+          region,
+          message: CAP_COPY.get(crop.omitted) ?? FAILED_COPY,
+        }
         // Without markup state the key handler ignores Enter, so a failed capture cannot open a
         // composer that claims a screenshot is attached.
         if (model.mode.peek() === "markup") model.markup.value = null

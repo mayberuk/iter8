@@ -23,7 +23,7 @@ import { resolveAnchor } from "../pick/anchor"
 import { Conversation } from "./Conversation"
 import { useOverlay, useSheet } from "./context"
 import { SessionRows, useSendRound } from "./Dock"
-import { Avatar, Icon, IntentGlyph, Meter, StatusGlyph } from "./glyphs"
+import { Avatar, Icon, IntentGlyph, StatusGlyph, StatusRing } from "./glyphs"
 import sheetCss from "./sheet.css" with { type: "text" }
 
 type Sending = ReturnType<typeof useSendRound>
@@ -353,7 +353,7 @@ function Footer({ sending }: { sending: Sending }) {
       ) : null}
       {model.dock.value === "busy" ? (
         <div class="busyline">
-          <Meter state="busy" />
+          <StatusRing state="busy" agent={pairing?.agent} size={16} />
           {model.name.value} is mid-turn. This round delivers when its turn ends.
         </div>
       ) : null}
@@ -701,16 +701,18 @@ function Sheet({ sending }: { sending: Sending }) {
         <div>
           <h2>Round {nextRoundNumber(model.rounds.value)}</h2>
           <div class="sub">
-            <Meter state={model.dock.value} still />
             {pairing ? (
               <>
                 <span>to</span>
-                <Avatar agent={pairing.agent} size={16} />
+                <StatusRing state={model.dock.value} agent={pairing.agent} size={16} still />
                 <b>{model.name.value}</b>
                 <span class="host">{model.where.value}</span>
               </>
             ) : (
-              <span>Not attached</span>
+              <>
+                <StatusRing state={model.dock.value} size={16} still />
+                <span>Not attached</span>
+              </>
             )}
           </div>
         </div>

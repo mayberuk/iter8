@@ -1026,42 +1026,96 @@ kbd {
   opacity: 1;
 }
 
-.meter {
-  display: block;
-  width: 10px;
-  height: 11px;
+.status-ring {
+  position: relative;
   flex: none;
-  --mc: var(--keep);
-  --mcd: var(--keep-d);
+  display: grid;
+  place-items: center;
+  width: var(--rs, 34px);
+  height: var(--rs, 34px);
 }
-.meter.small {
-  width: 8px;
-  height: 9px;
-}
-.meter .mf {
-  fill: var(--mc);
-}
-.meter .md {
-  fill: var(--mcd);
-}
-.meter.faint {
-  --mc: var(--faint);
-  --mcd: var(--edge-2);
-}
-.meter.busy {
-  --mc: var(--change);
-  --mcd: var(--change-d);
-}
-.meter.delivered {
-  --mc: var(--cobalt);
-  --mcd: var(--cobalt-d);
-}
-.meter.gone .mf {
+.status-ring > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
   fill: none;
+  stroke-width: 1.6;
+}
+.status-ring circle {
+  transform-box: view-box;
+  transform-origin: 17px 17px;
+}
+.status-ring .av {
+  box-shadow: none;
+}
+.status-ring .rt {
+  stroke: var(--line);
+  opacity: 0;
+}
+.status-ring .ra,
+.status-ring .rb {
+  stroke: var(--line-2);
+}
+.ring-live .ra {
+  stroke: var(--keep);
+  opacity: 0.8;
+  animation: ring-breathe 4s ease-in-out infinite;
+}
+.ring-busy .rt {
+  opacity: 1;
+}
+.ring-busy .ra,
+.ring-busy .rb {
+  stroke: var(--change);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 18 80;
+  animation: ring-orbit 1.15s linear infinite;
+}
+.ring-busy .rb {
+  stroke-dasharray: 14 84;
+  animation-duration: 1.7s;
+}
+.ring-delivered .ra {
+  stroke: var(--cobalt);
+  animation: ring-land 0.5s var(--spring) both;
+}
+.ring-gone .ra {
   stroke: var(--faint);
+  stroke-linecap: round;
+  stroke-dasharray: 7.5 4.75;
 }
-.meter.gone .md {
-  fill: none;
+.ring-gone .av {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.ring-unattached .av {
+  opacity: 0.6;
+}
+.status-ring.still circle {
+  animation: none;
+}
+@keyframes ring-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+@keyframes ring-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ring-land {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
 }
 
 .av {

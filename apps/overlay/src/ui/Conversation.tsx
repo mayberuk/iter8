@@ -16,7 +16,7 @@ import { roundDisplayState } from "../model"
 import { useOverlay, useSheet } from "./context"
 import conversationCss from "./conversation.css" with { type: "text" }
 import { SessionRows } from "./Dock"
-import { Avatar, Icon, Meter, StatusGlyph } from "./glyphs"
+import { Avatar, Icon, StatusGlyph, StatusRing } from "./glyphs"
 import { Markdown } from "./Markdown"
 
 type Overlay = Pick<ReturnType<typeof useOverlay>, "model" | "connection">
@@ -111,7 +111,7 @@ function messageEntry(message: ConversationMessage, name: string): Entry {
       return {
         ...shared,
         key: message.id,
-        who: { kind: "agent", agent: author.agent, name: author.name },
+        who: { kind: "agent", agent: author.agent, name },
       }
     case "user":
       return { ...shared, key: message.id, who: { kind: "user" } }
@@ -311,26 +311,17 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
       style={enter !== null ? { "--i": enter } : undefined}
       aria-label={`${label}, ${time}`}
     >
-      {head ? (
+      {head && who.kind === "agent" ? (
         <header class="cv-meta">
-          {who.kind === "agent" ? <Avatar agent={who.agent} size={22} /> : null}
-          {who.kind === "user" ? <Icon name="term" size={14} /> : null}
-          <b class="cv-who">
-            {who.kind === "agent" ? (
-              <>
-                {who.agent === "claude" ? "Claude" : who.agent}
-                <i> · {who.name}</i>
-              </>
-            ) : (
-              label
-            )}
-          </b>
+          <Avatar agent={who.agent} size={18} />
+          <b class="cv-who">{who.agent === "claude" ? "Claude" : who.agent}</b>
+          <span class="cv-sess">{who.name}</span>
           <time dateTime={entry.at}>{time}</time>
         </header>
       ) : (
         <span class="cv-sr">{label}</span>
       )}
-      <div class="cv-card">
+      <div class={agent ? "cv-prose" : "cv-bubble"}>
         {agent ? <Markdown text={entry.text} /> : <p class="cv-text">{entry.text}</p>}
         <div class="cv-tools">
           {agent && !head ? <time dateTime={entry.at}>{time}</time> : null}
@@ -344,6 +335,12 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
             <p class={`cv-state ${state}`}>
               <span class="cv-words">{who.words}</span>
               {state === "sending" ? <Icon name="send" size={15} /> : <StatusGlyph state={state} />}
+            </p>
+          ) : null}
+          {who.kind === "user" ? (
+            <p class="cv-state user">
+              <span class="cv-words">From the terminal</span>
+              <Icon name="term" size={13} />
             </p>
           ) : null}
         </div>
@@ -371,29 +368,19 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
   )
 }
 
-function RoundDivider(props: {
-  roundId: RoundId
-  final: boolean
-  enter: boolean
-  open: (id: RoundId) => void
-}) {
+function RoundDivider(props: { roundId: RoundId; enter: boolean; open: (id: RoundId) => void }) {
   const { model } = useOverlay()
   const round = model.rounds.value.find((held) => held.id === props.roundId)
   const state = round ? roundDisplayState(round) : null
-  const live = props.final && (state === "queued" || state === "delivered" || state === "working")
   const number = props.roundId.slice(1)
   return (
     <button
       type="button"
-      class={cls("cv-round", state, live && "live", props.enter && "enter")}
+      class={cls("cv-round", state, props.enter && "enter")}
       aria-label={state ? `Round ${number}, ${state}` : `Round ${number}`}
       onClick={() => props.open(props.roundId)}
     >
-      <span class="rn">
-        {state ? <StatusGlyph state={state} /> : null}
-        Round {number}
-        <Icon name="right" size={12} />
-      </span>
+      <span class="rn">{state ? `Round ${number} · ${state}` : `Round ${number}`}</span>
     </button>
   )
 }
@@ -458,6 +445,23 @@ function Empty({ name }: { name: string }) {
   )
 }
 
+function Working({ agent }: { agent: string }) {
+  return (
+    <div class="cv-work" aria-hidden="true">
+      <div class="cv-meta">
+        <Avatar agent={agent} size={18} />
+        <b class="cv-who">{agent === "claude" ? "Claude" : agent}</b>
+        <span class="cv-sess">writing</span>
+      </div>
+      <div class="cv-bars">
+        <i />
+        <i />
+        <i />
+      </div>
+    </div>
+  )
+}
+
 function MessageList() {
   const { model, connection, root } = useOverlay()
   const messages = model.messages.value
@@ -465,6 +469,8 @@ function MessageList() {
   const load = model.conversation.value
   const blocked = model.chatBlocked.value !== null
   const name = model.name.value
+  const pairing = model.pairing.value
+  const busyPairing = pairing?.state.status === "busy" ? pairing : null
   const list = useRef<HTMLDivElement>(null)
   const body = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -485,6 +491,14 @@ function MessageList() {
     () => groupRuns(entries.map(({ identity, roundId, at }) => ({ identity, roundId, at }))),
     [entries],
   )
+
+  // A message from the agent ends the draft the placeholder stands for.
+  const lastAgent = entries.findLast((entry) => entry.who.kind === "agent")?.key ?? null
+  const draftAfter = useRef<string | null | undefined>(undefined)
+  if (!busyPairing || load.status !== "ready") draftAfter.current = undefined
+  else if (draftAfter.current === undefined) draftAfter.current = lastAgent
+  const forming =
+    busyPairing !== null && load.status === "ready" && draftAfter.current === lastAgent
 
   // Read before this render commits: a scroll in the same task as a push has no scroll event yet.
   // Only a scroll upward leaves the bottom: a row that grows under the pin moves the gap too.
@@ -583,9 +597,6 @@ function MessageList() {
 
   const loading = load.status === "loading" || (load.status === "ready" && load.olderLoading)
   const firstUnread = view.firstUnread.value
-  const finalDivider = entries.findLastIndex(
-    (entry, index) => entry.roundId !== null && entry.roundId !== entries[index - 1]?.roundId,
-  )
 
   return (
     <div class="cv-stage">
@@ -622,7 +633,7 @@ function MessageList() {
           ) : null}
           {loading ? (
             <div class="cv-top">
-              <Meter state="busy" size="small" />
+              <StatusRing state="checking" agent={pairing?.agent} size={16} />
               Loading…
             </div>
           ) : null}
@@ -645,12 +656,7 @@ function MessageList() {
             return (
               <Fragment key={entry.key}>
                 {entry.roundId !== null && entry.roundId !== entries[index - 1]?.roundId ? (
-                  <RoundDivider
-                    roundId={entry.roundId}
-                    final={index === finalDivider}
-                    enter={enter !== null}
-                    open={showRound}
-                  />
+                  <RoundDivider roundId={entry.roundId} enter={enter !== null} open={showRound} />
                 ) : null}
                 {entry.key === firstUnread ? (
                   // biome-ignore lint/a11y/useSemanticElements: an hr cannot carry the "New" label
@@ -668,7 +674,11 @@ function MessageList() {
               </Fragment>
             )
           })}
+          {forming ? <Working agent={busyPairing.agent} /> : null}
         </div>
+      </div>
+      <div class="cv-sr" role="status">
+        {busyPairing ? `${name} is working` : ""}
       </div>
       <JumpPill view={view} list={list} />
     </div>
@@ -783,7 +793,6 @@ function ChatBox() {
   const blocked = model.chatBlocked.value
   const chat = model.chat.value
   const name = model.name.value
-  const busy = model.dock.value === "busy"
   const [checkFailed, setCheckFailed] = useState(false)
   const focusInput = useRef(true)
   const unknown = chat === null
@@ -866,12 +875,6 @@ function ChatBox() {
           <button type="button" class="cv-link" onClick={() => void toggleChat(false)}>
             Turn off
           </button>
-        </div>
-      ) : null}
-      {busy && blocked === null ? (
-        <div class="busyline">
-          <Meter state="busy" />
-          {name} is working — each message appears here when it finishes.
         </div>
       ) : null}
       {blocked === null ? <ChatInput name={name} focus={focusInput} /> : null}

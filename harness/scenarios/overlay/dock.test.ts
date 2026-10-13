@@ -1347,7 +1347,7 @@ describe("the dock's state shimmer", () => {
     }, 30_000)
   }
 
-  test("with reduced motion a live dock shows no highlight, only the lamp's colour", async () => {
+  test("with reduced motion a live dock shows no highlight, only its still green ring", async () => {
     const o = await open({ pairing: LIVE })
     await o.page.emulateMedia({ reducedMotion: "reduce" })
     await until("the sweep to stop", async () => {
@@ -1362,6 +1362,108 @@ describe("the dock's state shimmer", () => {
       return sheen.right <= idn.left
     })
     expect(rest).toBe(true)
-    expect(await o.overlay.locator(".dock .vu svg.meter").count()).toBe(1)
+    const ring = o.overlay.locator(".dock .status-ring.ring-live")
+    expect(await ring.count()).toBe(1)
+    expect(await ring.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0)
+    expect(await ring.locator("circle.ra").evaluate((el) => getComputedStyle(el).stroke)).not.toBe(
+      "none",
+    )
+  }, 30_000)
+})
+
+describe("the session status ring", () => {
+  const RING_STATES = [
+    ["live", LIVE],
+    ["busy", { ...LIVE, state: { status: "busy" } }],
+    ["checking", { ...LIVE, state: { status: "unknown" } }],
+    ["gone", GONE],
+    ["unattached", null],
+  ] as const
+
+  for (const [state, pairing] of RING_STATES) {
+    test(`a ${state} dock draws one ring with the ${state} class around the session's avatar, and no meter`, async () => {
+      const o = await open({ pairing })
+      const rings = o.overlay.locator(".dock .idn .status-ring")
+      expect(await rings.count()).toBe(1)
+      expect(await rings.getAttribute("class")).toContain(`ring-${state}`)
+      expect(await rings.getByRole("img", { name: "Claude" }).count()).toBe(1)
+      expect(await o.overlay.locator(".meter, .vu").count()).toBe(0)
+    }, 30_000)
+  }
+
+  test("the ring follows the pairing as it goes busy, idle and gone", async () => {
+    const o = await open({ pairing: LIVE, liveSessions: [OTHER] })
+    await socketOpen(o)
+    const ring = o.overlay.locator(".dock .idn .status-ring")
+    const set = async (next: Pairing, state: string) => {
+      o.mock.setPairing(next)
+      o.mock.push({ type: "pairing", pairing: next })
+      await until(`the ${state} ring`, async () =>
+        ((await ring.getAttribute("class")) ?? "").includes(`ring-${state}`),
+      )
+    }
+    await set({ ...LIVE, state: { status: "busy" } }, "busy")
+    await set(LIVE, "live")
+    await set(GONE, "gone")
+  }, 30_000)
+
+  test("a busy ring is a faint track with two amber arcs that orbit; a ready ring is still full green", async () => {
+    const busy = await open({ pairing: { ...LIVE, state: { status: "busy" } } })
+    const probe = (o: Awaited<ReturnType<typeof open>>) =>
+      o.overlay.locator(".dock .status-ring").evaluate((ring) => {
+        const style = (selector: string) =>
+          getComputedStyle(ring.querySelector(selector) as Element)
+        const moving = Array.from(ring.querySelectorAll("circle"), (circle) =>
+          circle.getAnimations().map((a) => (a as CSSAnimation).animationName),
+        )
+        return {
+          trackShown: style(".rt").opacity,
+          arc: style(".ra").stroke,
+          dash: style(".ra").strokeDasharray,
+          moving,
+        }
+      })
+    const orbit = await probe(busy)
+    expect(orbit.trackShown).toBe("1")
+    expect(orbit.dash).not.toBe("none")
+    expect(orbit.moving.flat()).toContain("ring-orbit")
+    expect(orbit.arc).toBe(await tokenColor(busy.page, "--change"))
+    await busy.close()
+    opened = null
+
+    const live = await open({ pairing: LIVE })
+    const ready = await probe(live)
+    expect(ready.dash).toBe("none")
+    expect(ready.arc).toBe(await tokenColor(live.page, "--keep"))
+    expect(ready.moving.flat()).toEqual(["ring-breathe"])
+  }, 30_000)
+
+  test("an ended session's ring is dashed grey and its avatar greyed", async () => {
+    const o = await open({ pairing: GONE })
+    const seen = await o.overlay.locator(".dock .status-ring").evaluate((ring) => ({
+      dash: getComputedStyle(ring.querySelector(".ra") as Element).strokeDasharray,
+      avatar: getComputedStyle(ring.querySelector(".av") as Element).filter,
+    }))
+    expect(seen.dash).not.toBe("none")
+    expect(seen.avatar).toContain("grayscale")
+  }, 30_000)
+
+  test("the collapsed dock button and the attach list carry the ring too", async () => {
+    const o = await open({ pairing: LIVE, liveSessions: [OTHER] })
+    await o.overlay.getByRole("button", { name: "Collapse dock" }).click()
+    const expand = o.overlay.getByRole("button", { name: "Expand iter8 dock" })
+    await until("the collapsed button", () => expand.isVisible())
+    expect(await expand.locator(".status-ring.ring-live").count()).toBe(1)
+    await expand.click()
+    await dockAtRest(o.page)
+    await dock(o.overlay).locator(".idn").click()
+    const menu = o.overlay.getByRole("dialog", { name: "Send rounds to" })
+    await until("the session menu", () => menu.isVisible())
+    const rows = menu.getByRole("button")
+    expect(await rows.count()).toBeGreaterThan(0)
+    for (const row of await rows.all()) {
+      expect(await row.locator(".status-ring").count()).toBe(1)
+    }
+    expect(await o.overlay.locator(".meter").count()).toBe(0)
   }, 30_000)
 })
