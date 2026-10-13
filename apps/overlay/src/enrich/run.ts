@@ -8,7 +8,7 @@ import type {
 } from "@iter8/protocol"
 import { parentAcrossShadow, resolveSelector } from "../pick/anchor"
 import { describeContext } from "./context"
-import { captureCrop } from "./crop"
+import { captureCrop, captureRegion } from "./crop"
 import { diffStyles, VISUAL_PROPERTIES } from "./styles"
 
 type Lookup = (el: Element, signal: AbortSignal) => Promise<SourceLead>
@@ -84,6 +84,7 @@ export async function enrich(
     uploadScreenshot: (png: Blob) => Promise<Screenshot>
     errors: () => NonNullable<Capture["consoleErrors"]>
     shot: boolean
+    clip?: DOMRectReadOnly
     idleSinceInput: () => number
     exclude: Element
   },
@@ -126,7 +127,9 @@ export async function enrich(
       await nextStep(signal)
     }
     if (!isStale()) {
-      const shot = await captureCrop(el, { signal, exclude: deps.exclude })
+      const opts = { signal, exclude: deps.exclude }
+      const shot =
+        deps.clip === undefined ? await captureCrop(el, opts) : await captureRegion(deps.clip, opts)
       signal.throwIfAborted()
       if ("omitted" in shot) omittedParts.push("screenshot")
       else if (!isStale()) {

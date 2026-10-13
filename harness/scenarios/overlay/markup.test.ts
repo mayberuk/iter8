@@ -215,15 +215,16 @@ describe("screenshot and markup", () => {
     expect(await dialog.locator("line.mark-arrow").count()).toBe(1)
   }, 30_000)
 
-  test("an area over the capture caps says it is too heavy and Retake returns to shot mode", async () => {
+  test("an area holding more elements than the capture budget says it is too heavy and Retake returns to shot mode", async () => {
     const o = await open()
     await o.page.evaluate(() => {
       const heavy = document.createElement("div")
-      for (let i = 0; i < 400; i++) {
-        const row = document.createElement("div")
-        row.style.height = "20px"
-        row.textContent = `row ${i}`
-        heavy.append(row)
+      heavy.style.cssText =
+        "display:flex;flex-wrap:wrap;width:1200px;position:absolute;top:0;left:0"
+      for (let i = 0; i < 3000; i++) {
+        const cell = document.createElement("span")
+        cell.style.cssText = "width:10px;height:10px;background:#c30"
+        heavy.append(cell)
       }
       document.body.prepend(heavy)
     })
@@ -232,7 +233,7 @@ describe("screenshot and markup", () => {
     const dialog = o.overlay.getByRole("dialog", { name: "Mark up screenshot" })
     await dialog.waitFor({ timeout: 10_000 })
     await dialog
-      .getByText("This area is too heavy to capture — try a smaller region")
+      .getByText("This part of the page is too heavy to capture")
       .waitFor({ timeout: 10_000 })
     expect(await dialog.locator("img").count()).toBe(0)
 

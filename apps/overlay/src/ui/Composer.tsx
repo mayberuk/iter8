@@ -109,6 +109,7 @@ export function Composer({
   lead,
   thumb,
   attach,
+  unavailable,
   onAttach,
   onInput,
 }: {
@@ -116,6 +117,7 @@ export function Composer({
   lead: ResolvedSourceLead | "pending" | null
   thumb: string | null
   attach: boolean
+  unavailable: boolean
   onAttach: (on: boolean) => void
   onInput: () => void
 }): JSX.Element | null {
@@ -261,11 +263,15 @@ export function Composer({
           role="switch"
           aria-checked={shot || attach}
           aria-label="Attach screenshot of this"
-          disabled={shot}
+          disabled={shot || unavailable}
           onClick={() => onAttach(!attach)}
         />
         <label for="iter8-cmp-attach">
-          {shot ? "Screenshot attached" : "Attach screenshot of this"}
+          {shot
+            ? "Screenshot attached"
+            : unavailable
+              ? "No screenshot taken"
+              : "Attach screenshot of this"}
         </label>
         <div class={shot || attach ? "tw" : "tw off"}>
           {thumb && <img src={thumb} alt="Screenshot attached" />}

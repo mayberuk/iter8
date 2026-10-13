@@ -1,13 +1,10 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
-import { OpenResult, type OwnerId, ServiceStatus } from "@iter8/protocol"
-import type { Browser, Page } from "playwright"
-import { startAgentSession } from "../../rig/agent"
-import { launchChromium, newPage } from "../../rig/browser"
-import { fixtureDir, startFixture } from "../../rig/fixtures"
-import type { RunningService } from "../../rig/service"
+import { OpenResult } from "@iter8/protocol"
+import type { Page } from "playwright"
+import { fixtureDir } from "../../rig/fixtures"
 import { waitFor } from "../../rig/wait"
-import { startBuiltService } from "../e2e/steps"
+import { type Rig, withPlayground, withRig } from "./support"
 
 const MOUNT_TIMEOUT_MS = 30_000
 
@@ -65,56 +62,6 @@ const overlayMounted = (page: Page, label: string) =>
   )
 
 const pathOf = (page: Page) => new URL(page.url()).pathname
-
-async function teardown(steps: (() => Promise<unknown>)[]): Promise<void> {
-  const failures: unknown[] = []
-  for (const step of steps.reverse()) {
-    try {
-      await step()
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length > 0) throw new AggregateError(failures, "teardown failed")
-}
-
-type Rig = { page: Page; errors: string[]; service: RunningService; owner: OwnerId }
-
-async function withRig(run: (rig: Rig) => Promise<void>): Promise<void> {
-  const cleanups: (() => Promise<unknown>)[] = []
-  try {
-    const service = await startBuiltService()
-    cleanups.push(() => service.stop())
-    const session = await startAgentSession(service)
-    // `hook end` against a stopped service starts a fresh detached service, so the session leaves first.
-    cleanups.push(() => session.exit())
-    const browser: Browser = await launchChromium()
-    cleanups.push(() => browser.close())
-    const opened = await newPage(browser)
-    cleanups.push(opened.close)
-    const owner = (await session.run(["status", "--json"])).json(ServiceStatus).owner
-    if (owner === null) throw new Error("the stub session is not paired")
-    await run({ page: opened.page, errors: opened.errors, service, owner: owner.owner })
-  } finally {
-    await teardown(cleanups)
-  }
-}
-
-async function withPlayground(
-  run: (rig: Rig & { open: OpenResult }) => Promise<void>,
-): Promise<void> {
-  const fixture = await startFixture("playground")
-  try {
-    await withRig(async (rig) => {
-      const open = (
-        await rig.service.cli(["open", fixture.url(), "--json", "--owner", rig.owner])
-      ).json(OpenResult)
-      await run({ ...rig, open })
-    })
-  } finally {
-    await fixture.stop()
-  }
-}
 
 test("every playground route mounts the overlay with no page errors, and client-side navigation keeps it", async () => {
   await withPlayground(async ({ page, errors, open }) => {

@@ -183,6 +183,7 @@ export function PickLayer(): JSX.Element | null {
   const [lead, setLead] = useState<Lead>(null)
   const [thumb, setThumb] = useState<string | null>(null)
   const [attach, setAttach] = useState(true)
+  const [unavailable, setUnavailable] = useState(false)
   const target = useComputed(() => model.composer.value?.target ?? null).value
 
   useEffect(() => {
@@ -225,7 +226,7 @@ export function PickLayer(): JSX.Element | null {
       model.noteUpdated({ ...note, ...body })
     }
 
-    function elementAt(box: Box): Element | null {
+    function elementAt(box: Box): Element {
       const x = box.x - window.scrollX + box.width / 2
       const y = box.y - window.scrollY + box.height / 2
       return (
@@ -237,7 +238,7 @@ export function PickLayer(): JSX.Element | null {
               el !== document.body &&
               el !== document.documentElement &&
               !host.contains(el),
-          ) ?? null
+          ) ?? document.body
       )
     }
 
@@ -271,12 +272,26 @@ export function PickLayer(): JSX.Element | null {
               return connection.uploadScreenshot(png)
             },
             errors,
-            shot: current.target.kind !== "region",
+            shot: !current.marked,
+            ...(current.target.kind === "region"
+              ? {
+                  clip: new DOMRect(
+                    current.target.box.x,
+                    current.target.box.y,
+                    current.target.box.width,
+                    current.target.box.height,
+                  ),
+                }
+              : {}),
             idleSinceInput: () => performance.now() - current.lastInput,
             exclude: host,
           },
         )
         if (shown() && current.target.kind !== "region") setLead(current.capture.sourceLead ?? null)
+        if (shown() && !current.marked && current.capture.screenshot === undefined) {
+          setAttach(false)
+          setUnavailable(true)
+        }
         deliver(current)
       } catch {
         if (!signal.aborted && shown()) setLead(null)
@@ -307,6 +322,7 @@ export function PickLayer(): JSX.Element | null {
       setLead(composer.target.kind === "region" ? null : "pending")
       setThumb(null)
       setAttach(true)
+      setUnavailable(false)
       void enrichRun(current, targets.current[0] ?? null)
     }
 
@@ -324,6 +340,7 @@ export function PickLayer(): JSX.Element | null {
       setLead(composer.target.kind === "region" ? null : (capture?.sourceLead ?? null))
       setThumb(null)
       setAttach(capture?.screenshot !== undefined)
+      setUnavailable(capture?.omittedParts.includes("screenshot") ?? false)
       const ref = capture?.screenshot?.ref
       if (ref === undefined) return
       connection
@@ -873,6 +890,7 @@ export function PickLayer(): JSX.Element | null {
             lead={lead}
             thumb={thumb}
             attach={attach}
+            unavailable={unavailable}
             onAttach={onAttach}
             onInput={onInput}
           />
