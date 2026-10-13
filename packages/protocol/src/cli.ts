@@ -22,6 +22,7 @@ export const CliCommand = z.enum([
   "note",
   "status",
   "version",
+  "help",
   "serve",
   "hook",
 ])
@@ -133,9 +134,13 @@ type CliFlag = {
   required: boolean
 }
 
-type CliCommandSpec = {
+export type CliCommandSpec = {
   summary: string
   positionals: readonly string[]
+  /** Any number of the positionals may be left off the end. */
+  positionalsOptional?: true
+  /** Names the arguments taken after `--`. */
+  trailing?: string
   flags: readonly CliFlag[]
   /** What `--json` prints, or null when the command prints no JSON. */
   output: z.ZodType | null
@@ -164,6 +169,8 @@ export const CLI_SURFACE = {
   run: {
     summary: "Start this project's dev server, or serve its HTML, behind an iter8 page and open it",
     positionals: ["DIR"],
+    positionalsOptional: true,
+    trailing: "COMMAND",
     flags: [{ name: "port", value: "integer", repeatable: false, required: false }, ownerFlag],
     output: null,
     owner: AGENT_OWNER,
@@ -179,6 +186,7 @@ export const CLI_SURFACE = {
     summary:
       "Install the iter8 command for this user; with HOST, also keep iter8 connect HOST running at login",
     positionals: ["HOST"],
+    positionalsOptional: true,
     flags: [],
     output: null,
     owner: "none",
@@ -238,6 +246,14 @@ export const CLI_SURFACE = {
     positionals: [],
     flags: [],
     output: VersionReport,
+    owner: "none",
+  },
+  help: {
+    summary: "List the commands, or show one command's arguments and flags",
+    positionals: ["COMMAND", "SUBCOMMAND"],
+    positionalsOptional: true,
+    flags: [],
+    output: null,
     owner: "none",
   },
   serve: {

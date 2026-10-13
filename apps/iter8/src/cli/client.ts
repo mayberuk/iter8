@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util"
-import { CLI_SURFACE, ExitCode, OwnerId } from "@iter8/protocol"
+import { CLI_SURFACE, type CliCommandSpec, ExitCode, OwnerId } from "@iter8/protocol"
 import type { ArgsDef } from "citty"
 import { hc } from "hono/client"
 import { ZodError } from "zod"
@@ -32,10 +32,12 @@ export type CliDeps = {
 type SurfaceName = keyof typeof CLI_SURFACE
 
 export function commandArgs(name: SurfaceName): ArgsDef {
-  const spec = CLI_SURFACE[name]
+  const spec: CliCommandSpec = CLI_SURFACE[name]
   const args: ArgsDef = { json: { type: "boolean" } }
   for (const positional of spec.positionals) {
-    args[positional] = { type: "positional", required: true, default: "" }
+    args[positional] = spec.positionalsOptional
+      ? { type: "positional", required: false }
+      : { type: "positional", required: true, default: "" }
   }
   for (const flag of spec.flags) {
     // citty validates before run, where the injected exit maps usage errors to the protocol code.
@@ -51,7 +53,7 @@ export function commandArgs(name: SurfaceName): ArgsDef {
 }
 
 function parseCommand(name: SurfaceName, rawArgs: string[]) {
-  const spec = CLI_SURFACE[name]
+  const spec: CliCommandSpec = CLI_SURFACE[name]
   const options: Record<string, { type: "string" | "boolean"; multiple?: boolean }> = {
     json: { type: "boolean" },
   }
@@ -63,7 +65,11 @@ function parseCommand(name: SurfaceName, rawArgs: string[]) {
     strict: true,
     tokens: true,
   })
-  if (parsed.positionals.length !== spec.positionals.length) {
+  const given = parsed.positionals.length
+  if (
+    given > spec.positionals.length ||
+    (given < spec.positionals.length && !spec.positionalsOptional)
+  ) {
     throw new Error(`Expected ${spec.positionals.join(" ") || "no positional arguments"}`)
   }
   const seen = new Set<string>()

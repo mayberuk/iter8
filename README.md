@@ -38,6 +38,8 @@ The chosen port arrives as `PORT`; if the command ignores it, iter8 uses the URL
 
 If both machines run iter8 with the same pool, give one a different `pool` in its `config.json`.
 
+`iter8 help` lists every command; `iter8 help <command>` or `iter8 <command> --help` shows its arguments and flags.
+
 ## Work on it
 
 Prerequisites: Bun 1.4.2 and Node 22.12+ for the fixture apps.

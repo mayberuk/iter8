@@ -5,6 +5,7 @@ import { CLI_NAME, CLI_SURFACE, ExitCode } from "@iter8/protocol"
 import { defineCommand, runCommand } from "citty"
 import { type CliDeps, commandArgs, runCli } from "./cli/client"
 import { cliCommands } from "./cli/commands"
+import { helpArgs } from "./cli/commands/help"
 import { ensureService } from "./cli/ensure"
 import { resolvePaths } from "./home"
 import { processAncestry, readProcessStart } from "./pairing/process-identity"
@@ -51,7 +52,7 @@ if (argv.length === 1 && argv[0] === "--version") {
     subCommands: { ...cliCommands(deps), serve },
   })
   try {
-    await runCommand(root, { rawArgs: argv })
+    await runCommand(root, { rawArgs: helpArgs(argv) ?? argv })
   } catch (error) {
     const message = Bun.stripANSI(error instanceof Error ? error.message : String(error))
       .replace(/\s+/g, " ")
