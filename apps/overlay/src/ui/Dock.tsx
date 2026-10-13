@@ -22,7 +22,7 @@ import {
 } from "../model"
 import { adoptSheet, useOverlay, useSheet } from "./context"
 import dockCss from "./dock.css" with { type: "text" }
-import { Avatar, Icon, type IconName, Meter, StatusGlyph } from "./glyphs"
+import { Icon, type IconName, ringBox, StatusGlyph, StatusRing } from "./glyphs"
 
 type DockAnchor = OverlayPrefs["dock"]
 type Theme = OverlayPrefs["theme"]
@@ -124,9 +124,7 @@ export function NoticeDock(props: { root: ShadowRoot; boot: OverlayBoot; state: 
         style={{ left: "auto", top: "auto", right: `${MARGIN}px`, bottom: `${MARGIN}px` }}
       >
         <div class="idn">
-          <span class="vu">
-            <Meter state="checking" />
-          </span>
+          <StatusRing state="checking" size={DOCK_AVATAR_PX} />
           <span class="proj">iter8</span>
           <span class="where">
             {props.boot.machineName}:{servicePort()}
@@ -254,8 +252,7 @@ export function SessionRows(props: {
             aria-label={`Attach to ${name}${shared ? ` · ${session.process.label}` : ""}`}
             onClick={() => void attach(session.owner)}
           >
-            <Meter state="live" still size="small" />
-            <Avatar agent={session.agent} size={18} />
+            <StatusRing state="live" agent={session.agent} size={16} still />
             <span class="nm">{name}</span>
             <span class="wh">{session.process.label}</span>
             {current ? (
@@ -560,7 +557,6 @@ export function Dock() {
   const dragging = near !== null
   const roundNumber = nextRoundNumber(model.rounds.value)
   const compact = sheetOpen && window.innerWidth < COMPACT_BELOW
-  const hasAvatar = pairing !== null
   // biome-ignore lint/correctness/useExhaustiveDependencies: the dock's rendered content sets its width, so a change re-places it in the same frame; viewport and resized are re-measure ticks.
   useLayoutEffect(() => {
     const dock = dockRef.current
@@ -617,7 +613,6 @@ export function Dock() {
     count,
     roundNumber,
     label,
-    hasAvatar,
   ])
 
   function toggleTool(tool: Mode) {
@@ -769,10 +764,7 @@ export function Dock() {
           onPointerCancel={onGripEnd}
           onClick={onGripClick}
         >
-          <span class="vu">
-            <Meter state={state} />
-          </span>
-          {pairing ? <Avatar agent={pairing.agent} size={DOCK_AVATAR_PX} /> : null}
+          <StatusRing state={state} agent={pairing?.agent} size={DOCK_AVATAR_PX} />
           <span class="proj">{name}</span>
           <span class="where">{where}</span>
           {word ? (
@@ -784,8 +776,7 @@ export function Dock() {
           ) : null}
           <span class="sheen" aria-hidden="true">
             <span class="sheen-copy">
-              <i class="vu skip" />
-              {pairing ? <i class="skip" style={{ width: `${DOCK_AVATAR_PX}px` }} /> : null}
+              <i class="skip" style={{ width: `${ringBox(DOCK_AVATAR_PX)}px` }} />
               <span class="hn">{name}</span>
               <span class="hw">{where}</span>
               {word ? (
@@ -890,9 +881,7 @@ export function Dock() {
         style={fontsReady ? undefined : HIDDEN}
         onClick={() => model.setPrefs({ collapsed: false })}
       >
-        <span class="vu">
-          <Meter state={state} />
-        </span>
+        <StatusRing state={state} agent={pairing?.agent} size={DOCK_AVATAR_PX} />
         {count ? <span class="badge">{count}</span> : null}
       </button>
     </>

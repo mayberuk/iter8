@@ -139,16 +139,6 @@
     transform: translateX(-104%);
   }
 }
-.vu {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: var(--well);
-  box-shadow: inset 0 2px 0 var(--base-2);
-  border: 1px solid var(--line-2);
-}
 .proj,
 .hn {
   font-weight: 600;

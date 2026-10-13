@@ -1,6 +1,7 @@
 import type { Intent } from "@iter8/protocol"
 import type { JSX } from "preact"
 import { useId } from "preact/hooks"
+import type { DockState } from "../model"
 
 const X_PATH = "m4 4 8 8M12 4l-8 8"
 
@@ -559,40 +560,6 @@ export function StatusGlyph({ state }: { state: StatusKey }) {
   )
 }
 
-const METER_VARIANTS = {
-  live: "",
-  busy: "busy",
-  gone: "gone",
-  checking: "faint still",
-  delivered: "delivered",
-  unattached: "faint still",
-}
-
-export type MeterKey = keyof typeof METER_VARIANTS
-
-export function Meter({
-  state,
-  still = false,
-  size = "dock",
-}: {
-  state: MeterKey
-  still?: boolean
-  size?: "dock" | "small"
-}) {
-  const classes = [
-    "meter",
-    METER_VARIANTS[state],
-    still ? "still" : "",
-    size === "small" ? "small" : "",
-  ]
-  return (
-    <svg class={classes.filter(Boolean).join(" ")} viewBox="0 0 10 11" aria-hidden="true">
-      <circle class="md" cx="5" cy="6" r="4" />
-      <circle class="mf" cx="5" cy="5" r="4" />
-    </svg>
-  )
-}
-
 /** Renders the `claude-mark` symbol that `Avatar` references; mount it once per shadow root. */
 export function ClaudeMarkSymbol() {
   return (
@@ -623,6 +590,39 @@ export function Avatar({ agent, size }: { agent: string; size: number }) {
       ) : (
         <span>{agent.slice(0, 2)}</span>
       )}
+    </span>
+  )
+}
+
+const RING_PAD_PX = 8
+
+export function ringBox(avatarPx: number): number {
+  return avatarPx + RING_PAD_PX
+}
+
+/** The session's state drawn as a ring around its avatar; `still` freezes the animation for lists. */
+export function StatusRing({
+  state,
+  agent = "claude",
+  size,
+  still = false,
+}: {
+  state: DockState
+  agent?: string | undefined
+  size: number
+  still?: boolean
+}) {
+  return (
+    <span
+      class={still ? `status-ring ring-${state} still` : `status-ring ring-${state}`}
+      style={{ "--rs": `${ringBox(size)}px` }}
+    >
+      <svg viewBox="0 0 34 34" aria-hidden="true">
+        <circle class="rt" cx="17" cy="17" r="15.5" />
+        <circle class="ra" cx="17" cy="17" r="15.5" pathLength="98" />
+        {state === "busy" ? <circle class="rb" cx="17" cy="17" r="15.5" pathLength="98" /> : null}
+      </svg>
+      <Avatar agent={agent} size={size} />
     </span>
   )
 }

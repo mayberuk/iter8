@@ -5,15 +5,15 @@ import {
   ClaudeMarkSymbol,
   Icon,
   IntentGlyph,
-  Meter,
   StatusGlyph,
+  StatusRing,
 } from "../../../apps/overlay/src/ui/glyphs"
 
 export type Item =
   | { kind: "icon"; props: ComponentProps<typeof Icon> }
   | { kind: "intent"; props: ComponentProps<typeof IntentGlyph> }
   | { kind: "status"; props: ComponentProps<typeof StatusGlyph> }
-  | { kind: "meter"; props: ComponentProps<typeof Meter> }
+  | { kind: "ring"; props: ComponentProps<typeof StatusRing> }
   | { kind: "avatar"; props: ComponentProps<typeof Avatar> }
 
 function view(item: Item) {
@@ -24,8 +24,8 @@ function view(item: Item) {
       return <IntentGlyph {...item.props} />
     case "status":
       return <StatusGlyph {...item.props} />
-    case "meter":
-      return <Meter {...item.props} />
+    case "ring":
+      return <StatusRing {...item.props} />
     case "avatar":
       return <Avatar {...item.props} />
   }

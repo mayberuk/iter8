@@ -90,7 +90,10 @@ test("the conversation panel shows an agent's finished message, sends a page mes
     const messages = panel.getByRole("log", { name: "Messages" }).getByRole("article")
     const agentRow = messages.filter({ hasText: agentText })
     await appears("the agent's message in the open conversation", agentRow)
-    expect(await agentRow.getByText(`stub · ${session.label}`, { exact: true }).count()).toBe(1)
+    const head = agentRow.locator(".cv-meta")
+    expect(await head.locator(".cv-who").textContent()).toBe("stub")
+    expect(await head.locator(".cv-sess").textContent()).toBe(name)
+    expect(await agentRow.textContent()).not.toContain(session.label)
     expect(await agentRow.getByText("You, from this page").count()).toBe(0)
 
     const chatText = `Can the badge sit left of the title? ${crypto.randomUUID()}`

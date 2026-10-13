@@ -57,7 +57,7 @@ const ICON_NAMES = Object.keys(ICON_CATALOG) as IconName[]
 const ICON_FIXTURE: Record<IconName, { viewBox?: string; inner: string }> = fixture.icons
 
 const STATUS_KEYS = ["queued", "delivered", "working", "done", "answered", "failed"] as const
-const METER_KEYS = ["live", "busy", "gone", "checking", "delivered", "unattached"] as const
+const RING_KEYS = ["live", "busy", "gone", "checking", "delivered", "unattached"] as const
 
 const INTENT_TOKENS = {
   fix: ["#010203", "#040506"],
@@ -429,33 +429,33 @@ describe("the glyph set", () => {
     expect(ids[0]).not.toBe(ids[1])
   }, 30_000)
 
-  test("the meter is one lamp per dock state, carrying the state's class, with checking and unattached faint", async () => {
+  test("the status ring wraps the session's avatar, one ring per dock state carrying that state's class", async () => {
     const { page } = await openUi()
     await show(
       page,
-      METER_KEYS.map((state) => ({ kind: "meter", props: { state } })),
+      RING_KEYS.map((state) => ({ kind: "ring", props: { state, agent: "claude", size: 22 } })),
     )
-    const meters = await page.evaluate(() => {
+    const rings = await page.evaluate(() => {
       const root = document.getElementById("stage")?.shadowRoot
-      return Array.from(root?.querySelectorAll("[data-item] svg") ?? [], (svg) => ({
-        lamps: svg.querySelectorAll(".mf").length,
-        shapes: svg.querySelectorAll("*").length,
-        classes: Array.from(svg.classList),
+      return Array.from(root?.querySelectorAll("[data-item] > .status-ring") ?? [], (ring) => ({
+        classes: Array.from(ring.classList),
+        avatars: ring.querySelectorAll("[role=img]").length,
+        arcs: ring.querySelectorAll("svg circle.ra, svg circle.rb").length,
+        box: getComputedStyle(ring).getPropertyValue("--rs"),
       }))
     })
-    expect(meters.map((meter) => meter.lamps)).toEqual([1, 1, 1, 1, 1, 1])
-    expect(meters.map((meter) => meter.shapes)).toEqual([2, 2, 2, 2, 2, 2])
-    const byState = new Map(METER_KEYS.map((state, index) => [state, meters[index]?.classes ?? []]))
-    for (const state of ["busy", "gone", "delivered"] as const) {
-      expect(byState.get(state)).toContain(state)
-    }
-    for (const state of ["checking", "unattached"] as const) {
-      expect(byState.get(state)).toContain("faint")
-    }
-    for (const state of ["live", "busy", "gone", "delivered"] as const) {
-      expect(byState.get(state)).not.toContain("faint")
-    }
-    expect(byState.get("live")).toEqual(["meter"])
+    expect(rings).toHaveLength(RING_KEYS.length)
+    RING_KEYS.forEach((state, index) => {
+      expect(rings[index]?.classes, state).toContain(`ring-${state}`)
+      expect(rings[index]?.avatars, `${state} wraps one avatar`).toBe(1)
+      expect(rings[index]?.box, `${state} is the avatar plus its ring`).toBe("30px")
+    })
+    expect(rings.map((ring) => ring.arcs)).toEqual([1, 2, 1, 1, 1, 1])
+    expect(
+      await page.evaluate(
+        () => document.getElementById("stage")?.shadowRoot?.querySelectorAll(".meter").length,
+      ),
+    ).toBe(0)
   }, 30_000)
 
   test("the Claude avatar draws the mark from the shared symbol; any other agent is a two-letter monogram", async () => {

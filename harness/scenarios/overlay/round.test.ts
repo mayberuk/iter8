@@ -1392,16 +1392,19 @@ describe("round sheet: remaining spec gaps", () => {
     await until("Undo to be gone", async () => (await undo.count()) === 0)
   }, 30_000)
 
-  test("the panel header shows the session's meter and avatar, and every draft row has its grip", async () => {
+  test("the panel header shows the session's avatar inside its status ring, and every draft row has its grip", async () => {
     const live = await open({ pairing: LIVE, pageState: THREE })
     const sheet = await openSheet(live)
-    const meter = sheet.locator(".sh-h .sub svg.meter")
-    expect(await meter.count()).toBe(1)
-    const liveClass = (await meter.getAttribute("class")) ?? ""
+    const ring = sheet.locator(".sh-h .sub .status-ring")
+    expect(await ring.count()).toBe(1)
+    const liveClass = (await ring.getAttribute("class")) ?? ""
+    expect(liveClass).toContain("ring-live")
     expect(liveClass).toContain("still")
-    const avatar = sheet.locator(".sh-h .sub").getByRole("img", { name: "Claude" })
+    const avatar = ring.getByRole("img", { name: "Claude" })
     expect(await avatar.count()).toBe(1)
     expect(await avatar.locator("svg").count()).toBe(1)
+    expect(await sheet.locator(".sh-h .sub").getByRole("img", { name: "Claude" }).count()).toBe(1)
+    expect(await sheet.locator(".meter").count()).toBe(0)
     const grips = sheet.getByRole("listitem").locator(".grip svg")
     expect(await grips.count()).toBe(3)
     for (const box of await grips.evaluateAll((els) =>
@@ -1413,9 +1416,12 @@ describe("round sheet: remaining spec gaps", () => {
 
     const busy = await open({ pairing: { ...LIVE, state: { status: "busy" } }, pageState: THREE })
     const busySheet = await openSheet(busy)
-    const busyClass = (await busySheet.locator(".sh-h .sub svg.meter").getAttribute("class")) ?? ""
-    expect(busyClass).toContain("busy")
-    expect(busyClass).not.toBe(liveClass)
+    const busyClass =
+      (await busySheet.locator(".sh-h .sub .status-ring").getAttribute("class")) ?? ""
+    expect(busyClass).toContain("ring-busy")
+    expect(busyClass).not.toContain("ring-live")
+    expect(await busySheet.locator(".busyline .status-ring.ring-busy").count()).toBe(1)
+    expect(await busySheet.locator(".meter").count()).toBe(0)
   }, 30_000)
 
   test("rows and summary cover question and keep as well as fix and change: labels, colours and counts", async () => {
