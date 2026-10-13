@@ -12,7 +12,6 @@ import {
 } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
-import { parseArgs } from "node:util"
 import { CLI_SURFACE } from "@iter8/protocol"
 import { type CommandDef, defineCommand } from "citty"
 import { assertHost } from "../../connect/ssh"
@@ -292,24 +291,13 @@ async function runSetup(deps: CliDeps, system: SetupSystem, host: string | null)
   if (host !== null) await keepConnected(deps, system, host)
 }
 
-function givesHost(args: string[]): boolean {
-  const { positionals } = parseArgs({
-    args,
-    options: { json: { type: "boolean" } },
-    allowPositionals: true,
-    strict: false,
-  })
-  return positionals.length > 0
-}
-
 export const setup = (deps: CliDeps, system?: SetupSystem): CommandDef =>
   defineCommand({
     meta: { name: "setup", description: CLI_SURFACE.setup.summary },
     args: commandArgs("setup"),
-    run: ({ rawArgs }) => {
-      const given = givesHost(rawArgs)
-      return runCli(deps, "setup", given ? rawArgs : [...rawArgs, ""], ({ positionals }) =>
-        runSetup(deps, system ?? liveSystem(), given ? assertHost(positionals[0] ?? "") : null),
-      )
-    },
+    run: ({ rawArgs }) =>
+      runCli(deps, "setup", rawArgs, ({ positionals }) => {
+        const [host] = positionals
+        return runSetup(deps, system ?? liveSystem(), host === undefined ? null : assertHost(host))
+      }),
   })

@@ -1,7 +1,6 @@
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { hostname } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import { parseArgs } from "node:util"
 import { CLI_SURFACE, ExitCode } from "@iter8/protocol"
 import { type CommandDef, defineCommand } from "citty"
 import { z } from "zod"
@@ -115,19 +114,6 @@ export function liveSystem(deps: CliDeps, values: Parameters<typeof caller>[1]):
       return { url: opened.url, laptops }
     },
   }
-}
-
-function withDefaultDir(args: string[]): string[] {
-  const options = Object.fromEntries(
-    CLI_SURFACE.run.flags.map((flag) => [flag.name, { type: "string" as const }]),
-  )
-  const { positionals } = parseArgs({
-    args,
-    options: { ...options, json: { type: "boolean" } },
-    allowPositionals: true,
-    strict: false,
-  })
-  return positionals.length === 0 ? [...args, "."] : args
 }
 
 async function projectDir(path: string): Promise<string> {
@@ -423,7 +409,7 @@ export const run = (deps: CliDeps, system?: RunSystem): CommandDef =>
       const split = rawArgs.indexOf("--")
       const head = split === -1 ? rawArgs : rawArgs.slice(0, split)
       const command = split === -1 ? null : rawArgs.slice(split + 1)
-      return runCli(deps, "run", withDefaultDir(head), async ({ values, positionals }) => {
+      return runCli(deps, "run", head, async ({ values, positionals }) => {
         if (command?.length === 0) {
           throw new Error("Give the dev command after --", { cause: ExitCode.usage })
         }

@@ -3,6 +3,7 @@ import type { CliDeps } from "../client"
 import { attach } from "./attach"
 import { connect } from "./connect"
 import { done } from "./done"
+import { help } from "./help"
 import { hook } from "./hook"
 import { note } from "./note"
 import { open } from "./open"
@@ -26,6 +27,7 @@ export function cliCommands(deps: CliDeps): Record<string, CommandDef> {
     note: note(deps),
     status: status(deps),
     version: version(deps),
+    help: help(deps),
     hook: hook(deps),
   }
 }

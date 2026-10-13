@@ -6,6 +6,7 @@ import { join } from "node:path"
 import {
   type Capture,
   CLI_SURFACE,
+  type CliCommandSpec,
   DraftBody,
   ExitCode,
   formatPointer,
@@ -310,10 +311,12 @@ describe("command surface", () => {
         "note",
         "status",
         "version",
+        "help",
         "hook",
       ].sort(),
     )
-    for (const [name, spec] of Object.entries(CLI_SURFACE)) {
+    const surface: [string, CliCommandSpec][] = Object.entries(CLI_SURFACE)
+    for (const [name, spec] of surface) {
       if (name === "serve") continue
       const [root = "", child] = name.split(" ")
       let command = commands[root]
@@ -329,12 +332,12 @@ describe("command surface", () => {
       expect(args.json?.type).toBe("boolean")
       for (const positional of spec.positionals) {
         expect(args[positional]?.type).toBe("positional")
-        expect(args[positional]?.required).toBe(true)
+        expect(args[positional]?.required).toBe(spec.positionalsOptional !== true)
       }
       for (const flag of spec.flags) {
         expect(args[flag.name]?.required).toBe(flag.required)
         expect(args[flag.name]?.valueHint).toBe(
-          Array.isArray(flag.value) ? flag.value.join("|") : flag.value,
+          typeof flag.value === "string" ? flag.value : flag.value.join("|"),
         )
         expect(args[flag.name]?.description).toBe(flag.repeatable ? "Repeatable" : "")
       }
