@@ -664,6 +664,21 @@ describe("hook commands", () => {
     expect(state.exits).toEqual([ExitCode.ok])
   })
 
+  test.each([
+    ["prompt", false, ["--pid", "9001"]],
+    ["stop", false, ["--pid", "9001"]],
+    ["end", false, ["--pid", "9001", "--label", "session-9001", "--reason", "other"]],
+    ["tool", false, ["--pid", "9001"]],
+    ["start", true, ["--pid", "9001", "--label", "session-9001", "--source", "startup"]],
+    ["wait", true, ["--pid", "9001", "--timeout-seconds", "0"]],
+  ] as const)("%s connects with start %s", async (command, start, args) => {
+    const state = await setup()
+    await state.start()
+    state.clear()
+    await state.run("hook", [command, ...args])
+    expect(state.connections).toEqual([{ start }])
+  })
+
   test("wait wakes with pointer lines on stderr and exit wake", async () => {
     const state = await setup()
     const pairing = await state.start()
@@ -1500,7 +1515,7 @@ describe("flag validation", () => {
 })
 
 describe("hook commands for another process", () => {
-  test("prompt, stop and end act on the owner of the given --pid, not the CLI's own, and start the service", async () => {
+  test("prompt, stop and end act on the owner of the given --pid, not the CLI's own, and never start the service", async () => {
     const state = await setup()
     const own = await state.start("claude", 9001)
     const other = await state.start("claude", 9002)
@@ -1509,7 +1524,7 @@ describe("hook commands for another process", () => {
     await state.run("hook", ["prompt", "--pid", "9002"])
     expect(state.exits).toEqual([ExitCode.ok])
     expect([stateOf(own.owner), stateOf(other.owner)]).toEqual(["live", "busy"])
-    expect(state.connections).toEqual([{ start: true }])
+    expect(state.connections).toEqual([{ start: false }])
     expect(state.requests[0]).toMatchObject({
       path: "/hook/prompt",
       body: { pid: 9002, startedAt: "linux:1:9002" },
@@ -1518,7 +1533,7 @@ describe("hook commands for another process", () => {
 
     await state.run("hook", ["stop", "--pid", "9002"])
     expect([stateOf(own.owner), stateOf(other.owner)]).toEqual(["live", "live"])
-    expect(state.connections).toEqual([{ start: true }])
+    expect(state.connections).toEqual([{ start: false }])
     expect(state.requests[0]).toMatchObject({ path: "/hook/stop", body: { pid: 9002 } })
     state.clear()
 
@@ -1533,7 +1548,7 @@ describe("hook commands for another process", () => {
     ])
     expect(state.exits).toEqual([ExitCode.ok])
     expect([stateOf(own.owner), stateOf(other.owner)]).toEqual(["live", "gone"])
-    expect(state.connections).toEqual([{ start: true }])
+    expect(state.connections).toEqual([{ start: false }])
     expect(state.requests[0]).toMatchObject({
       path: "/hook/end",
       body: { pid: 9002, startedAt: "linux:1:9002", label: "session-9002", reason: "logout" },
