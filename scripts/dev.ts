@@ -7,9 +7,12 @@ import { buildOverlayBundles } from "./build"
 const READY_LIMIT_MS = 30_000
 const READY_POLL_MS = 200
 
-/** The service drains itself after ten idle minutes; a clean exit sooner means another service holds the pool. */
-export function afterServiceExit(code: number | null, ranMs: number): "restart" | "fail" {
-  return code === 0 && ranMs >= READY_LIMIT_MS ? "restart" : "fail"
+/**
+ * The service drains itself after ten idle minutes and `iter8 run` starts it again on its own; restarting it
+ * here races that start. A clean exit sooner means another service holds the pool.
+ */
+export function afterServiceExit(code: number | null, ranMs: number): "idle" | "fail" {
+  return code === 0 && ranMs >= READY_LIMIT_MS ? "idle" : "fail"
 }
 
 type Readiness = {
@@ -94,7 +97,7 @@ async function dev(): Promise<void> {
       building = null
     })
   }
-  const start = (argv: string[], restartWhenIdle = false) => {
+  const start = (argv: string[], toleratesIdle = false) => {
     const startedAt = Date.now()
     const child = Bun.spawn(argv, {
       cwd: root,
@@ -107,9 +110,10 @@ async function dev(): Promise<void> {
     void child.exited.then((code) => {
       children.delete(child)
       if (stopping) return
-      if (restartWhenIdle && afterServiceExit(code, Date.now() - startedAt) === "restart") {
-        console.error("The dev service stopped while idle; starting it again.")
-        start(argv, true)
+      if (toleratesIdle && afterServiceExit(code, Date.now() - startedAt) === "idle") {
+        console.error(
+          "The dev service stopped while idle; iter8 starts it again on the next request, without file watching.",
+        )
         return
       }
       fail(`${argv.join(" ")} exited (${code})`)

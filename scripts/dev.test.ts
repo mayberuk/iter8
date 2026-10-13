@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test"
 import { afterServiceExit, startWhenReady } from "./dev"
 
-test("a service that drains itself after running a while is restarted", () => {
-  expect(afterServiceExit(0, 600_000)).toBe("restart")
+test("a service that drains itself after running a while leaves dev running", () => {
+  expect(afterServiceExit(0, 600_000)).toBe("idle")
 })
 
 test("a service that exits cleanly at once, or fails, ends dev", () => {
