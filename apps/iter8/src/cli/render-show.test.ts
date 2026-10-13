@@ -212,6 +212,80 @@ test("renders a region and a done resolution without requiring element selectors
   expect(splitFences(output).blocks).toEqual([])
 })
 
+test("renders a note about iter8 with its part, source and a line saying it is not about the page", () => {
+  const show = example()
+  const note = show.notes[0]!
+  note.authored.target = {
+    kind: "iter8",
+    part: { key: "dock.ring", name: "Dock status ring", source: "apps/overlay/src/ui/Dock.tsx" },
+    iter8Version: "0.4.4",
+    box: { x: 1096, y: 842, width: 34, height: 34 },
+    viewport: { width: 1440, height: 900, devicePixelRatio: 2 },
+  }
+  note.untrustedCapture = Capture.parse({
+    completeness: "complete",
+    omittedParts: [],
+    url: "http://larkspur.localhost:3990/pricing",
+    viewport: { width: 1440, height: 900, devicePixelRatio: 2 },
+    theme: "light",
+    screenshot: { ref: "shot-N3", width: 68, height: 68 },
+  })
+  const output = renderShow(show, new Map([[NoteId.parse("N3"), "/tmp/iter8-shots/N3.png"]]))
+  expect(output).toContain(
+    [
+      "Target: iter8 · Dock status ring",
+      "This note is about iter8 itself, not the page it was left on.",
+      "Source: apps/overlay/src/ui/Dock.tsx",
+      "iter8 version: 0.4.4",
+      "Target at (1096, 842), 34 × 34 CSS px in the viewport",
+      "Target viewport: 1440 × 900, device pixel ratio 2",
+      "Anchor status: anchored",
+    ].join("\n"),
+  )
+  const { outside, blocks } = splitFences(output)
+  expect(blocks.map((block) => block.text)).toEqual([
+    [
+      "Completeness: complete",
+      "Omitted parts: none",
+      "URL: http://larkspur.localhost:3990/pricing",
+      "Viewport: 1440 × 900 CSS px, device pixel ratio 2",
+      "Theme: light",
+      "Screenshot: /tmp/iter8-shots/N3.png",
+    ].join("\n"),
+  ])
+  expect(outside).toContain("Source: apps/overlay/src/ui/Dock.tsx")
+  for (const absent of [
+    "Selector hops",
+    "Computed styles",
+    "Console errors",
+    "Source lead",
+    "Landmark",
+  ])
+    expect(output).not.toContain(absent)
+})
+
+test("a note about iter8 whose screenshot was omitted says so and prints no screenshot path", () => {
+  const show = example()
+  const note = show.notes[0]!
+  note.authored.target = {
+    kind: "iter8",
+    part: { key: "sheet", name: "Round sheet", source: "apps/overlay/src/ui/RoundSheet.tsx" },
+    iter8Version: "0.4.4",
+    box: { x: 0, y: 12, width: 416, height: 692 },
+    viewport: { width: 1440, height: 900, devicePixelRatio: 1 },
+  }
+  note.untrustedCapture = Capture.parse({
+    completeness: "partial",
+    omittedParts: ["screenshot"],
+    url: "http://larkspur.localhost:3990/",
+    viewport: { width: 1440, height: 900, devicePixelRatio: 1 },
+    theme: "dark",
+  })
+  const { blocks } = splitFences(renderShow(show, new Map()))
+  expect(blocks[0]!.text).toContain("Completeness: partial\nOmitted parts: screenshot")
+  expect(blocks[0]!.text).toContain("Screenshot: none")
+})
+
 test("role, name and text read from the page cannot escape the untrusted fence", () => {
   const show = example()
   const note = show.notes[0]!

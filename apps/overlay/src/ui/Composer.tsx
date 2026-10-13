@@ -2,6 +2,7 @@ import { Intent, type NoteTarget, type ResolvedSourceLead } from "@iter8/protoco
 import { useComputed } from "@preact/signals"
 import type { JSX, RefObject } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
+import { part } from "../parts"
 import composerCss from "./composer.css" with { type: "text" }
 import { useOverlay, useSheet } from "./context"
 import { Icon, IntentGlyph } from "./glyphs"
@@ -42,6 +43,14 @@ function header(
     return shot
       ? { icon: "shot", comp: "Screenshot", name: "marked-up capture", dims }
       : { icon: "region", comp: "Region", name: "place something here", dims }
+  }
+  if (target.kind === "iter8") {
+    return {
+      icon: "pick",
+      comp: "iter8",
+      name: target.part.name,
+      dims: `${Math.round(target.box.width)} × ${Math.round(target.box.height)}`,
+    }
   }
   const anchors = target.kind === "element" ? [target.anchor] : target.anchors
   const first = anchors[0]
@@ -84,23 +93,29 @@ function SourceRow({ lead }: { lead: ResolvedSourceLead | "pending" | null }) {
         </span>
       </div>
     )
-  const segments = lead.file.split("/")
-  const file = segments.pop() ?? lead.file
-  const dir = segments.at(-1)
   return (
     <div class={lead.confidence === "exact" ? "cmp-src" : "cmp-src uncertain"}>
       <Icon name="file" size={12} />
-      <span class="file" title={lead.file}>
-        {dir === undefined ? "" : `${dir}/`}
-        <b>
-          {file}
-          {lead.line === undefined ? "" : `:${lead.line}`}
-        </b>
-      </span>
+      <FileName file={lead.file} line={lead.line} />
       <span class="conf" role="status" aria-label="Source confidence">
         {lead.confidence}
       </span>
     </div>
+  )
+}
+
+function FileName({ file: path, line }: { file: string; line?: number | undefined }) {
+  const segments = path.split("/")
+  const file = segments.pop() ?? path
+  const dir = segments.at(-1)
+  return (
+    <span class="file" title={path}>
+      {dir === undefined ? "" : `${dir}/`}
+      <b>
+        {file}
+        {line === undefined ? "" : `:${line}`}
+      </b>
+    </span>
   )
 }
 
@@ -205,6 +220,7 @@ export function Composer({
       class={on ? "pop composer on" : "pop composer"}
       role="dialog"
       aria-label={editing ? "Edit note" : "New note"}
+      {...part("composer")}
     >
       <div class="cmp-h">
         <Icon name={head.icon} size={14} />
@@ -212,7 +228,14 @@ export function Composer({
         <span class="nm">{head.name}</span>
         <span class="dim">{head.dims}</span>
       </div>
-      {target.kind !== "region" && <SourceRow lead={lead} />}
+      {target.kind === "iter8" ? (
+        <div class="cmp-src">
+          <Icon name="file" size={12} />
+          <FileName file={target.part.source} />
+        </div>
+      ) : (
+        target.kind !== "region" && <SourceRow lead={lead} />
+      )}
       <div
         class="intents"
         role="radiogroup"

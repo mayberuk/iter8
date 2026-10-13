@@ -21,6 +21,7 @@ import {
   sessionName,
   type ToastTone,
 } from "../model"
+import { part } from "../parts"
 import { adoptSheet, useOverlay, useSheet } from "./context"
 import dockCss from "./dock.css" with { type: "text" }
 import { Icon, type IconName, ringBox, StatusGlyph, StatusRing } from "./glyphs"
@@ -757,10 +758,12 @@ export function Dock() {
         aria-label="iter8 annotation tools"
         inert={prefs.collapsed}
         style={fontsReady ? undefined : HIDDEN}
+        {...part("dock")}
       >
         <button
           type="button"
           class="idn"
+          {...part("dock.identity")}
           aria-haspopup="dialog"
           aria-expanded={menu === "session"}
           aria-label={gripLabel}
@@ -770,7 +773,7 @@ export function Dock() {
           onPointerCancel={onGripEnd}
           onClick={onGripClick}
         >
-          <StatusRing state={state} agent={pairing?.agent} size={DOCK_AVATAR_PX} />
+          <StatusRing state={state} agent={pairing?.agent} size={DOCK_AVATAR_PX} part="dock.ring" />
           <span class="proj">{name}</span>
           <span class="where">{where}</span>
           {word ? (
@@ -795,7 +798,7 @@ export function Dock() {
           </span>
         </button>
         <i class="vr" />
-        <div class="seg">
+        <div class="seg" {...part("dock.tools")}>
           <button
             type="button"
             aria-pressed={pressed("pick")}
@@ -831,6 +834,7 @@ export function Dock() {
         <button
           type="button"
           class="counter"
+          {...part("dock.round")}
           aria-label="Open round sheet"
           data-tip="Round sheet"
           data-kbd="R"
@@ -844,6 +848,7 @@ export function Dock() {
         <button
           type="button"
           class="send"
+          {...part("dock.send")}
           disabled={blocked !== null}
           data-tip={tip}
           onClick={() => void send()}
@@ -855,6 +860,7 @@ export function Dock() {
           type="button"
           ref={moreRef}
           class="iconbtn"
+          {...part("dock.more")}
           aria-haspopup="menu"
           aria-expanded={menu === "more"}
           aria-label="More options"
@@ -866,6 +872,7 @@ export function Dock() {
         <button
           type="button"
           class="iconbtn"
+          {...part("dock.collapse")}
           aria-label="Collapse dock"
           data-tip="Collapse"
           onClick={() => {
@@ -883,6 +890,7 @@ export function Dock() {
           prefs.collapsed ? `iter8btn chrome ${stateClass}` : `iter8btn chrome hidden ${stateClass}`
         }
         aria-label="Expand iter8 dock"
+        {...part("dock.collapsed")}
         inert={!prefs.collapsed}
         style={fontsReady ? undefined : HIDDEN}
         onClick={() => model.setPrefs({ collapsed: false })}

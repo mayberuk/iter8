@@ -2,6 +2,7 @@ import type { Intent } from "@iter8/protocol"
 import type { JSX } from "preact"
 import { useId } from "preact/hooks"
 import type { DockState } from "../model"
+import { type PartKey, part } from "../parts"
 
 const X_PATH = "m4 4 8 8M12 4l-8 8"
 
@@ -606,16 +607,19 @@ export function StatusRing({
   agent = "claude",
   size,
   still = false,
+  part: partKey,
 }: {
   state: DockState
   agent?: string | undefined
   size: number
   still?: boolean
+  part?: PartKey
 }) {
   return (
     <span
       class={still ? `status-ring ring-${state} still` : `status-ring ring-${state}`}
       style={{ "--rs": `${ringBox(size)}px` }}
+      {...(partKey === undefined ? {} : part(partKey))}
     >
       <svg viewBox="0 0 34 34" aria-hidden="true">
         <circle class="rt" cx="17" cy="17" r="15.5" />

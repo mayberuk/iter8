@@ -15,6 +15,7 @@ import {
   IdempotencyKey,
   Intent,
   LANDING_PATH,
+  type NoteTarget,
   OpenResult,
   type OwnerId,
   type PageId,
@@ -210,15 +211,18 @@ async function setup() {
     clear()
     return opened.page
   }
-  function sendMany(pageId: PageId, drafts: Array<{ body: string; capture?: Capture }>) {
-    const notes = drafts.map(({ body, capture }) =>
+  function sendMany(
+    pageId: PageId,
+    drafts: Array<{ body: string; capture?: Capture; target?: NoteTarget }>,
+  ) {
+    const notes = drafts.map(({ body, capture, target }) =>
       inbox.createDraft(
         pageId,
         DraftBody.parse({
           intent: "fix",
           body,
           anchorStatus: "anchored",
-          target: {
+          target: target ?? {
             kind: "element",
             anchor: {
               selector: ["h1"],
@@ -1311,6 +1315,57 @@ describe("show text output", () => {
       expect(text).toContain(authored.body)
     }
     expect(text).not.toContain("undefined")
+  })
+})
+
+describe("show for a note about iter8", () => {
+  const iter8Target: NoteTarget = {
+    kind: "iter8",
+    part: { key: "dock.ring", name: "Dock status ring", source: "apps/overlay/src/ui/Dock.tsx" },
+    iter8Version: "0.4.4",
+    box: { x: 1096, y: 842, width: 34, height: 34 },
+    viewport: { width: 1440, height: 900, devicePixelRatio: 2 },
+  }
+
+  test("goes through the service and prints the part, its source and that it is not about the page", async () => {
+    const state = await setup()
+    await state.start()
+    const page = await state.openPage()
+    const capture: Capture = {
+      completeness: "complete",
+      omittedParts: [],
+      url: `${page.origin}/pricing`,
+      viewport: iter8Target.viewport,
+      theme: "light",
+    }
+    const round = state.sendMany(page.id, [
+      { body: "More room around the ring", target: iter8Target, capture },
+      { body: "A page note" },
+    ])
+
+    await state.run("show", [round.id, "--json"])
+    const data = ShowResult.parse(JSON.parse(state.stdout.join("")))
+    expect(data.notes[0]?.authored.target).toEqual(iter8Target)
+    expect(data.notes[0]?.untrustedCapture).toEqual(capture)
+    state.clear()
+
+    await state.run("show", [round.id])
+    expect(state.exits).toEqual([ExitCode.ok])
+    const text = state.stdout.join("")
+    const [iter8Section = "", pageSection = ""] = text.split(/\n## /).slice(1)
+    expect(iter8Section).toContain(
+      [
+        "Target: iter8 · Dock status ring",
+        "This note is about iter8 itself, not the page it was left on.",
+        "Source: apps/overlay/src/ui/Dock.tsx",
+        "iter8 version: 0.4.4",
+      ].join("\n"),
+    )
+    expect(iter8Section).not.toContain("Selector hops")
+    expect(iter8Section).not.toContain("Source lead")
+    expect(iter8Section).not.toContain("Computed styles")
+    expect(pageSection).toContain("Target: element")
+    expect(pageSection).not.toContain("about iter8 itself")
   })
 })
 

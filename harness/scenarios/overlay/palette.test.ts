@@ -730,6 +730,7 @@ describe("shortcut sheet", () => {
         rows: [
           ["Pick mode", "C or ⌥⇧A"],
           ["Parent / child", "↑↓"],
+          ["Pick iter8 itself", "hold ⌥"],
           ["Add to selection", "⇧ click"],
           ["Region", "drag on the page"],
           ["Annotate selection", "↵"],

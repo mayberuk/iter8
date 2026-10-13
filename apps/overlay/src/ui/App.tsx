@@ -1,3 +1,4 @@
+import { part } from "../parts"
 import { useOverlay } from "./context"
 import { Dock } from "./Dock"
 import { ClaudeMarkSymbol } from "./glyphs"
@@ -12,7 +13,11 @@ import { Tooltip } from "./Tooltip"
 export function App() {
   const { model } = useOverlay()
   return (
-    <div class={model.peek.value ? "root peek" : "root"} data-theme={model.prefs.value.theme}>
+    <div
+      class={model.peek.value ? "root peek" : "root"}
+      data-theme={model.prefs.value.theme}
+      {...part("overlay")}
+    >
       <ClaudeMarkSymbol />
       <PickLayer />
       <Pins />

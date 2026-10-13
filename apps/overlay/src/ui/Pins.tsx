@@ -126,12 +126,14 @@ function anchorsOf(note: Note): readonly ElementAnchor[] {
     case "elements":
       return note.target.anchors
     case "region":
+    case "iter8":
       return []
   }
 }
 
 function targetLabel(note: Note): string {
   const { target } = note
+  if (target.kind === "iter8") return `iter8 · ${target.part.name}`
   if (target.kind === "region") {
     const size = `${Math.round(target.box.width)}×${Math.round(target.box.height)}`
     return note.capture?.screenshot ? `screenshot ${size}` : `region ${size}`

@@ -13,6 +13,7 @@ import { Fragment, type RefObject } from "preact"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 import { authorIdentity, groupRuns, type PendingMessage, type PostFailure } from "../conversation"
 import { backgroundWords, roundDisplayState } from "../model"
+import { part } from "../parts"
 import { useOverlay, useSheet } from "./context"
 import conversationCss from "./conversation.css" with { type: "text" }
 import { SessionRows } from "./Dock"
@@ -310,6 +311,7 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
       )}
       style={enter !== null ? { "--i": enter } : undefined}
       aria-label={`${label}, ${time}`}
+      {...(agent ? part("chat.agent-message") : {})}
     >
       {head && who.kind === "agent" ? (
         <header class="cv-meta">
@@ -321,7 +323,7 @@ function MessageRow({ entry, head, last, enter, blocked }: RowProps) {
       ) : (
         <span class="cv-sr">{label}</span>
       )}
-      <div class={agent ? "cv-prose" : "cv-bubble"}>
+      <div class={agent ? "cv-prose" : "cv-bubble"} {...(agent ? {} : part("chat.user-bubble"))}>
         {agent ? <Markdown text={entry.text} /> : <p class="cv-text">{entry.text}</p>}
         <div class="cv-tools">
           {agent && !head ? <time dateTime={entry.at}>{time}</time> : null}
@@ -383,6 +385,7 @@ function RoundDivider(props: {
     <button
       type="button"
       class={cls("cv-round", state, live && "live", props.enter && "enter")}
+      {...part("chat.round-divider")}
       aria-label={state ? `Round ${number}, ${state}` : `Round ${number}`}
       onClick={() => props.open(props.roundId)}
     >
@@ -457,7 +460,7 @@ function Empty({ name }: { name: string }) {
 
 function BackgroundLine({ agent, words }: { agent: string; words: string }) {
   return (
-    <div class="cv-bg" aria-hidden="true">
+    <div class="cv-bg" aria-hidden="true" {...part("chat.background")}>
       <StatusRing state="background" agent={agent} size={16} />
       <span>{words}</span>
     </div>
@@ -466,7 +469,7 @@ function BackgroundLine({ agent, words }: { agent: string; words: string }) {
 
 function Working({ agent }: { agent: string }) {
   return (
-    <div class="cv-work" aria-hidden="true">
+    <div class="cv-work" aria-hidden="true" {...part("chat.working")}>
       <div class="cv-meta">
         <Avatar agent={agent} size={18} />
         <b class="cv-who">{agent === "claude" ? "Claude" : agent}</b>
@@ -626,6 +629,7 @@ function MessageList() {
     <div class="cv-stage">
       <div
         class="cv-list"
+        {...part("chat.messages")}
         role="log"
         aria-label="Messages"
         ref={list}
@@ -787,7 +791,7 @@ function ChatInput({ name, focus }: { name: string; focus: { current: boolean } 
   }
 
   return (
-    <div class="cv-compose">
+    <div class="cv-compose" {...part("chat.composer")}>
       <div class={cls("cv-field", over > 0 && "over")}>
         <textarea
           ref={field}

@@ -544,6 +544,58 @@ test("an accepted hello returns the page with its drafts, rounds, agent notes, p
   await waiting
 })
 
+test("a note about iter8 keeps its part, version, box and capture through create, list, replace, send and the stored round", async () => {
+  const t = await setup()
+  t.owners.pairPage(t.larkspur.page.id, t.ownerA)
+  const screenshot = t.deps.screenshots.store(t.larkspur.page.id, png)
+  if (!screenshot) throw new Error("Seed screenshot was refused")
+  const viewport = { width: 1440, height: 900, devicePixelRatio: 2 }
+  const target = {
+    kind: "iter8",
+    part: { key: "dock.ring", name: "Dock status ring", source: "apps/overlay/src/ui/Dock.tsx" },
+    iter8Version: "0.4.4",
+    box: { x: 1096, y: 842, width: 34, height: 34 },
+    viewport,
+  } as const
+  const body = DraftBody.parse({
+    intent: "change",
+    body: "More room between the ring and the name",
+    target,
+    anchorStatus: "anchored",
+    capture: {
+      completeness: "complete",
+      omittedParts: [],
+      url: `${t.larkspur.page.origin}/pricing`,
+      viewport,
+      theme: "light",
+      screenshot,
+    },
+  })
+
+  const created = await t.call(R.createDraft, { body })
+  expect(created.status).toBe(201)
+  const note = Note.parse(await created.json())
+  expect(note.target).toEqual(target)
+  expect(note.capture).toEqual(body.capture)
+  expect(note.anchorStatus).toBe("anchored")
+
+  const listed = await t.call(R.listDrafts)
+  expect(R.listDrafts.response.parse(await listed.json())).toEqual([note])
+
+  const moved = { ...target, box: { ...target.box, x: 10 } }
+  const put = await t.call(R.putDraft, {
+    params: { noteId: note.id },
+    body: { ...body, target: moved },
+  })
+  expect(R.putDraft.response.parse(await put.json())).toMatchObject({ target: moved })
+
+  const sent = await t.call(R.send, { body: sendBody([note.id], 1) })
+  const result = R.send.response.parse(await sent.json())
+  if (result.outcome !== "accepted") throw new Error(`Expected accepted, got ${result.reason}`)
+  expect(result.round.notes[0]?.target).toEqual(moved)
+  expect(t.deps.inbox.round(result.round.id)?.notes[0]).toEqual(result.round.notes[0])
+})
+
 test("sending to a paired owner wakes its armed waiter and pushes the round to the page's sockets", async () => {
   const t = await setup()
   t.owners.pairPage(t.larkspur.page.id, t.ownerA)

@@ -2,6 +2,7 @@ import { Intent } from "@iter8/protocol"
 import { batch } from "@preact/signals"
 import type { Connection } from "../connection"
 import type { Mode, OverlayModel } from "../model"
+import { partTarget, resolvePart } from "../parts"
 import { parentAcrossShadow } from "../pick/anchor"
 import { regionTarget, snapshotElement } from "../pick/snapshot"
 
@@ -64,7 +65,7 @@ export function listenKeys(deps: {
 
   function climb(direction: "up" | "down") {
     const hover = model.hover.value?.deref()
-    if (!hover) return
+    if (!hover || root.contains(hover)) return
     if (direction === "up") {
       const parent = parentAcrossShadow(hover)
       if (!parent || parent === document.body || parent === document.documentElement) return
@@ -93,6 +94,12 @@ export function listenKeys(deps: {
     }
     const hover = model.hover.value?.deref() ?? picked[0]
     if (!hover) return false
+    if (root.contains(hover)) {
+      const found = resolvePart(hover)
+      if (!found) return false
+      model.openComposer({ target: partTarget(found, model.serviceVersion.peek()) })
+      return true
+    }
     model.openComposer({ target: { kind: "element", anchor: snapshotElement(hover, generation) } })
     return true
   }

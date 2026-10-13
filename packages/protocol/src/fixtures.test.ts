@@ -46,6 +46,7 @@ const cliFixtures = Object.entries(protocol.CLI_SURFACE).flatMap(([command, spec
 const namedVariants: Record<string, unknown> = {
   "Capture.stale.json": { completeness: "stale" },
   "Note.unanchored.json": { anchorStatus: "unanchored" },
+  "Note.iter8.json": { target: { kind: "iter8" } },
   "SourceLead.none.json": { confidence: "none" },
   "ResolvedSourceLead.none.json": { confidence: "none" },
   "ResolvedSourceLead.file-only.json": { confidence: "file-only" },

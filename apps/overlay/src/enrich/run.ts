@@ -8,7 +8,7 @@ import type {
 } from "@iter8/protocol"
 import { parentAcrossShadow, resolveSelector } from "../pick/anchor"
 import { describeContext } from "./context"
-import { captureCrop, captureRegion } from "./crop"
+import { captureCrop, capturePart, captureRegion } from "./crop"
 import { diffStyles, VISUAL_PROPERTIES } from "./styles"
 
 type Lookup = (el: Element, signal: AbortSignal) => Promise<SourceLead>
@@ -21,6 +21,15 @@ async function nextStep(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted()
   await scheduler.yield()
   signal.throwIfAborted()
+}
+
+async function untilQuiet(idleSinceInput: () => number, signal: AbortSignal): Promise<void> {
+  await nextStep(signal)
+  for (let idle = idleSinceInput(); idle < SHOT_AFTER_IDLE_MS; idle = idleSinceInput()) {
+    // Sleeps out the rest of the quiet period rather than spinning on yields through typing.
+    await new Promise((resolve) => setTimeout(resolve, SHOT_AFTER_IDLE_MS - idle))
+    await nextStep(signal)
+  }
 }
 
 function readStyles(el: Element | null): Record<string, string> {
@@ -116,16 +125,7 @@ export async function enrich(
 
   let screenshot: Screenshot | undefined
   if (deps.shot) {
-    await nextStep(signal)
-    for (
-      let idle = deps.idleSinceInput();
-      idle < SHOT_AFTER_IDLE_MS;
-      idle = deps.idleSinceInput()
-    ) {
-      // Sleeps out the rest of the quiet period rather than spinning on yields through typing.
-      await new Promise((resolve) => setTimeout(resolve, SHOT_AFTER_IDLE_MS - idle))
-      await nextStep(signal)
-    }
+    await untilQuiet(deps.idleSinceInput, signal)
     if (!isStale()) {
       const opts = { signal, exclude: deps.exclude }
       const shot =
@@ -156,5 +156,56 @@ export async function enrich(
     ...(consoleErrors.length > 0 ? { consoleErrors } : {}),
     ...(screenshot !== undefined && !stale ? { screenshot } : {}),
     ...(sourceLead !== null ? { sourceLead } : {}),
+  }
+}
+
+/**
+ * Captures an overlay part for a note about iter8 itself: the page's styles, console errors and
+ * source lead say nothing about it, so only where and how it was seen is recorded.
+ */
+export async function enrichPart(
+  part: Element,
+  deps: {
+    signal: AbortSignal
+    uploadScreenshot: (png: Blob) => Promise<Screenshot>
+    idleSinceInput: () => number
+  },
+): Promise<Capture> {
+  const { signal } = deps
+  signal.throwIfAborted()
+  const url = location.href
+  const viewport = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio,
+  }
+  const theme = pageTheme()
+  const omittedParts: Capture["omittedParts"] = []
+
+  await untilQuiet(deps.idleSinceInput, signal)
+  let screenshot: Screenshot | undefined
+  if (part.isConnected) {
+    const shot = await capturePart(part, signal)
+    signal.throwIfAborted()
+    if ("omitted" in shot) omittedParts.push("screenshot")
+    else if (part.isConnected) {
+      try {
+        screenshot = await deps.uploadScreenshot(shot.png)
+      } catch {
+        if (signal.aborted) throw signal.reason
+        omittedParts.push("screenshot")
+      }
+    }
+  }
+
+  signal.throwIfAborted()
+  const stale = !part.isConnected
+  return {
+    completeness: stale ? "stale" : omittedParts.length > 0 ? "partial" : "complete",
+    omittedParts,
+    url,
+    viewport,
+    theme,
+    ...(screenshot !== undefined && !stale ? { screenshot } : {}),
   }
 }
