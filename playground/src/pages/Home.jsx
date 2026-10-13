@@ -71,7 +71,7 @@ export default function Home() {
           {FEATURES.map((feature) => (
             <li
               key={feature.title}
-              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+              className="rounded-2xl border border-slate-200 bg-white p-6 italic shadow-sm transition-shadow hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
             >
               <span className="grid size-10 place-items-center rounded-lg bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300">
                 <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

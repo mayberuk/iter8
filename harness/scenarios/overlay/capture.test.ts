@@ -278,3 +278,77 @@ describe("a capture rooted at an element with a margin", () => {
     TEST_MS,
   )
 })
+
+const MAX_SHOT_BYTES = 2 * 1024 * 1024
+
+async function addNoise(page: Page, width: number, height: number) {
+  await addPage(
+    page,
+    `<canvas id="noise" width="${width}" height="${height}" style="display:block"></canvas>`,
+  )
+  await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>("#noise")
+    const pen = canvas?.getContext("2d")
+    if (!canvas || !pen) throw new Error("no noise canvas")
+    const image = pen.createImageData(canvas.width, canvas.height)
+    for (let i = 0; i < image.data.length; i += 65_536) {
+      crypto.getRandomValues(image.data.subarray(i, Math.min(i + 65_536, image.data.length)))
+    }
+    for (let i = 3; i < image.data.length; i += 4) image.data[i] = 255
+    pen.putImageData(image, 0, 0)
+  })
+}
+
+describe("a capture whose full-resolution PNG is over 2 MiB", () => {
+  test(
+    "is kept at a lower resolution by the screenshot tool instead of being refused",
+    async () => {
+      const o = await open()
+      await addNoise(o.page, 1180, 640)
+      const region = { ...(await boxOf(o.page.locator("#noise"))), width: 1180, height: 640 }
+
+      await o.page.keyboard.press("s")
+      await drag(o, region)
+      const dialog = o.overlay.getByRole("dialog", { name: "Mark up screenshot" })
+      const image = dialog.locator("img")
+      await image.waitFor({ timeout: 30_000 })
+      expect(await dialog.locator(".mk-heavy").count()).toBe(0)
+
+      const natural = await image.evaluate((img: HTMLImageElement) => [
+        img.naturalWidth,
+        img.naturalHeight,
+      ])
+      expect(natural[0]).toBeLessThan(region.width)
+      const shown = await image.boundingBox()
+      expect((shown?.width ?? 0) / (shown?.height ?? 1)).toBeCloseTo(
+        region.width / region.height,
+        1,
+      )
+    },
+    TEST_MS,
+  )
+
+  test(
+    "is attached to a region note at a lower resolution, under 2 MiB",
+    async () => {
+      const o = await open()
+      await addNoise(o.page, 1180, 640)
+      const region = { ...(await boxOf(o.page.locator("#noise"))), width: 1180, height: 640 }
+
+      await drawRegion(o, region)
+      await thumbnail(o).waitFor({ timeout: 30_000 })
+      await saveNote(o, "Noisy area")
+      await until(
+        "the screenshot on the draft",
+        () => o.mock.draft()[0]?.capture?.screenshot !== undefined,
+        30_000,
+      )
+
+      expect(o.mock.draft()[0]?.capture?.omittedParts).toEqual([])
+      const png = await uploadedPng(o)
+      expect(png.length).toBeLessThanOrEqual(MAX_SHOT_BYTES)
+      expect(png.length).toBeGreaterThan(MAX_SHOT_BYTES / 8)
+    },
+    TEST_MS,
+  )
+})

@@ -62,10 +62,6 @@ type View =
   | { status: "ready"; url: string; width: number; height: number; background: string }
   | { status: "omitted"; region: Box; message: string }
 
-function captureScale(): number {
-  return Math.min(window.devicePixelRatio || 1, 2)
-}
-
 function useEntered(): boolean {
   const [entered, setEntered] = useState(false)
   useEffect(() => {
@@ -136,18 +132,17 @@ async function flatten(
   held: Pick<Held, "colors" | "background">,
   shapes: readonly Shape[],
 ): Promise<Blob> {
-  const scale = captureScale()
   const bitmap = await createImageBitmap(png)
   const canvas = document.createElement("canvas")
-  canvas.width = Math.max(1, Math.round(region.width * scale))
-  canvas.height = Math.max(1, Math.round(region.height * scale))
+  canvas.width = bitmap.width
+  canvas.height = bitmap.height
   const pen = canvas.getContext("2d")
   if (pen === null) throw new Error("no 2d canvas")
   pen.fillStyle = held.background
   pen.fillRect(0, 0, canvas.width, canvas.height)
   pen.drawImage(bitmap, 0, 0)
   bitmap.close()
-  pen.scale(scale, scale)
+  pen.scale(canvas.width / region.width, canvas.height / region.height)
   for (const shape of shapes) drawShape(pen, shape, held.colors)
   const flat = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
   if (flat === null) throw new Error("encode failed")
@@ -571,8 +566,8 @@ function MarkupDialog({ view }: { view: Signal<View> }): JSX.Element | null {
                 src={current.url}
                 alt=""
                 style={{
-                  width: `${(current.width / captureScale()) * fit}px`,
-                  height: `${(current.height / captureScale()) * fit}px`,
+                  width: `${region.width * fit}px`,
+                  height: `${region.height * fit}px`,
                 }}
               />
             ) : (
