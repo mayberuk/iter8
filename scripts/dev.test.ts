@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test"
-import { startWhenReady } from "./dev"
+import { afterServiceExit, startWhenReady } from "./dev"
+
+test("a service that drains itself after running a while is restarted", () => {
+  expect(afterServiceExit(0, 600_000)).toBe("restart")
+})
+
+test("a service that exits cleanly at once, or fails, ends dev", () => {
+  expect(afterServiceExit(0, 500)).toBe("fail")
+  expect(afterServiceExit(1, 600_000)).toBe("fail")
+  expect(afterServiceExit(null, 600_000)).toBe("fail")
+})
 
 function harness(reports: (string | null)[]) {
   const events: string[] = []
