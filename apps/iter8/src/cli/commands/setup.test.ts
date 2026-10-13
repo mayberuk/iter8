@@ -58,6 +58,7 @@ async function fixture(
     pid: process.pid,
     ancestry: () => [],
     processStart: () => null,
+    readStdin: async () => "",
     makeTempDir: () => mkdtemp(join(tmpdir(), "i8-setup-tmp-")),
     version: VERSION,
   }

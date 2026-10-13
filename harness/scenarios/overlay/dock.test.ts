@@ -1375,6 +1375,7 @@ describe("the session status ring", () => {
   const RING_STATES = [
     ["live", LIVE],
     ["busy", { ...LIVE, state: { status: "busy" } }],
+    ["background", { ...LIVE, state: { status: "background", agents: 2, tasks: 1 } }],
     ["checking", { ...LIVE, state: { status: "unknown" } }],
     ["gone", GONE],
     ["unattached", null],
@@ -1437,6 +1438,124 @@ describe("the session status ring", () => {
     expect(ready.arc).toBe(await tokenColor(live.page, "--keep"))
     expect(ready.moving.flat()).toEqual(["ring-breathe"])
   }, 30_000)
+
+  describe("background work", () => {
+    const working = (agents: number, tasks: number) =>
+      ({ ...LIVE, state: { status: "background", agents, tasks } }) as const
+
+    test.each([
+      [1, 0, "1 agent running"],
+      [2, 0, "2 agents running"],
+      [0, 1, "1 background task running"],
+      [0, 2, "2 background tasks running"],
+      [2, 1, "2 agents and 1 task running"],
+      [1, 3, "1 agent and 3 tasks running"],
+    ])(
+      "%p agents and %p tasks read %p in the dock, its label and its tooltip text",
+      async (agents, tasks, words) => {
+        const o = await open({ pairing: working(agents, tasks) })
+        expect(await dockClass(o.overlay)).toContain("s-background")
+        const grip = dock(o.overlay).locator(".idn")
+        expect(await grip.locator(".stword .w").innerText()).toBe(words)
+        expect(await grip.getAttribute("aria-label")).toContain(words)
+        const style = await grip.locator(".stword").evaluate((el) => {
+          const { textTransform, letterSpacing, fontFamily } = getComputedStyle(el)
+          return { textTransform, letterSpacing, fontFamily }
+        })
+        expect(style.textTransform).toBe("none")
+        expect(style.letterSpacing).toBe("normal")
+        expect(style.fontFamily).not.toContain("JetBrains")
+        expect(await grip.locator(".stword svg").count()).toBe(0)
+      },
+      30_000,
+    )
+
+    test("the ring is one slow amber arc that orbits and breathes on the compositor, against busy's two quick ones", async () => {
+      const probe = (o: Awaited<ReturnType<typeof open>>) =>
+        o.overlay.locator(".dock .status-ring").evaluate((ring) => {
+          const compositor = ["transform", "translate", "scale", "rotate", "opacity"]
+          const animated = Array.from(ring.querySelectorAll("circle"), (circle) => ({
+            cls: circle.getAttribute("class"),
+            animations: circle.getAnimations().map((a) => {
+              const effect = a.effect as KeyframeEffect
+              const properties = new Set(
+                effect
+                  .getKeyframes()
+                  .flatMap((frame) => Object.keys(frame))
+                  .filter(
+                    (key) => !["offset", "computedOffset", "easing", "composite"].includes(key),
+                  ),
+              )
+              return {
+                name: (a as CSSAnimation).animationName,
+                seconds: Number(effect.getTiming().duration) / 1000,
+                offenders: [...properties].filter((key) => !compositor.includes(key)),
+              }
+            }),
+          })).filter((circle) => circle.animations.length > 0)
+          return {
+            animated,
+            track: getComputedStyle(ring.querySelector(".rt") as Element).opacity,
+            arc: getComputedStyle(ring.querySelector(".ra") as Element).stroke,
+            dash: getComputedStyle(ring.querySelector(".ra") as Element).strokeDasharray,
+          }
+        })
+      const o = await open({ pairing: working(2, 1) })
+      const seen = await probe(o)
+      expect(seen.animated.map((circle) => circle.cls)).toEqual(["ra"])
+      const arcs = seen.animated[0]?.animations ?? []
+      expect(arcs.map((a) => a.name).sort()).toEqual(["ring-breathe", "ring-orbit"])
+      expect(arcs.flatMap((a) => a.offenders)).toEqual([])
+      expect(Math.min(...arcs.map((a) => a.seconds))).toBeGreaterThanOrEqual(3)
+      expect(seen.track).toBe("1")
+      expect(seen.dash).not.toBe("none")
+      expect(seen.arc).toBe(await tokenColor(o.page, "--change"))
+      await o.close()
+      opened = null
+
+      const busy = await probe(await open({ pairing: { ...LIVE, state: { status: "busy" } } }))
+      const busyOrbit = busy.animated.flatMap((circle) => circle.animations)
+      expect(busy.animated).toHaveLength(2)
+      expect(Math.max(...busyOrbit.map((a) => a.seconds))).toBeLessThan(3)
+    }, 30_000)
+
+    test("with reduced motion the ring stands still", async () => {
+      const o = await open({ pairing: working(1, 0) })
+      await o.page.emulateMedia({ reducedMotion: "reduce" })
+      const ring = o.overlay.locator(".dock .status-ring.ring-background")
+      await until(
+        "the ring to stop",
+        async () => (await ring.evaluate((el) => el.getAnimations({ subtree: true }).length)) === 0,
+      )
+      expect(
+        await ring.locator("circle.ra").evaluate((el) => getComputedStyle(el).stroke),
+      ).not.toBe("none")
+    }, 30_000)
+
+    test("the dock goes busy, then to background work, then idle as the pairing changes", async () => {
+      const o = await open({ pairing: LIVE, liveSessions: [OTHER] })
+      await socketOpen(o)
+      const grip = dock(o.overlay).locator(".idn")
+      const set = async (next: Pairing, stateClass: string, word: string | null) => {
+        o.mock.setPairing(next)
+        o.mock.push({ type: "pairing", pairing: next })
+        await until(`the ${stateClass} dock`, async () =>
+          ((await dockClass(o.overlay)) ?? "").includes(stateClass),
+        )
+        expect(await grip.locator(".stword .w").allInnerTexts()).toEqual(word ? [word] : [])
+      }
+      await set({ ...LIVE, state: { status: "busy" } }, "s-busy", "busy")
+      await set(working(1, 0), "s-background", "1 agent running")
+      await set(working(3, 0), "s-background", "3 agents running")
+      await set(LIVE, "s-live", null)
+    }, 30_000)
+
+    test("Send stays Send and wakes the session, because its turn has ended", async () => {
+      const o = await open({ pairing: working(2, 0), pageState: SEEDED })
+      expect(await sendButton(o.overlay).innerText()).toBe("Send")
+      expect(await sendButton(o.overlay).isEnabled()).toBe(true)
+    }, 30_000)
+  })
 
   test("Claude's mark sits bare inside the ring, with no tile behind it", async () => {
     const o = await open({ pairing: LIVE })

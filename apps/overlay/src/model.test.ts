@@ -44,6 +44,7 @@ import roundMessageJson from "../../../packages/protocol/fixtures/ServerMessage.
 import upstreamJson from "../../../packages/protocol/fixtures/ServerMessage.upstream-failure.json"
 import {
   applyRound,
+  backgroundWords,
   buildSendRequest,
   canSendNow,
   createOverlayModel,
@@ -254,10 +255,31 @@ describe("dockState", () => {
     expect(dockState(gonePairing, null, T0)).toBe("gone")
   })
 
+  test("background work maps to background, and delivered still shows over it", () => {
+    const working = { ...pairing, state: { status: "background", agents: 1, tasks: 0 } } as const
+    expect(dockState(working, null, T0)).toBe("background")
+    expect(dockState(working, T0 + 2500, T0)).toBe("delivered")
+  })
+
   test("delivered holds only inside its window, and never over a gone session", () => {
     expect(dockState(pairing, T0 + 2500, T0)).toBe("delivered")
     expect(dockState(pairing, T0 + 2500, T0 + 2500)).toBe("live")
     expect(dockState(gonePairing, T0 + 2500, T0)).toBe("gone")
+  })
+})
+
+describe("backgroundWords", () => {
+  test.each([
+    [1, 0, "1 agent running"],
+    [2, 0, "2 agents running"],
+    [0, 1, "1 background task running"],
+    [0, 2, "2 background tasks running"],
+    [1, 1, "1 agent and 1 task running"],
+    [2, 1, "2 agents and 1 task running"],
+    [1, 2, "1 agent and 2 tasks running"],
+    [12, 30, "12 agents and 30 tasks running"],
+  ])("%p agents and %p tasks read %p", (agents, tasks, words) => {
+    expect(backgroundWords({ agents, tasks })).toBe(words)
   })
 })
 

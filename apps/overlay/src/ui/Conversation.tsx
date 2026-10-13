@@ -12,7 +12,7 @@ import { type Signal, signal } from "@preact/signals"
 import { Fragment, type RefObject } from "preact"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 import { authorIdentity, groupRuns, type PendingMessage, type PostFailure } from "../conversation"
-import { roundDisplayState } from "../model"
+import { backgroundWords, roundDisplayState } from "../model"
 import { useOverlay, useSheet } from "./context"
 import conversationCss from "./conversation.css" with { type: "text" }
 import { SessionRows } from "./Dock"
@@ -455,6 +455,15 @@ function Empty({ name }: { name: string }) {
   )
 }
 
+function BackgroundLine({ agent, words }: { agent: string; words: string }) {
+  return (
+    <div class="cv-bg" aria-hidden="true">
+      <StatusRing state="background" agent={agent} size={16} />
+      <span>{words}</span>
+    </div>
+  )
+}
+
 function Working({ agent }: { agent: string }) {
   return (
     <div class="cv-work" aria-hidden="true">
@@ -481,6 +490,8 @@ function MessageList() {
   const name = model.name.value
   const pairing = model.pairing.value
   const busyPairing = pairing?.state.status === "busy" ? pairing : null
+  const backgroundWork =
+    pairing?.state.status === "background" && load.status === "ready" ? pairing : null
   const list = useRef<HTMLDivElement>(null)
   const body = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -693,10 +704,20 @@ function MessageList() {
             )
           })}
           {forming ? <Working agent={busyPairing.agent} /> : null}
+          {backgroundWork?.state.status === "background" ? (
+            <BackgroundLine
+              agent={backgroundWork.agent}
+              words={backgroundWords(backgroundWork.state)}
+            />
+          ) : null}
         </div>
       </div>
       <div class="cv-sr" role="status">
-        {busyPairing ? `${name} is working` : ""}
+        {busyPairing
+          ? `${name} is working`
+          : backgroundWork?.state.status === "background"
+            ? `${name}: ${backgroundWords(backgroundWork.state)}`
+            : ""}
       </div>
       <JumpPill view={view} list={list} />
     </div>

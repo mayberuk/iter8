@@ -7,9 +7,12 @@ import { type CliDeps, commandArgs, runCli } from "./cli/client"
 import { cliCommands } from "./cli/commands"
 import { helpArgs } from "./cli/commands/help"
 import { ensureService } from "./cli/ensure"
+import { readBounded } from "./cli/stdin"
 import { resolvePaths } from "./home"
 import { processAncestry, readProcessStart } from "./pairing/process-identity"
 import { runService, VERSION } from "./service/lifecycle"
+
+const STDIN_DEADLINE_MS = 1_000
 
 const argv = process.argv.slice(2)
 
@@ -30,6 +33,8 @@ if (argv.length === 1 && argv[0] === "--version") {
     pid: process.pid,
     ancestry: () => processAncestry(process.pid),
     processStart: readProcessStart,
+    readStdin: async () =>
+      process.stdin.isTTY ? "" : readBounded(Bun.stdin.stream(), STDIN_DEADLINE_MS),
     makeTempDir: () => mkdtemp(join(tmpdir(), `${CLI_NAME}-show-`)),
     version: VERSION,
   }

@@ -1084,6 +1084,18 @@ kbd {
   stroke-dasharray: 14 84;
   animation-duration: 1.7s;
 }
+.ring-background .rt {
+  opacity: 1;
+}
+.ring-background .ra {
+  stroke: var(--change);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-dasharray: 30 68;
+  animation:
+    ring-orbit 5s linear infinite,
+    ring-breathe 5s ease-in-out infinite;
+}
 .ring-delivered .ra {
   stroke: var(--cobalt);
   animation: ring-land 0.5s var(--spring) both;

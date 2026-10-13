@@ -41,6 +41,7 @@ const deps: CliDeps = {
   pid: process.pid,
   ancestry: () => [],
   processStart: () => null,
+  readStdin: async () => "",
   makeTempDir: () => mkdtemp(join(tmpdir(), "i8-connect-cli-")),
   version: pkg.version,
 }

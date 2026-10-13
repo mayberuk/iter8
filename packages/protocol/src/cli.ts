@@ -290,7 +290,8 @@ export const CLI_SURFACE = {
     owner: HOOK_OWNER,
   },
   "hook stop": {
-    summary: "Mark the process idle",
+    summary:
+      "Mark the process idle, or working in the background when the hook JSON on stdin lists running tasks",
     positionals: [],
     flags: [pidFlag],
     output: null,

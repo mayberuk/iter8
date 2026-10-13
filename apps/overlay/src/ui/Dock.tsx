@@ -12,6 +12,7 @@ import { useComputed } from "@preact/signals"
 import type { JSX } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import {
+  backgroundWords,
   buildSendRequest,
   type ConnectionState,
   type DockState,
@@ -475,7 +476,12 @@ export function Dock() {
   const count = model.draftOrder.value.length
   const name = model.name.value
   const where = model.where.value
-  const word = pairing?.state.status === "gone" ? pairing.state.reason : (STATE_WORD[state] ?? null)
+  const word =
+    pairing?.state.status === "gone"
+      ? pairing.state.reason
+      : pairing?.state.status === "background" && state === "background"
+        ? backgroundWords(pairing.state)
+        : (STATE_WORD[state] ?? null)
   const tip = sendTip(blocked, pairing?.state.status === "busy", pairing?.listener, name)
 
   const previousCount = useRef(count)

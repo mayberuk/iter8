@@ -10,6 +10,7 @@ import type { JSX } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { captureCrop } from "../enrich/crop"
 import {
+  backgroundWords,
   canSendNow,
   type DisplayNoteState,
   displayNoteState,
@@ -355,6 +356,12 @@ function Footer({ sending }: { sending: Sending }) {
         <div class="busyline">
           <StatusRing state="busy" agent={pairing?.agent} size={16} />
           {model.name.value} is mid-turn. This round delivers when its turn ends.
+        </div>
+      ) : null}
+      {model.dock.value === "background" && pairing?.state.status === "background" ? (
+        <div class="busyline">
+          <StatusRing state="background" agent={pairing.agent} size={16} />
+          {backgroundWords(pairing.state)}
         </div>
       ) : null}
       {nowAvailable ? (

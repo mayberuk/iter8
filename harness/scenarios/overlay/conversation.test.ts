@@ -1387,6 +1387,75 @@ describe("conversation: what the panel shows", () => {
     expect(await work.count()).toBe(0)
   }, 30_000)
 
+  describe("background work", () => {
+    const working = (agents: number, tasks: number) =>
+      ({ ...LIVE, state: { status: "background", agents, tasks } }) as const
+
+    test("a quiet line with the small ring and the plain words ends the list, with no forming-draft bars", async () => {
+      const o = await open({ pairing: working(2, 1), messages: [agentMessage(1)] })
+      const panel = await openConversation(o)
+      await untilCount(panel, 1)
+      const line = log(panel).locator(".cv-bg")
+      await until("the background line", () => line.isVisible())
+      expect(await line.innerText()).toBe("2 agents and 1 task running")
+      expect(await line.locator(".status-ring.ring-background").count()).toBe(1)
+      expect(await line.evaluate((el) => el === el.parentElement?.lastElementChild)).toBe(true)
+      expect(await log(panel).locator(".cv-work, .cv-bars").count()).toBe(0)
+      expect(await articles(panel).count()).toBe(1)
+      const style = await line.evaluate((el) => {
+        const { textTransform, letterSpacing, fontFamily } = getComputedStyle(el)
+        return { textTransform, letterSpacing, fontFamily }
+      })
+      expect(style.textTransform).toBe("none")
+      expect(style.letterSpacing).toBe("normal")
+      expect(style.fontFamily).not.toContain("JetBrains")
+      const status = panel
+        .getByRole("status")
+        .filter({ hasText: `${NAME}: 2 agents and 1 task running` })
+      expect(await status.count()).toBe(1)
+      expect(await panel.getByRole("status").filter({ hasText: "is working" }).count()).toBe(0)
+    }, 30_000)
+
+    test("the line follows the pairing: busy replaces it with the draft bars, and idle removes it", async () => {
+      const o = await open({ pairing: working(1, 0), messages: [agentMessage(1)] })
+      const panel = await openConversation(o)
+      await untilCount(panel, 1)
+      const line = log(panel).locator(".cv-bg")
+      const work = log(panel).locator(".cv-work")
+      await until("the background line", () => line.isVisible())
+      expect(await line.innerText()).toBe("1 agent running")
+      const set = (pairing: typeof LIVE, shown: Locator, label: string) =>
+        waitFor(
+          label,
+          async () => {
+            o.mock.push({ type: "pairing", pairing })
+            return (await shown.count()) === 1 ? true : null
+          },
+          { timeoutMs: 5000, everyMs: 150 },
+        )
+      await set({ ...LIVE, state: { status: "busy" } }, work, "the draft placeholder")
+      expect(await line.count()).toBe(0)
+      await set(working(1, 2), line, "the background line again")
+      expect(await line.innerText()).toBe("1 agent and 2 tasks running")
+      await waitFor(
+        "the idle pairing",
+        async () => {
+          o.mock.push({ type: "pairing", pairing: LIVE })
+          return (await line.count()) === 0 ? true : null
+        },
+        { timeoutMs: 5000, everyMs: 150 },
+      )
+      expect(await work.count()).toBe(0)
+    }, 30_000)
+
+    test("an empty conversation still shows the line, and no draft bars", async () => {
+      const o = await open({ pairing: working(1, 0), messages: [] })
+      const panel = await openConversation(o)
+      await until("the background line", () => log(panel).locator(".cv-bg").isVisible())
+      expect(await log(panel).locator(".cv-work").count()).toBe(0)
+    }, 30_000)
+  })
+
   test("the placeholder returns when a session turns busy again, and shows nothing for an idle one", async () => {
     const o = await open({ messages: [agentMessage(1)] })
     const panel = await openConversation(o)

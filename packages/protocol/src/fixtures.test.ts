@@ -50,6 +50,7 @@ const namedVariants: Record<string, unknown> = {
   "ResolvedSourceLead.none.json": { confidence: "none" },
   "ResolvedSourceLead.file-only.json": { confidence: "file-only" },
   "Pairing.gone.json": { state: { status: "gone" } },
+  "Pairing.background.json": { state: { status: "background", agents: 2, tasks: 1 } },
   "Round.orphaned.json": { state: { stage: "orphaned" } },
   "Round.queued.json": { state: { stage: "queued" } },
   "Round.send-now.json": {

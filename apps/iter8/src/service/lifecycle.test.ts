@@ -374,6 +374,76 @@ test("--version prints iter8 and the package.json version", async () => {
   expect(run).toEqual({ exitCode: 0, stdout: `iter8 ${version}\n`, stderr: "" })
 })
 
+async function hookStop(home: Home, pid: number, stdin: { text: string; close: boolean }) {
+  const child = Bun.spawn([process.execPath, MAIN, "hook", "stop", "--pid", String(pid)], {
+    cwd: home.root,
+    env: home.env,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  cleanups.push(async () => {
+    child.kill("SIGKILL")
+    await child.exited
+  })
+  if (stdin.text) child.stdin.write(stdin.text)
+  if (stdin.close) await child.stdin.end()
+  const started = Date.now()
+  const exitCode = await child.exited
+  return { exitCode, stderr: await new Response(child.stderr).text(), ms: Date.now() - started }
+}
+
+test("hook stop reads the background tasks the hook JSON lists from a real stdin pipe", async () => {
+  const home = await makeHome()
+  const session = sleeper(home)
+  const owner = await registerOwner(home, session.pid)
+  const prompt = await cli(home, ["hook", "prompt", "--pid", String(session.pid)])
+  expect(prompt.exitCode, prompt.stderr).toBe(0)
+  const json = JSON.stringify({
+    hook_event_name: "Stop",
+    background_tasks: [
+      { id: "a", type: "subagent", status: "running", description: "review" },
+      { id: "b", type: "shell", status: "running", description: "tail", command: "tail -f log" },
+    ],
+  })
+  const stopped = await hookStop(home, session.pid, { text: json, close: true })
+  expect(stopped.exitCode, stopped.stderr).toBe(0)
+  expect((await serviceStatus(home, owner)).owner?.state).toEqual({
+    status: "background",
+    agents: 1,
+    tasks: 1,
+  })
+  const finished = await hookStop(home, session.pid, {
+    text: JSON.stringify({ background_tasks: [] }),
+    close: true,
+  })
+  expect(finished.exitCode, finished.stderr).toBe(0)
+  expect((await serviceStatus(home, owner)).owner?.state).toEqual({ status: "live" })
+})
+
+test("hook stop with a stdin that never closes still marks the session idle within seconds", async () => {
+  const home = await makeHome()
+  const session = sleeper(home)
+  const owner = await registerOwner(home, session.pid)
+  const prompt = await cli(home, ["hook", "prompt", "--pid", String(session.pid)])
+  expect(prompt.exitCode, prompt.stderr).toBe(0)
+  const stopped = await hookStop(home, session.pid, { text: "", close: false })
+  expect(stopped.exitCode, stopped.stderr).toBe(0)
+  expect(stopped.ms).toBeLessThan(5_000)
+  expect((await serviceStatus(home, owner)).owner?.state).toEqual({ status: "live" })
+})
+
+test("hook stop with malformed JSON on stdin still marks the session idle", async () => {
+  const home = await makeHome()
+  const session = sleeper(home)
+  const owner = await registerOwner(home, session.pid)
+  const prompt = await cli(home, ["hook", "prompt", "--pid", String(session.pid)])
+  expect(prompt.exitCode, prompt.stderr).toBe(0)
+  const stopped = await hookStop(home, session.pid, { text: '{"background_tasks": [', close: true })
+  expect(stopped.exitCode, stopped.stderr).toBe(0)
+  expect((await serviceStatus(home, owner)).owner?.state).toEqual({ status: "live" })
+})
+
 const blockers: Record<string, (home: Home) => Promise<() => Promise<unknown>>> = {
   "a live owner": async (home) => {
     const session = sleeper(home)

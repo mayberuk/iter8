@@ -16,6 +16,7 @@ import {
   runCli,
   textFlag,
 } from "../client"
+import { backgroundWork } from "./stop-input"
 
 export const hook = (deps: CliDeps) => {
   const identity = (value: string | undefined) => {
@@ -88,7 +89,10 @@ export const hook = (deps: CliDeps) => {
         args: commandArgs("hook stop"),
         run: ({ rawArgs }) =>
           runCli(deps, "hook stop", rawArgs, async ({ values }) => {
-            const body = identity(textFlag(values, "pid"))
+            const body = {
+              ...identity(textFlag(values, "pid")),
+              ...backgroundWork(await deps.readStdin().catch(() => "")),
+            }
             const client = await connect(deps, false)
             await request(() => client.hook.stop.$post({ json: body }))
           }),

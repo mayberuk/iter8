@@ -172,6 +172,7 @@
 .s-busy .stword {
   color: var(--busy-t);
 }
+.s-background .stword,
 .s-gone .stword,
 .s-unattached .stword {
   color: var(--mute);

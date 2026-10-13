@@ -147,6 +147,7 @@ async function setup() {
       return response
     },
   })
+  let stdin: () => Promise<string> = async () => ""
   const deps: CliDeps = {
     connect: async (options) => {
       connections.push(options)
@@ -159,8 +160,12 @@ async function setup() {
     pid,
     ancestry: () => [{ pid, startedAt: starts.get(pid) ?? "" }],
     processStart: (pid) => starts.get(pid) ?? null,
+    readStdin: () => stdin(),
     makeTempDir: tempDir,
     version: "0.1.0",
+  }
+  function pipeStdin(read: () => Promise<string>) {
+    stdin = read
   }
   function clear() {
     stdout.length = 0
@@ -240,6 +245,7 @@ async function setup() {
     client,
     app,
     run,
+    pipeStdin,
     failStatus,
     clear,
     start,
@@ -639,6 +645,61 @@ describe("hook commands", () => {
       expect(state.stdout[1]).toContain("2 notes")
     },
   )
+
+  describe("hook stop with the hook JSON on stdin", () => {
+    const stopWith = async (read: () => Promise<string>) => {
+      const state = await setup()
+      const pairing = await state.start()
+      await state.run("hook", ["prompt", "--pid", "9001"])
+      state.clear()
+      state.pipeStdin(read)
+      await state.run("hook", ["stop", "--pid", "9001"])
+      return { state, owner: pairing.owner }
+    }
+    const tasks = (...types: string[]) =>
+      JSON.stringify({
+        hook_event_name: "Stop",
+        stop_hook_active: false,
+        background_tasks: types.map((type, index) => ({
+          id: `task-${index}`,
+          type,
+          status: "running",
+          description: "work",
+        })),
+        session_crons: [],
+      })
+
+    test("two agents and a shell command leave the session in the background with those counts", async () => {
+      const { state, owner } = await stopWith(async () => tasks("subagent", "shell", "teammate"))
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(state.requests[0]?.body).toMatchObject({ pid: 9001, agents: 2, tasks: 1 })
+      expect(state.owners.state(owner)).toEqual({ status: "background", agents: 2, tasks: 1 })
+    })
+
+    test("an empty task list leaves the session live", async () => {
+      const { state, owner } = await stopWith(async () => tasks())
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.owners.state(owner)).toEqual({ status: "live" })
+    })
+
+    test.each([
+      ["no input", async () => ""],
+      ["input that is not JSON", async () => "{not json"],
+      ["JSON of another shape", async () => JSON.stringify({ background_tasks: "none" })],
+      [
+        "a stream that fails",
+        async () => {
+          throw new Error("stdin closed")
+        },
+      ],
+    ])("%s leaves the session live and the hook successful", async (_name, read) => {
+      const { state, owner } = await stopWith(read)
+      expect(state.exits).toEqual([ExitCode.ok])
+      expect(state.stderr).toEqual([])
+      expect(state.owners.state(owner)).toEqual({ status: "live" })
+    })
+  })
 
   test("prompt, stop and end update the registered owner without extra output", async () => {
     const state = await setup()
