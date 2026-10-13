@@ -1,6 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs"
 import { PROTOCOL_VERSION, ServiceStatus } from "@iter8/protocol"
 import type { Iter8Paths } from "../home"
+import { compareVersions } from "../install/releases"
 import { BUILD, liveLockHolder, VERSION } from "../service/lifecycle"
 import { LATEST_MIGRATION_VERSION } from "../store/db"
 import { type ControlClient, controlClientFor } from "./client"
@@ -16,7 +17,7 @@ export type EnsureDeps = {
   command: string[]
 }
 
-type Probe = "unreachable" | "current" | "pending" | "mismatched"
+type Probe = "unreachable" | "current" | "pending" | "mismatched" | "newer-incompatible"
 
 async function probe(client: ControlClient): Promise<Probe> {
   let body: unknown
@@ -27,16 +28,20 @@ async function probe(client: ControlClient): Promise<Probe> {
     return "unreachable"
   }
   const status = ServiceStatus.safeParse(body)
-  if (
-    !status.success ||
-    status.data.protocolVersion !== PROTOCOL_VERSION ||
-    status.data.schemaVersion !== LATEST_MIGRATION_VERSION ||
-    status.data.version !== VERSION ||
-    status.data.build !== BUILD
-  ) {
-    return "mismatched"
-  }
-  return status.data.state === "ready" ? "current" : "pending"
+  if (!status.success) return "mismatched"
+  return classify(status.data)
+}
+
+/**
+ * Never drains a newer service: sessions on older plugins would replace it on every prompt.
+ */
+export function classify(status: ServiceStatus): Probe {
+  const compatible =
+    status.protocolVersion === PROTOCOL_VERSION && status.schemaVersion === LATEST_MIGRATION_VERSION
+  const order = compareVersions(status.version, VERSION)
+  if (order > 0 && !compatible) return "newer-incompatible"
+  if (order < 0 || (order === 0 && (!compatible || status.build !== BUILD))) return "mismatched"
+  return status.state === "ready" ? "current" : "pending"
 }
 
 async function drainOld(client: ControlClient, paths: Iter8Paths): Promise<void> {
@@ -71,8 +76,9 @@ function spawnService(paths: Iter8Paths, deps: EnsureDeps): void {
 }
 
 /**
- * Returns a client for a ready service of this exact build, draining one of another version and
- * starting this executable when needed. Null only when none is reachable and `start` is false.
+ * Returns a client for a ready service of this exact build or a newer compatible one, draining an
+ * older or differently built one and starting this executable when needed. Without `start`, any
+ * reachable service is returned as is, and null means none is reachable.
  */
 export async function ensureService(
   paths: Iter8Paths,
@@ -87,7 +93,10 @@ export async function ensureService(
     if (state === "current") return client
     if (!options.start) {
       if (state === "unreachable") return null
-      if (state === "mismatched") return client
+      if (state === "mismatched" || state === "newer-incompatible") return client
+    }
+    if (state === "newer-incompatible") {
+      throw new Error("A newer, incompatible iter8 is running; restart this session to use it.")
     }
     if (state === "mismatched") {
       await drainOld(client, paths)

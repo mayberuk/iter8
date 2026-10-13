@@ -18,12 +18,14 @@ import {
   TOKEN_HEADER,
 } from "@iter8/protocol"
 import type { Subprocess } from "bun"
+import fc from "fast-check"
 import type { z } from "zod"
 import { resolvePaths } from "../home"
+import { compareVersions } from "../install/releases"
 import { readProcessStart } from "../pairing/process-identity"
 import { BUILD, liveLockHolder, VERSION } from "../service/lifecycle"
 import { LATEST_MIGRATION_VERSION } from "../store/db"
-import { ensureService } from "./ensure"
+import { classify, ensureService } from "./ensure"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const MAIN = join(REPO, "apps/iter8/src/main.ts")
@@ -333,6 +335,7 @@ const server = Bun.serve({
       10_000,
     )
     expect(seenOld).toMatchObject({ [field]: differing, pid: fake.pid })
+    if (field === "version") expect(compareVersions(differing as string, VERSION)).toBeLessThan(0)
 
     const reopened = await cliJson(home, ["open", site], OpenResult)
     const fakeRun = await finished(fake)
@@ -385,7 +388,7 @@ test("status starts no service when none is running", async () => {
   expect(existsSync(join(home.home, "service.lock"))).toBe(false)
 }, 60_000)
 
-function currentStatus(home: Home) {
+function currentStatus(home: Pick<Home, "home" | "ports">) {
   return ServiceStatus.parse({
     state: "ready",
     version: VERSION,
@@ -428,7 +431,7 @@ Bun.serve({
       ${options.onDrain}
       return new Response(null, { status: 202 })
     }
-    return Response.json({ rounds: [] })
+    return Response.json({ rounds: [], pointers: [] })
   },
 })
 `,
@@ -538,3 +541,153 @@ test("a service that never becomes ready fails the command after 30 s, naming th
     stdio: ["ignore", expect.any(Number), expect.any(Number)],
   })
 }, 60_000)
+
+const NEWER = "99.0.0"
+
+async function startFake(home: Home, name: string, status: ServiceStatus, onDrain = "") {
+  await mkdir(home.home, { recursive: true })
+  const entry = await writeFakeService(home, name, { status, bindAfterMs: 0, onDrain })
+  const fake = spawnChild([process.execPath, entry], home.env, home.root)
+  await until(
+    "the fake service to answer status",
+    async () => {
+      const run = await cli(home, ["status", "--json"])
+      return run.exitCode === 0
+    },
+    10_000,
+  )
+  return fake
+}
+
+function drainMarker(home: Home) {
+  const marker = join(home.root, "drain-requested")
+  return { marker, onDrain: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "")` }
+}
+
+test("a newer service with the same protocol and schema is used, not drained", async () => {
+  const home = await makeHome()
+  const { marker, onDrain } = drainMarker(home)
+  const fake = await startFake(
+    home,
+    "newer-service.ts",
+    { ...currentStatus(home), version: NEWER },
+    onDrain,
+  )
+
+  const run = await cli(home, ["rounds", "--json"])
+  expect(run.exitCode, run.stderr).toBe(0)
+  expect(RoundsResult.parse(JSON.parse(run.stdout))).toEqual({ rounds: [] })
+  const status = await cliJson(home, ["status"], ServiceStatus)
+  expect(status).toMatchObject({ version: NEWER, pid: fake.pid })
+  expect(fake.exitCode).toBeNull()
+  expect(liveLockHolder(join(home.home, "service.lock"))?.pid).toBe(fake.pid)
+  expect(existsSync(marker)).toBe(false)
+  expect(existsSync(join(home.home, "service.log"))).toBe(false)
+}, 60_000)
+
+for (const field of ["protocolVersion", "schemaVersion"] as const) {
+  test(`a newer service differing in ${field} is reported by status, not drained, and other commands ask for a restart`, async () => {
+    const home = await makeHome()
+    const { marker, onDrain } = drainMarker(home)
+    const current = currentStatus(home)
+    const fake = await startFake(
+      home,
+      "newer-incompatible-service.ts",
+      { ...current, version: NEWER, [field]: current[field] + 1 },
+      onDrain,
+    )
+
+    const run = await cli(home, ["rounds", "--json"])
+    expect(run.exitCode).toBe(5)
+    expect(run.stdout).toBe("")
+    expect(run.stderr).toContain(
+      "A newer, incompatible iter8 is running; restart this session to use it.",
+    )
+    const status = await cliJson(home, ["status"], ServiceStatus)
+    expect(status).toMatchObject({ version: NEWER, pid: fake.pid })
+    expect(fake.exitCode).toBeNull()
+    expect(liveLockHolder(join(home.home, "service.lock"))?.pid).toBe(fake.pid)
+    expect(existsSync(marker)).toBe(false)
+    expect(existsSync(join(home.home, "service.log"))).toBe(false)
+  }, 60_000)
+}
+
+const PID = String(process.pid)
+const NON_STARTING_HOOKS = {
+  prompt: ["hook", "prompt", "--pid", PID],
+  stop: ["hook", "stop", "--pid", PID],
+  end: ["hook", "end", "--pid", PID, "--label", "session", "--reason", "other"],
+}
+
+for (const [name, args] of Object.entries(NON_STARTING_HOOKS)) {
+  test(`hook ${name} with no service starts none and fails fast`, async () => {
+    const home = await makeHome()
+    const began = Date.now()
+    const run = await cli(home, args)
+    expect(Date.now() - began).toBeLessThan(4_000)
+    expect(run.exitCode).toBe(5)
+    expect(existsSync(join(home.home, "service.lock"))).toBe(false)
+    expect(existsSync(join(home.home, "service.log"))).toBe(false)
+    expect(servicesIn(home.home)).toEqual([])
+  }, 60_000)
+
+  test(`hook ${name} with an older service running does not drain it`, async () => {
+    const home = await makeHome()
+    const { marker, onDrain } = drainMarker(home)
+    const fake = await startFake(
+      home,
+      "older-service.ts",
+      { ...currentStatus(home), version: "0.0.0-old" },
+      onDrain,
+    )
+
+    const run = await cli(home, args)
+    expect(run.exitCode, run.stderr).toBe(0)
+    expect(fake.exitCode).toBeNull()
+    expect(liveLockHolder(join(home.home, "service.lock"))?.pid).toBe(fake.pid)
+    expect(existsSync(marker)).toBe(false)
+    expect(existsSync(join(home.home, "service.log"))).toBe(false)
+  }, 60_000)
+}
+
+const versionPart = fc.nat({ max: 9 })
+const versionArbitrary = fc
+  .tuple(versionPart, versionPart, versionPart)
+  .map((parts) => parts.join("."))
+
+test("a service newer than this binary is never classified for draining", () => {
+  fc.assert(
+    fc.property(
+      versionArbitrary,
+      fc.boolean(),
+      fc.boolean(),
+      fc.constantFrom("ready", "starting"),
+      fc.constantFrom("compiled", "source"),
+      (version, sameProtocol, sameSchema, state, build) => {
+        fc.pre(compareVersions(version, VERSION) > 0)
+        const current = currentStatus({ home: "/x", ports: [1, 2] })
+        const verdict = classify({
+          ...current,
+          version,
+          build,
+          state,
+          protocolVersion: current.protocolVersion + (sameProtocol ? 0 : 1),
+          schemaVersion: current.schemaVersion + (sameSchema ? 0 : 1),
+        })
+        if (sameProtocol && sameSchema)
+          expect(verdict).toBe(state === "ready" ? "current" : "pending")
+        else expect(verdict).toBe("newer-incompatible")
+      },
+    ),
+  )
+})
+
+test("a service older than this binary is always classified for draining", () => {
+  fc.assert(
+    fc.property(versionArbitrary, (version) => {
+      fc.pre(compareVersions(version, VERSION) < 0)
+      const current = currentStatus({ home: "/x", ports: [1, 2] })
+      expect(classify({ ...current, version })).toBe("mismatched")
+    }),
+  )
+})

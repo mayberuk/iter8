@@ -63,7 +63,7 @@ export const hook = (deps: CliDeps) => {
         run: ({ rawArgs }) =>
           runCli(deps, "hook prompt", rawArgs, async ({ values }) => {
             const body = identity(textFlag(values, "pid"))
-            const client = await connect(deps)
+            const client = await connect(deps, false)
             const result = await (
               await request(() => client.hook.prompt.$post({ json: body }))
             ).json()
@@ -89,7 +89,7 @@ export const hook = (deps: CliDeps) => {
         run: ({ rawArgs }) =>
           runCli(deps, "hook stop", rawArgs, async ({ values }) => {
             const body = identity(textFlag(values, "pid"))
-            const client = await connect(deps)
+            const client = await connect(deps, false)
             await request(() => client.hook.stop.$post({ json: body }))
           }),
       }),
@@ -136,7 +136,7 @@ export const hook = (deps: CliDeps) => {
               label: textFlag(values, "label") ?? "",
               reason: HookEndReason.parse(textFlag(values, "reason")),
             }
-            const client = await connect(deps)
+            const client = await connect(deps, false)
             await request(() => client.hook.end.$post({ json: body }))
           }),
       }),
