@@ -37,6 +37,8 @@ const ICON_CATALOG = {
   history: true,
   collapse: true,
   more: true,
+  dockFloat: true,
+  dockBottom: true,
   sun: true,
   moon: true,
   auto: true,
@@ -55,6 +57,8 @@ const ICON_CATALOG = {
 const ICON_NAMES = Object.keys(ICON_CATALOG) as IconName[]
 
 const ICON_FIXTURE: Record<IconName, { viewBox?: string; inner: string }> = fixture.icons
+
+const STROKED: IconName[] = ["pick", "collapse", "dockFloat", "dockBottom"]
 
 const STATUS_KEYS = ["queued", "delivered", "working", "done", "answered", "failed"] as const
 const RING_KEYS = ["live", "busy", "gone", "checking", "delivered", "unattached"] as const
@@ -277,7 +281,7 @@ describe("the glyph set", () => {
     )
   }, 30_000)
 
-  test("pick alone is stroked; every other icon is filled with currentColor", async () => {
+  test("pick, collapse and the two dock edges are stroked; every other icon is filled with currentColor", async () => {
     const { page } = await openUi()
     await show(
       page,
@@ -289,7 +293,7 @@ describe("the glyph set", () => {
     )
     icons.forEach((icon, index) => {
       const name = ICON_NAMES[index] as IconName
-      if (name === "pick") {
+      if (STROKED.includes(name)) {
         expect({ name, fill: icon.ink.fill, stroke: icon.ink.stroke }).toEqual({
           name,
           fill: "none",

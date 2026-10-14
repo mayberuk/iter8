@@ -6,6 +6,8 @@ import { Round } from "./round"
 export const OverlayPrefs = z.object({
   theme: z.enum(["auto", "light", "dark"]),
   dock: z.enum(["tl", "tc", "tr", "ml", "mr", "bl", "bc", "br"]),
+  /** Optional so prefs stored before this field existed still parse; absent means float. */
+  dockEdge: z.enum(["float", "bottom"]).optional(),
   collapsed: z.boolean(),
   pinsVisible: z.boolean(),
   coachDone: z.boolean(),

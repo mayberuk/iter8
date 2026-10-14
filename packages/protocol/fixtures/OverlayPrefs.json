@@ -1,6 +1,7 @@
 {
   "theme": "auto",
   "dock": "br",
+  "dockEdge": "bottom",
   "collapsed": false,
   "pinsVisible": true,
   "coachDone": true

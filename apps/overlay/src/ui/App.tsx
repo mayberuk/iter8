@@ -14,7 +14,9 @@ export function App() {
   const { model } = useOverlay()
   return (
     <div
-      class={model.peek.value ? "root peek" : "root"}
+      class={["root", model.peek.value ? "peek" : "", model.barDocked.value ? "docked" : ""]
+        .filter(Boolean)
+        .join(" ")}
       data-theme={model.prefs.value.theme}
       {...part("overlay")}
     >

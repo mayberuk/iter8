@@ -778,7 +778,8 @@ export function PickLayer(): JSX.Element | null {
           rects.push({ x, y, w: width, h: height })
         }
         if (rects.length === 0) return null
-        const { dock: anchor, collapsed } = model.prefs.peek()
+        const { collapsed } = model.prefs.peek()
+        const anchor = model.dockAnchor.peek()
         const dockBox = root
           .querySelector(collapsed ? ".iter8btn" : ".dock")
           ?.getBoundingClientRect()

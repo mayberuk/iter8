@@ -9,6 +9,7 @@ const X_PATH = "m4 4 8 8M12 4l-8 8"
 type IconData = {
   viewBox: 16 | 24
   kind: "fill" | "stroke"
+  strokeWidth?: number
   paths: { d: string; fillRule?: "evenodd" }[]
 }
 
@@ -209,11 +210,32 @@ const ICONS = {
   },
   collapse: {
     viewBox: 24,
-    kind: "fill",
+    kind: "stroke",
+    strokeWidth: 2,
     paths: [
+      { d: "M4 4l6 6" },
+      { d: "M4.5 10H10V4.5" },
       {
-        d: "M12 2c.375 0 .745.02 1.11.061a1 1 0 0 1-.22 1.988 8 8 0 1 0 7.061 7.061 1 1 0 1 1 1.988-.22c.04.365.061.735.061 1.11 0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2m-.032 5.877a1 1 0 0 1-.719 1.217A3.002 3.002 0 0 0 12 15a3.002 3.002 0 0 0 2.906-2.25 1 1 0 0 1 1.936.5A5.002 5.002 0 0 1 7 12a5.002 5.002 0 0 1 3.75-4.842 1 1 0 0 1 1.218.719m6.536-5.75a1 1 0 0 1 .617.923v1.83h1.829a1 1 0 0 1 .707 1.707L18.12 10.12a1 1 0 0 1-.707.293H15l-1.828 1.829a1 1 0 0 1-1.415-1.415L13.586 9V6.586a1 1 0 0 1 .293-.707l3.535-3.536a1 1 0 0 1 1.09-.217m-1.383 3.337L15.586 7v1.414H17l1.536-1.535h-.415a1 1 0 0 1-1-1z",
+        d: "M14 12h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2z",
       },
+    ],
+  },
+  dockFloat: {
+    viewBox: 24,
+    kind: "stroke",
+    strokeWidth: 2,
+    paths: [
+      { d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" },
+      { d: "M9.5 12.5h5a1.75 1.75 0 0 1 0 3.5h-5a1.75 1.75 0 0 1 0-3.5z" },
+    ],
+  },
+  dockBottom: {
+    viewBox: 24,
+    kind: "stroke",
+    strokeWidth: 2,
+    paths: [
+      { d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" },
+      { d: "M3 15h18" },
     ],
   },
   more: {
@@ -343,22 +365,46 @@ const ICONS = {
 
 export type IconName = keyof typeof ICONS
 
-const INK = {
-  fill: { fill: "currentColor" },
-  stroke: {
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": 1.5,
-    "stroke-linecap": "round",
-    "stroke-linejoin": "round",
-  },
+const COLLAPSE_TURNS = {
+  mirrored: "translate(24 0) scale(-1 1)",
+  flipped: "translate(0 24) scale(1 -1)",
+  both: "rotate(180 12 12)",
 } as const
 
+/** The collapse glyph points at the corner the collapsed button lands in; the drawing faces bottom-right. */
+export function collapseTurn(anchor: string): string | undefined {
+  const left = anchor.endsWith("l")
+  const top = anchor.startsWith("t")
+  if (left && top) return COLLAPSE_TURNS.both
+  if (left) return COLLAPSE_TURNS.mirrored
+  if (top) return COLLAPSE_TURNS.flipped
+  return undefined
+}
+
 /** Two stacked copies of the paths: a shaded one a CSS pixel lower, the coloured one on top. */
-export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
+export function Icon({
+  name,
+  size = 16,
+  turn,
+}: {
+  name: IconName
+  size?: number
+  turn?: string | undefined
+}) {
   const data: IconData = ICONS[name]
   const { viewBox, kind, paths } = data
-  const shapes = () => paths.map(({ d, fillRule }) => <path key={d} d={d} fill-rule={fillRule} />)
+  const ink =
+    kind === "fill"
+      ? { fill: "currentColor" }
+      : ({
+          fill: "none",
+          stroke: "currentColor",
+          "stroke-width": data.strokeWidth ?? 1.5,
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+        } as const)
+  const shapes = () =>
+    paths.map(({ d, fillRule }) => <path key={d} d={d} fill-rule={fillRule} transform={turn} />)
   return (
     <svg
       class={`ic ic-${kind}`}
@@ -368,10 +414,10 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
       aria-hidden="true"
       style={{ overflow: "visible" }}
     >
-      <g class="ic-d" transform={`translate(0 ${viewBox / size})`} {...INK[kind]}>
+      <g class="ic-d" transform={`translate(0 ${viewBox / size})`} {...ink}>
         {shapes()}
       </g>
-      <g {...INK[kind]}>{shapes()}</g>
+      <g {...ink}>{shapes()}</g>
     </svg>
   )
 }
