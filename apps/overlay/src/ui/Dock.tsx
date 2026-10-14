@@ -24,9 +24,10 @@ import {
 import { part } from "../parts"
 import { adoptSheet, useOverlay, useSheet } from "./context"
 import dockCss from "./dock.css" with { type: "text" }
-import { Icon, type IconName, ringBox, StatusGlyph, StatusRing } from "./glyphs"
+import { collapseTurn, Icon, type IconName, ringBox, StatusGlyph, StatusRing } from "./glyphs"
 
 type DockAnchor = OverlayPrefs["dock"]
+type DockEdge = NonNullable<OverlayPrefs["dockEdge"]>
 type Theme = OverlayPrefs["theme"]
 
 const ANCHORS = OverlayPrefs.shape.dock.options
@@ -46,6 +47,8 @@ const MARGIN = 16
 const SHEET_CLEARANCE = 446
 /** Below this width an open sheet leaves no room for the dock's labels. */
 const COMPACT_BELOW = 1600
+/** Below this width the bar drops its labels, or its controls would run past the window. */
+const BAR_COMPACT_BELOW = 760
 const DRAG_THRESHOLD = 5
 const SNAP_RADIUS = 90
 const SNAP_PULL = 0.55
@@ -63,6 +66,11 @@ const THEMES = {
   light: { label: "Light", icon: "sun" },
   dark: { label: "Dark", icon: "moon" },
 } as const satisfies Record<Theme, { label: string; icon: IconName }>
+
+const EDGES = {
+  float: { label: "Float", icon: "dockFloat" },
+  bottom: { label: "Bottom", icon: "dockBottom" },
+} as const satisfies Record<DockEdge, { label: string; icon: IconName }>
 
 function clamp(value: number, low: number, high: number): number {
   return Math.min(Math.max(value, low), high)
@@ -363,6 +371,10 @@ function MoreMenu() {
     )
   }
 
+  function pickEdge(dockEdge: DockEdge) {
+    model.setPrefs({ dockEdge })
+  }
+
   function togglePins() {
     model.menu.value = "none"
     model.setPrefs({ pinsVisible: !prefs.pinsVisible })
@@ -388,6 +400,21 @@ function MoreMenu() {
             />
             <Icon name={THEMES[theme].icon} size={14} />
             {THEMES[theme].label}
+          </label>
+        ))}
+      </div>
+      <h4>Dock to</h4>
+      <div class="tabs tseg" role="radiogroup" aria-label="Dock to">
+        {(Object.keys(EDGES) as DockEdge[]).map((edge) => (
+          <label key={edge} class="tab">
+            <input
+              type="radio"
+              name="iter8-dock-edge"
+              checked={(prefs.dockEdge ?? "float") === edge}
+              onChange={() => pickEdge(edge)}
+            />
+            <Icon name={EDGES[edge].icon} size={14} />
+            {EDGES[edge].label}
           </label>
         ))}
       </div>
@@ -469,6 +496,8 @@ export function Dock() {
   })
 
   const prefs = model.prefs.value
+  const bar = prefs.dockEdge === "bottom"
+  const dockAnchor = model.dockAnchor.value
   const state = model.dock.value
   const pairing = model.pairing.value
   const mode = model.mode.value
@@ -563,7 +592,10 @@ export function Dock() {
 
   const dragging = near !== null
   const roundNumber = nextRoundNumber(model.rounds.value)
-  const compact = sheetOpen && window.innerWidth < COMPACT_BELOW
+  const compact = bar
+    ? window.innerWidth < BAR_COMPACT_BELOW
+    : sheetOpen && window.innerWidth < COMPACT_BELOW
+  const edgeSeen = useRef(prefs.dockEdge)
   // biome-ignore lint/correctness/useExhaustiveDependencies: the dock's rendered content sets its width, so a change re-places it in the same frame; viewport and resized are re-measure ticks.
   useLayoutEffect(() => {
     const dock = dockRef.current
@@ -577,12 +609,22 @@ export function Dock() {
     const otherHeight = other.offsetHeight
     const more = moreRef.current
     const moreRight = more ? more.offsetLeft + more.offsetWidth : 0
-    const at = anchorXY(prefs.dock, width, height, sheetOpen)
+    const barShown = bar && !prefs.collapsed
+    const at = barShown
+      ? { x: 0, y: window.innerHeight - height }
+      : anchorXY(dockAnchor, width, height, sheetOpen)
     // The first placement would animate in from the stylesheet's 0,0, and a font landing changes the width the dock was placed by.
-    const instant = !placed.current || !fontsReady
+    const instant = !placed.current || !fontsReady || edgeSeen.current !== prefs.dockEdge
+    edgeSeen.current = prefs.dockEdge
     if (instant) for (const el of [dock, iter8]) el.style.transition = "none"
-    shown.style.translate = `${at.x}px ${at.y}px`
-    other.style.translate = `${at.x + width / 2 - otherWidth / 2}px ${at.y + height / 2 - otherHeight / 2}px`
+    if (bar) {
+      const corner = anchorXY(dockAnchor, iter8.offsetWidth, iter8.offsetHeight, sheetOpen)
+      dock.style.translate = "0px 0px"
+      iter8.style.translate = `${corner.x}px ${corner.y}px`
+    } else {
+      shown.style.translate = `${at.x}px ${at.y}px`
+      other.style.translate = `${at.x + width / 2 - otherWidth / 2}px ${at.y + height / 2 - otherHeight / 2}px`
+    }
     if (instant) {
       placed.current = true
       void dock.offsetWidth
@@ -605,7 +647,9 @@ export function Dock() {
       morePop.style.bottom = above ? `${window.innerHeight - at.y + POP_GAP}px` : "auto"
     }
   }, [
-    prefs.dock,
+    dockAnchor,
+    bar,
+    prefs.dockEdge,
     prefs.collapsed,
     sheetOpen,
     compact,
@@ -622,6 +666,17 @@ export function Dock() {
     label,
   ])
 
+  const barShown = bar && !prefs.collapsed
+  useLayoutEffect(() => {
+    const height = dockRef.current?.offsetHeight
+    if (!barShown || height === undefined) return
+    const style = document.documentElement.style
+    const before = style.getPropertyValue("padding-bottom")
+    const priority = style.getPropertyPriority("padding-bottom")
+    style.setProperty("padding-bottom", `${height}px`, "important")
+    return () => style.setProperty("padding-bottom", before, priority)
+  }, [barShown])
+
   function toggleTool(tool: Mode) {
     model.setMode(mode === tool || (tool === "shot" && mode === "markup") ? "idle" : tool)
   }
@@ -632,7 +687,7 @@ export function Dock() {
 
   function onGripDown(event: PointerEvent) {
     const dock = dockRef.current
-    if (event.button !== 0 || !dock) return
+    if (event.button !== 0 || !dock || bar) return
     const rect = dock.getBoundingClientRect()
     drag.current = {
       x0: event.clientX,
@@ -714,7 +769,7 @@ export function Dock() {
       ? mode === "shot" || mode === "markup"
       : mode === tool || (mode === "compose" && composeTool.value === tool)
   const stateClass = `s-${state}`
-  const gripLabel = `Session ${name} on ${where}, ${word ?? state}. Drag to move the dock, press to switch session.`
+  const gripLabel = `Session ${name} on ${where}, ${word ?? state}. ${bar ? "Press" : "Drag to move the dock, press"} to switch session.`
 
   return (
     <>
@@ -749,6 +804,7 @@ export function Dock() {
           "dock chrome",
           stateClass,
           compact ? "compact" : "",
+          bar ? "bar" : "",
           near ? "dragging" : "",
           prefs.collapsed ? "hidden" : "",
         ]
@@ -848,6 +904,7 @@ export function Dock() {
         <button
           type="button"
           class="send"
+          aria-label={label}
           {...part("dock.send")}
           disabled={blocked !== null}
           data-tip={tip}
@@ -880,7 +937,7 @@ export function Dock() {
             model.setPrefs({ collapsed: true })
           }}
         >
-          <Icon name="collapse" />
+          <Icon name="collapse" turn={collapseTurn(dockAnchor)} />
         </button>
       </div>
       <button

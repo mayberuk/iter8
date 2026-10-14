@@ -347,6 +347,9 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
   /** Reads the clock only when its signals change; call `expireDelivered` once the window lapses. */
   const dock = computed(() => dockState(pairing.value, deliveredUntil.value, now()))
   const sendBlocked = computed(() => sendBlockedReason(pairing.value, drafts.value.length))
+  const barDocked = computed(() => prefs.value.dockEdge === "bottom" && !prefs.value.collapsed)
+  /** A bar docked at the bottom collapses to the bottom-right button, so that is the anchor everything else follows. */
+  const dockAnchor = computed(() => (prefs.value.dockEdge === "bottom" ? "br" : prefs.value.dock))
 
   let nextToastId = 1
   let undo: { note: Note; index: number } | null = null
@@ -952,6 +955,8 @@ export function createOverlayModel(init: { hello: AcceptedHello; now: () => numb
     name,
     where,
     dock,
+    barDocked,
+    dockAnchor,
     sendBlocked,
     setMode,
     escape: closeTopLayer,

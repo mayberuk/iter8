@@ -519,7 +519,7 @@ export function Pins(): JSX.Element | null {
   const hasLost = lost.length > 0
   const lostKey = lost.map(({ note }) => note.id).join("\n")
   const sheetOpen = model.sheet.value.open
-  const dock = model.prefs.value.dock
+  const dock = model.dockAnchor.value
 
   useEffect(() => {
     const held = model.lostDismissed.peek()

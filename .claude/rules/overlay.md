@@ -28,5 +28,6 @@ keystroke, and the page must never be able to break it.
 
 ## Never
 - Synchronous work at pick or keystroke time that grows with the page's size.
-- A global style, a global variable, or a patched built-in on the host page.
+- A global style, a global variable, or a patched built-in on the host page. The one exception is
+  the bottom bar's inline `padding-bottom` on `<html>`, restored exactly when the bar goes away.
 - Showing a source lead as certain when its confidence label says otherwise.

@@ -46,7 +46,7 @@ test("saving preferences replaces one durable row and validates the protocol", (
   expect(createPrefs(db).get()).toEqual(first)
   first.theme = "light"
   expect(prefs.get().theme).toBe("dark")
-  const second = OverlayPrefs.parse({ ...defaults, theme: "light", dock: "bc" })
+  const second = OverlayPrefs.parse({ ...defaults, theme: "light", dock: "bc", dockEdge: "bottom" })
   expect(prefs.save(second)).toEqual(second)
   expect(prefs.get()).toEqual(second)
   expect(db.query("SELECT id FROM prefs").all()).toEqual([{ id: 1 }])

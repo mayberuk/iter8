@@ -469,3 +469,68 @@
 .dock.compact .idn {
   padding-right: 8px;
 }
+.root {
+  --bar-h: 44px;
+}
+.dock.bar {
+  top: auto;
+  bottom: 0;
+  width: 100%;
+  height: var(--bar-h);
+  padding: 0 8px;
+  gap: 2px;
+  border-width: 1px 0 0;
+  border-radius: 0;
+  box-shadow:
+    0 -3px 0 var(--edge),
+    var(--top);
+}
+.dock.bar.hidden {
+  transform: translateY(100%);
+}
+.dock.bar .idn {
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.dock.bar .vr {
+  height: 20px;
+  margin: 0 4px;
+}
+.dock.bar .seg {
+  padding: 3px 3px 5px;
+  gap: 3px;
+}
+.dock.bar .seg button {
+  width: 32px;
+  height: 28px;
+}
+.dock.bar .counter {
+  height: 32px;
+  margin-left: auto;
+  border-radius: 8px;
+}
+.dock.bar .counter .n {
+  height: 22px;
+}
+.dock.bar .send {
+  height: 30px;
+  padding: 0 12px 0 9px;
+}
+.dock.bar.compact .send {
+  display: flex;
+  padding: 0 9px;
+}
+.dock.bar.compact .send span {
+  display: none;
+}
+.dock.bar .iconbtn {
+  width: 30px;
+  height: 30px;
+}
+.root.docked .sheet {
+  bottom: calc(var(--bar-h) + 14px);
+}
+.root.docked .lost {
+  --dock-gap: calc(var(--bar-h) + 14px);
+}
