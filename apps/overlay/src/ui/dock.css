@@ -517,6 +517,13 @@
   height: 30px;
   padding: 0 12px 0 9px;
 }
+.dock.bar.compact .send {
+  display: flex;
+  padding: 0 9px;
+}
+.dock.bar.compact .send span {
+  display: none;
+}
 .dock.bar .iconbtn {
   width: 30px;
   height: 30px;

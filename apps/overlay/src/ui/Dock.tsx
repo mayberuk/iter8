@@ -904,6 +904,7 @@ export function Dock() {
         <button
           type="button"
           class="send"
+          aria-label={label}
           {...part("dock.send")}
           disabled={blocked !== null}
           data-tip={tip}

@@ -191,6 +191,31 @@ describe("docking to the bottom", () => {
   )
 
   test(
+    "a narrow window keeps Send on the bar, without its label, and every control inside the window",
+    async () => {
+      const o = await open({ dockEdge: "bottom" })
+      await o.page.setViewportSize({ width: 600, height: 700 })
+      await until(
+        "the bar to drop its labels",
+        async () => (await dock(o).getAttribute("class"))?.includes("compact") ?? false,
+      )
+      await atRest(o.page)
+      const send = dock(o).getByRole("button", { name: /^Send/ })
+      expect(await send.isVisible()).toBe(true)
+      expect(await send.locator("span").isVisible()).toBe(false)
+      const width = (await viewport(o.page)).client.w
+      const controls = await dock(o)
+        .getByRole("button")
+        .evaluateAll((els) =>
+          els.filter((el) => el.checkVisibility()).map((el) => el.getBoundingClientRect().right),
+        )
+      expect(controls.length).toBeGreaterThan(0)
+      for (const right of controls) expect(right).toBeLessThanOrEqual(width)
+    },
+    TEST_MS,
+  )
+
+  test(
     "collapsing removes the room and shows the button at the bottom right, and expanding brings the bar back",
     async () => {
       const o = await open({ dockEdge: "bottom" })
