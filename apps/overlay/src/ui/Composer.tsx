@@ -132,7 +132,8 @@ export function Composer({
   lead: ResolvedSourceLead | "pending" | null
   thumb: string | null
   attach: boolean
-  unavailable: boolean
+  /** Why no screenshot can be attached; null while one can. */
+  unavailable: string | null
   onAttach: (on: boolean) => void
   onInput: () => void
 }): JSX.Element | null {
@@ -286,15 +287,11 @@ export function Composer({
           role="switch"
           aria-checked={shot || attach}
           aria-label="Attach screenshot of this"
-          disabled={shot || unavailable}
+          disabled={shot || unavailable !== null}
           onClick={() => onAttach(!attach)}
         />
         <label for="iter8-cmp-attach">
-          {shot
-            ? "Screenshot attached"
-            : unavailable
-              ? "No screenshot taken"
-              : "Attach screenshot of this"}
+          {shot ? "Screenshot attached" : (unavailable ?? "Attach screenshot of this")}
         </label>
         <div class={shot || attach ? "tw" : "tw off"}>
           {thumb && <img src={thumb} alt="Screenshot attached" />}

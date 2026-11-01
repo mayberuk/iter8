@@ -80,6 +80,12 @@ async function leadFor(
   }
 }
 
+/** Why a requested screenshot is missing: a reason from `crop.ts`, or one of these. */
+export const SHOT_CHANGED = "changed"
+export const SHOT_UPLOAD_FAILED = "upload failed"
+
+type Enriched = { capture: Capture; shotOmitted: string | null }
+
 /**
  * Gathers everything captured after the pick, yielding between steps. Rejects with the signal's
  * reason once it aborts, so a cancelled run never produces a capture.
@@ -97,7 +103,7 @@ export async function enrich(
     idleSinceInput: () => number
     exclude: Element
   },
-): Promise<Capture> {
+): Promise<Enriched> {
   const { el, anchor } = target
   const { signal } = deps
   const omittedParts: Capture["omittedParts"] = []
@@ -124,20 +130,23 @@ export async function enrich(
   if (sourceLead === null) omittedParts.push("sourceLead")
 
   let screenshot: Screenshot | undefined
+  let shotOmitted: string | null = null
   if (deps.shot) {
     await untilQuiet(deps.idleSinceInput, signal)
-    if (!isStale()) {
+    if (isStale()) shotOmitted = SHOT_CHANGED
+    else {
       const opts = { signal, exclude: deps.exclude }
       const shot =
         deps.clip === undefined ? await captureCrop(el, opts) : await captureRegion(deps.clip, opts)
       signal.throwIfAborted()
-      if ("omitted" in shot) omittedParts.push("screenshot")
-      else if (!isStale()) {
+      if ("omitted" in shot) shotOmitted = shot.omitted
+      else if (isStale()) shotOmitted = SHOT_CHANGED
+      else {
         try {
           screenshot = await deps.uploadScreenshot(shot.png)
         } catch {
           if (signal.aborted) throw signal.reason
-          omittedParts.push("screenshot")
+          shotOmitted = SHOT_UPLOAD_FAILED
         }
       }
     }
@@ -145,7 +154,9 @@ export async function enrich(
 
   signal.throwIfAborted()
   const stale = isStale()
-  return {
+  if (stale && screenshot !== undefined) shotOmitted = SHOT_CHANGED
+  if (shotOmitted !== null) omittedParts.push("screenshot")
+  const capture: Capture = {
     completeness: stale ? "stale" : omittedParts.length > 0 ? "partial" : "complete",
     omittedParts,
     url,
@@ -157,20 +168,22 @@ export async function enrich(
     ...(screenshot !== undefined && !stale ? { screenshot } : {}),
     ...(sourceLead !== null ? { sourceLead } : {}),
   }
+  return { capture, shotOmitted }
 }
 
 /**
  * Captures an overlay part for a note about iter8 itself: the page's styles, console errors and
- * source lead say nothing about it, so only where and how it was seen is recorded.
+ * source lead say nothing about it, so only where and how it was seen is recorded. `resolve` finds
+ * the part at capture time, since a re-render can replace the element that was picked.
  */
 export async function enrichPart(
-  part: Element,
+  resolve: () => Element | null,
   deps: {
     signal: AbortSignal
     uploadScreenshot: (png: Blob) => Promise<Screenshot>
     idleSinceInput: () => number
   },
-): Promise<Capture> {
+): Promise<Enriched> {
   const { signal } = deps
   signal.throwIfAborted()
   const url = location.href
@@ -184,23 +197,30 @@ export async function enrichPart(
 
   await untilQuiet(deps.idleSinceInput, signal)
   let screenshot: Screenshot | undefined
-  if (part.isConnected) {
+  let shotOmitted: string | null = null
+  const part = resolve()
+  if (part === null) shotOmitted = SHOT_CHANGED
+  else {
     const shot = await capturePart(part, signal)
     signal.throwIfAborted()
-    if ("omitted" in shot) omittedParts.push("screenshot")
-    else if (part.isConnected) {
+    if ("omitted" in shot) shotOmitted = shot.omitted
+    // A clone read from an element that left the page mid-render can be missing its styles.
+    else if (!part.isConnected) shotOmitted = SHOT_CHANGED
+    else {
       try {
         screenshot = await deps.uploadScreenshot(shot.png)
       } catch {
         if (signal.aborted) throw signal.reason
-        omittedParts.push("screenshot")
+        shotOmitted = SHOT_UPLOAD_FAILED
       }
     }
   }
 
   signal.throwIfAborted()
-  const stale = !part.isConnected
-  return {
+  const stale = resolve() === null
+  if (stale && screenshot !== undefined) shotOmitted = SHOT_CHANGED
+  if (shotOmitted !== null) omittedParts.push("screenshot")
+  const capture: Capture = {
     completeness: stale ? "stale" : omittedParts.length > 0 ? "partial" : "complete",
     omittedParts,
     url,
@@ -208,4 +228,5 @@ export async function enrichPart(
     theme,
     ...(screenshot !== undefined && !stale ? { screenshot } : {}),
   }
+  return { capture, shotOmitted }
 }

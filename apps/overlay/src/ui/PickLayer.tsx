@@ -12,12 +12,12 @@ import { useEffect, useRef, useState } from "preact/hooks"
 import { enrich, enrichPart } from "../enrich/run"
 import { loadSourceLookup } from "../enrich/source"
 import { type Mode, toDraftBody } from "../model"
-import { findPart, PARTS, partTarget, resolvePart } from "../parts"
+import { findPart, PARTS, partTarget, refindPart, resolvePart } from "../parts"
 import { parentAcrossShadow, resolveAnchor, resolveSelector } from "../pick/anchor"
 import { identityOf, regionTarget, snapshotElement } from "../pick/snapshot"
 import { Composer, shake } from "./Composer"
 import { useOverlay, useSheet } from "./context"
-import { SHOT_READY } from "./Markup"
+import { omittedShotCopy, SHOT_READY } from "./Markup"
 import pickCss from "./pick.css" with { type: "text" }
 
 const ACTIVE: ReadonlySet<Mode> = new Set(["pick", "region", "compose"])
@@ -197,7 +197,7 @@ export function PickLayer(): JSX.Element | null {
   const [lead, setLead] = useState<Lead>(null)
   const [thumb, setThumb] = useState<string | null>(null)
   const [attach, setAttach] = useState(true)
-  const [unavailable, setUnavailable] = useState(false)
+  const [unavailable, setUnavailable] = useState<string | null>(null)
   const target = useComputed(() => model.composer.value?.target ?? null).value
 
   useEffect(() => {
@@ -263,18 +263,21 @@ export function PickLayer(): JSX.Element | null {
         await afterPaint()
         signal.throwIfAborted()
         if (current.target.kind === "iter8") {
-          if (!first) return
-          current.capture = await enrichPart(first, {
-            signal,
-            uploadScreenshot: (png) => {
-              if (shown()) setThumb(URL.createObjectURL(png))
-              return connection.uploadScreenshot(png)
+          const { capture, shotOmitted } = await enrichPart(
+            refindPart(root, current.target.part.key, first),
+            {
+              signal,
+              uploadScreenshot: (png) => {
+                if (shown()) setThumb(URL.createObjectURL(png))
+                return connection.uploadScreenshot(png)
+              },
+              idleSinceInput: () => performance.now() - current.lastInput,
             },
-            idleSinceInput: () => performance.now() - current.lastInput,
-          })
-          if (shown() && current.capture.screenshot === undefined) {
+          )
+          current.capture = capture
+          if (shown() && capture.screenshot === undefined) {
             setAttach(false)
-            setUnavailable(true)
+            setUnavailable(omittedShotCopy(shotOmitted))
           }
           deliver(current)
           return
@@ -288,7 +291,7 @@ export function PickLayer(): JSX.Element | null {
         lookup.current ??= loadSourceLookup(boot.sourceBundleUrl)
         const lookupSource = await lookup.current
         signal.throwIfAborted()
-        current.capture = await enrich(
+        const { capture, shotOmitted } = await enrich(
           { el, anchor: anchor ?? snapshotElement(el, renderGeneration()) },
           {
             signal,
@@ -318,10 +321,11 @@ export function PickLayer(): JSX.Element | null {
             exclude: host,
           },
         )
-        if (shown() && current.target.kind !== "region") setLead(current.capture.sourceLead ?? null)
-        if (shown() && !current.marked && current.capture.screenshot === undefined) {
+        current.capture = capture
+        if (shown() && current.target.kind !== "region") setLead(capture.sourceLead ?? null)
+        if (shown() && !current.marked && capture.screenshot === undefined) {
           setAttach(false)
-          setUnavailable(true)
+          setUnavailable(omittedShotCopy(shotOmitted))
         }
         deliver(current)
       } catch {
@@ -360,7 +364,7 @@ export function PickLayer(): JSX.Element | null {
       )
       setThumb(null)
       setAttach(true)
-      setUnavailable(false)
+      setUnavailable(null)
       void enrichRun(current, targets.current[0] ?? null)
     }
 
@@ -385,7 +389,7 @@ export function PickLayer(): JSX.Element | null {
       )
       setThumb(null)
       setAttach(capture?.screenshot !== undefined)
-      setUnavailable(capture?.omittedParts.includes("screenshot") ?? false)
+      setUnavailable(capture?.omittedParts.includes("screenshot") ? "No screenshot taken" : null)
       const ref = capture?.screenshot?.ref
       if (ref === undefined) return
       connection

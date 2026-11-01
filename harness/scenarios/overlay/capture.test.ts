@@ -208,11 +208,47 @@ describe("a region note's screenshot", () => {
 
       expect(await attachSwitch(o).getAttribute("aria-checked")).toBe("false")
       expect(await thumbnail(o).count()).toBe(0)
-      expect(await composer(o).innerText()).toContain("No screenshot taken")
+      expect(await composer(o).innerText()).toContain(
+        "This part of the page is too heavy to capture",
+      )
       await saveNote(o, "Too heavy to capture")
       expect(o.mock.draft()[0]?.capture?.omittedParts).toContain("screenshot")
       expect(o.mock.draft()[0]?.capture?.screenshot).toBeUndefined()
       expect(uploads(o)).toHaveLength(0)
+    },
+    TEST_MS,
+  )
+})
+
+describe("a picked element inside an inline SVG chart", () => {
+  test(
+    "attaches a screenshot of the whole chart, styled as the browser paints it",
+    async () => {
+      const o = await open()
+      await addPage(
+        o.page,
+        `<style>.chart-area{fill:#dc2626}.chart-grid{stroke:#1d4ed8;stroke-width:2}</style>
+        <div id="chart" style="width:640px;background:#fff"><svg viewBox="0 0 640 240" width="640" height="240" style="display:block">
+          <line class="chart-grid" x1="40" x2="624" y1="120" y2="120"></line>
+          <path id="area" class="chart-area" d="M40 60 L200 30 L400 80 L624 20 L624 212 L40 212 Z"></path>
+        </svg></div>`,
+      )
+      const chart = await boxOf(o.page.locator("#chart"))
+      const truth = await truthOf(o.page, chart)
+
+      await o.page.keyboard.press("c")
+      await o.page.locator("#area").click()
+      await composer(o).waitFor({ timeout: 10_000 })
+      await thumbnail(o).waitFor({ timeout: 15_000 })
+      await saveNote(o, "The chart's fill")
+      await until(
+        "the screenshot on the draft",
+        () => o.mock.draft()[0]?.capture?.screenshot !== undefined,
+      )
+
+      const shot = await likeness(o.page, await uploadedPng(o), truth)
+      expect([shot.width, shot.height]).toEqual([chart.width, chart.height])
+      expect(shot.differingShare).toBeLessThanOrEqual(MAX_DIFFERING_SHARE)
     },
     TEST_MS,
   )

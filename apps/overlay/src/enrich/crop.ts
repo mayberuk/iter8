@@ -202,6 +202,16 @@ function backdropOf(root: Element): string {
   return "#fff"
 }
 
+/**
+ * modern-screenshot hands an `<svg>` root back as the live node, unstyled and uncropped, and a root
+ * inside one renders to an image that does not decode; the outermost `<svg>`'s parent draws both.
+ */
+function outsideSvg(el: Element): Element {
+  let top = el
+  while (top instanceof SVGElement && top.ownerSVGElement !== null) top = top.ownerSVGElement
+  return (top instanceof SVGElement ? parentAcrossShadow(top) : null) ?? top
+}
+
 type Shot = { png: Blob; width: number; height: number } | { omitted: string }
 type Opts = {
   signal: AbortSignal
@@ -211,11 +221,12 @@ type Opts = {
 }
 
 async function render(
-  root: Element,
+  target: Element,
   within: Rect,
   { signal, exclude, inFlow = false }: Opts,
 ): Promise<Shot> {
   signal.throwIfAborted()
+  const root = outsideSvg(target)
   const origin = root.getBoundingClientRect()
   const crop = intersect(origin, within)
   if (crop === null) return { omitted: "off screen" }

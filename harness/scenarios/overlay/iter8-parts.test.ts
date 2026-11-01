@@ -298,6 +298,82 @@ describe("picking an overlay part with the modifier held", () => {
   )
 })
 
+describe("an overlay part replaced by a re-render after the pick", () => {
+  const thumbnail = (o: Opened) => dialog(o).getByRole("img", { name: "Screenshot attached" })
+  const attachSwitch = (o: Opened) => dialog(o).getByRole("switch")
+
+  async function pickRingWithClick(o: Opened) {
+    await part(o, "dock.ring").evaluate((el) => Reflect.set(el, "pickedOriginal", true))
+    await pickRing(o)
+    const { x, y } = centre(await rectOf(part(o, "dock.ring")))
+    await o.page.mouse.click(x, y)
+    await until("the composer to open", () => noteBox(o).isVisible())
+  }
+
+  const ringReplaced = (o: Opened) =>
+    part(o, "dock.ring").evaluate((el) => !Reflect.has(el, "pickedOriginal"))
+
+  test(
+    "before its screenshot is taken still gets a screenshot of the part as it is now",
+    async () => {
+      const o = await open()
+      await o.page.evaluate(() => {
+        const root = document.querySelector("iter8-overlay")?.shadowRoot
+        if (!root) throw new Error("no overlay shadow root")
+        const observer = new MutationObserver(() => {
+          if (!root.querySelector('[data-iter8-part="composer"].on')) return
+          observer.disconnect()
+          const ring = root.querySelector('[data-iter8-part="dock.ring"]')
+          ring?.replaceWith(ring.cloneNode(true))
+        })
+        observer.observe(root, { attributes: true, childList: true, subtree: true })
+      })
+      await pickRingWithClick(o)
+
+      await thumbnail(o).waitFor({ timeout: 10_000 })
+      expect(await ringReplaced(o)).toBe(true)
+      expect(await attachSwitch(o).getAttribute("aria-checked")).toBe("true")
+      await noteBox(o).fill("The ring after a re-render")
+      await dialog(o).getByRole("button", { name: /^Save/ }).click()
+      await until("the screenshot on the draft", () =>
+        Boolean(o.mock.draft()[0]?.capture?.screenshot),
+      )
+      expect(o.mock.draft()[0]?.capture?.omittedParts).toEqual([])
+    },
+    TEST_MS,
+  )
+
+  test(
+    "while its screenshot renders says why there is no screenshot",
+    async () => {
+      const o = await open()
+      await o.page.evaluate(() => {
+        const root = document.querySelector("iter8-overlay")?.shadowRoot
+        if (!root) throw new Error("no overlay shadow root")
+        const decode = HTMLImageElement.prototype.decode
+        HTMLImageElement.prototype.decode = function (this: HTMLImageElement) {
+          if (this.src.startsWith("data:image/svg+xml")) {
+            HTMLImageElement.prototype.decode = decode
+            const ring = root.querySelector('[data-iter8-part="dock.ring"]')
+            ring?.replaceWith(ring.cloneNode(true))
+          }
+          return decode.call(this)
+        }
+      })
+      await pickRingWithClick(o)
+
+      await until("the switch to settle off", () => attachSwitch(o).isDisabled(), 10_000)
+      expect(await ringReplaced(o)).toBe(true)
+      expect(await attachSwitch(o).getAttribute("aria-checked")).toBe("false")
+      expect(await thumbnail(o).count()).toBe(0)
+      expect(await dialog(o).innerText()).toContain(
+        "It changed before the screenshot finished — pick it again",
+      )
+    },
+    TEST_MS,
+  )
+})
+
 describe("a note about iter8 in the round", () => {
   const iter8Note = Note.parse({ ...iter8NoteJson, pageId: PAGE, capture: undefined })
   const draft = { ...iter8Note, id: "N41" }

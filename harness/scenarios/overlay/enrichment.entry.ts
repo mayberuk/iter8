@@ -90,7 +90,7 @@ function createHarness(): EnrichmentHarness {
         setTimeout(() => controller.abort("cancelled by the test"), options.abortAfterMs)
       }
       try {
-        const capture = await enrich(
+        const { capture } = await enrich(
           {
             el,
             anchor: {

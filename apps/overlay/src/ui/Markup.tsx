@@ -3,6 +3,7 @@ import { batch, type Signal, useSignal, useSignalEffect } from "@preact/signals"
 import type { JSX } from "preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { captureRegion } from "../enrich/crop"
+import { SHOT_CHANGED, SHOT_UPLOAD_FAILED } from "../enrich/run"
 import { type MarkupTool, type Shape, toDraftBody } from "../model"
 import { part } from "../parts"
 import { regionTarget } from "../pick/snapshot"
@@ -24,14 +25,21 @@ const HEAD_BACK = 10.5
 const HEAD_FRONT = 4.5
 const HEAD_HALF = 7.5
 
-/** `captureRegion` words these omissions as caps; any other reason is a failed render. */
-const CAP_COPY = new Map([
+const OMITTED_COPY = new Map([
   ["too-large", "This area is too large to capture — try a smaller region"],
   ["too-many-nodes", "This part of the page is too heavy to capture"],
   ["over 2 MiB", "This capture is too big to keep — try a smaller region"],
+  ["off screen", "It scrolled out of view before the screenshot — pick it again"],
+  [SHOT_CHANGED, "It changed before the screenshot finished — pick it again"],
+  [SHOT_UPLOAD_FAILED, "Couldn’t save the screenshot — try again"],
 ])
 
 const FAILED_COPY = "Couldn’t capture this area — try again"
+
+/** Any reason without its own line, or none at all, reads as a failed render. */
+export function omittedShotCopy(reason: string | null): string {
+  return (reason !== null && OMITTED_COPY.get(reason)) || FAILED_COPY
+}
 
 const TOOLS = [
   { tool: "arrow", label: "Arrow", key: "A" },
@@ -670,7 +678,7 @@ export function Markup(): JSX.Element | null {
         view.value = {
           status: "omitted",
           region,
-          message: CAP_COPY.get(crop.omitted) ?? FAILED_COPY,
+          message: omittedShotCopy(crop.omitted),
         }
         // Without markup state the key handler ignores Enter, so a failed capture cannot open a
         // composer that claims a screenshot is attached.

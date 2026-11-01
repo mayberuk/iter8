@@ -64,6 +64,21 @@ export function findPart(root: ShadowRoot, key: string): Element | null {
   return isPartKey(key) ? root.querySelector(`[${PART_ATTRIBUTE}="${key}"]`) : null
 }
 
+/**
+ * The picked part while it stays on the page, else whatever now holds its key at the same position
+ * among that key's elements, so a re-render that replaces it does not lose it.
+ */
+export function refindPart(
+  root: ShadowRoot,
+  key: string,
+  picked: Element | null,
+): () => Element | null {
+  const tagged = () =>
+    isPartKey(key) ? Array.from(root.querySelectorAll(`[${PART_ATTRIBUTE}="${key}"]`)) : []
+  const at = picked === null ? 0 : tagged().indexOf(picked)
+  return () => (picked?.isConnected ? picked : at < 0 ? null : (tagged()[at] ?? null))
+}
+
 export function partTarget(
   found: { key: PartKey; el: Element },
   iter8Version: string,
