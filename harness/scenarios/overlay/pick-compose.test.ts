@@ -71,11 +71,11 @@ async function composeOn(o: Opened, target: Locator) {
   await until("the composer to open", () => noteBox(o).isVisible())
 }
 
-/** The token a confidence label is coloured with: `--cobalt-d` marks a certain lead, `--mute` any other. */
+/** The token a confidence label is coloured with: `--cobalt-t` marks a certain lead, `--mute` any other. */
 async function confidenceTone(locator: Locator): Promise<string> {
   return locator.evaluate((el) => {
     const own = getComputedStyle(el).color
-    for (const token of ["--cobalt-d", "--mute"]) {
+    for (const token of ["--cobalt-t", "--mute"]) {
       const probe = document.createElement("i")
       probe.style.color = `var(${token})`
       el.append(probe)
@@ -318,7 +318,7 @@ describe("the composer", () => {
       const text = (await dialog(o).textContent()) ?? ""
       expect(text).toContain("<Card>")
       expect(text).toContain("src/Card.jsx:3")
-      expect(await confidenceTone(confidence(o))).toBe("--cobalt-d")
+      expect(await confidenceTone(confidence(o))).toBe("--cobalt-t")
       expect(requestsTo(o, "POST", OVERLAY_ROUTES.symbolicate.path)).toHaveLength(1)
     },
     TEST_MS,

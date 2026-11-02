@@ -403,7 +403,7 @@ kbd {
 .chip .comp {
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--cobalt-d);
+  color: var(--cobalt-t);
 }
 .chip .in {
   font-size: 12px;
@@ -436,7 +436,7 @@ kbd {
   color: var(--mute);
 }
 .chip .path strong {
-  color: var(--cobalt-d);
+  color: var(--cobalt-t);
   font-weight: 600;
 }
 .chip .path i {

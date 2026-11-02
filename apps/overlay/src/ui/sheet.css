@@ -280,7 +280,7 @@
   box-shadow: 0 0 0 var(--edge);
 }
 .sheet .nb .acts .iconbtn.del:hover {
-  color: var(--fix-d);
+  color: var(--fix-t);
 }
 .sheet .empty-r {
   padding: 40px 24px;

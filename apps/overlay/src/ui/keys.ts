@@ -7,6 +7,7 @@ import { parentAcrossShadow } from "../pick/anchor"
 import { regionTarget, snapshotElement } from "../pick/snapshot"
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
+const TYPING_EVENTS = ["keydown", "keypress", "keyup", "beforeinput", "input"] as const
 
 function togglesPalette(event: KeyboardEvent): boolean {
   return (IS_MAC ? event.metaKey : event.ctrlKey) && event.key.toLowerCase() === "k"
@@ -277,13 +278,19 @@ export function listenKeys(deps: {
   const onBlur = (event: FocusEvent) => {
     if (event.target === window) endPeek()
   }
+  // Past the shadow root our field is retargeted to the host, which page hotkeys treat as non-editable.
+  const hideTyping = (event: Event) => {
+    if (editable(event.composedPath()[0])) event.stopPropagation()
+  }
 
   window.addEventListener("keydown", onKeyDown, { capture: true })
   window.addEventListener("keyup", onKeyUp, { capture: true, passive: true })
   window.addEventListener("blur", onBlur, { capture: true, passive: true })
+  for (const type of TYPING_EVENTS) root.addEventListener(type, hideTyping, { passive: true })
   return () => {
     window.removeEventListener("keydown", onKeyDown, { capture: true })
     window.removeEventListener("keyup", onKeyUp, { capture: true })
     window.removeEventListener("blur", onBlur, { capture: true })
+    for (const type of TYPING_EVENTS) root.removeEventListener(type, hideTyping)
   }
 }

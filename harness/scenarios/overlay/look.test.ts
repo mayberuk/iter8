@@ -449,30 +449,36 @@ describe("short labels, counts and statuses are plain text", () => {
     expectPlain(await plateOf(o.page, ".chip .c1 .dim"), "the size readout")
   }, 30_000)
 
-  test("the composer's source confidence, exact and uncertain", async () => {
-    const o = await open(SEEDED)
-    await o.page.locator(CARD).evaluate((el) => el.setAttribute("data-fake-src", ""))
-    await o.page.keyboard.press("c")
-    const box = await o.page.locator(CARD).boundingBox()
-    if (!box) throw new Error("the card has no box")
-    await o.page.mouse.click(box.x + 20, box.y + box.height / 2)
-    const confidence = o.overlay.getByRole("status", { name: "Source confidence" })
-    await until("the source confidence", () => confidence.isVisible())
-    expect(await confidence.innerText()).toBe("exact")
-    const exact = await plateOf(o.page, ".cmp-src .conf")
-    expectPlain(exact, "the exact confidence")
-    expect(exact.color, "the exact confidence colour").toBe(await tokenColor(o.page, "--cobalt-d"))
-    await o.page.evaluate(() => {
-      const row = document.querySelector("iter8-overlay")?.shadowRoot?.querySelector(".cmp-src")
-      if (!row) throw new Error("no source row")
-      row.className = "cmp-src uncertain"
-    })
-    const uncertain = await plateOf(o.page, ".cmp-src .conf")
-    expectPlain(uncertain, "the uncertain confidence")
-    expect(uncertain.color, "the uncertain confidence colour").toBe(
-      await tokenColor(o.page, "--mute"),
-    )
-  }, 30_000)
+  test.each(["light", "dark"] as const)(
+    "the composer's source confidence, exact and uncertain, %s",
+    async (theme) => {
+      const o = await open({ ...SEEDED, prefs: { ...TOUR_DONE, theme } })
+      await o.page.locator(CARD).evaluate((el) => el.setAttribute("data-fake-src", ""))
+      await o.page.keyboard.press("c")
+      const box = await o.page.locator(CARD).boundingBox()
+      if (!box) throw new Error("the card has no box")
+      await o.page.mouse.click(box.x + 20, box.y + box.height / 2)
+      const confidence = o.overlay.getByRole("status", { name: "Source confidence" })
+      await until("the source confidence", () => confidence.isVisible())
+      expect(await confidence.innerText()).toBe("exact")
+      const exact = await plateOf(o.page, ".cmp-src .conf")
+      expectPlain(exact, "the exact confidence")
+      expect(exact.color, "the exact confidence colour").toBe(
+        await tokenColor(o.page, "--cobalt-t"),
+      )
+      await o.page.evaluate(() => {
+        const row = document.querySelector("iter8-overlay")?.shadowRoot?.querySelector(".cmp-src")
+        if (!row) throw new Error("no source row")
+        row.className = "cmp-src uncertain"
+      })
+      const uncertain = await plateOf(o.page, ".cmp-src .conf")
+      expectPlain(uncertain, "the uncertain confidence")
+      expect(uncertain.color, "the uncertain confidence colour").toBe(
+        await tokenColor(o.page, "--mute"),
+      )
+    },
+    30_000,
+  )
 })
 
 describe("the spring stays", () => {
