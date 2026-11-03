@@ -7,7 +7,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "svelte": "5.57.2"
+    "svelte": "5.57.3"
   },
   "devDependencies": {
     "@sveltejs/kit": "3.0.1",
