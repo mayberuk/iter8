@@ -1,6 +1,6 @@
 {
   "name": "iter8",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Mark up a running web page and hand the round of notes to the Claude Code session that owns it — a mod that starts a turn per round and shows the round pane, hooks for pairing, wake and Send now, a skill for reading and resolving rounds, and a pinned iter8 release",
   "author": {
     "name": "mayberuk"
