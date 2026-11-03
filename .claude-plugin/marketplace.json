@@ -15,15 +15,7 @@
       "author": {
         "name": "mayberuk"
       },
-      "keywords": [
-        "iter8",
-        "annotate",
-        "review",
-        "browser",
-        "overlay",
-        "hooks",
-        "mod"
-      ]
+      "keywords": ["iter8", "annotate", "review", "browser", "overlay", "hooks", "mod"]
     }
   ]
 }
