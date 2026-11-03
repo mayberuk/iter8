@@ -10,7 +10,7 @@
 !.claude/docs/
 !.claude/rules/
 !.claude/settings.json
-!.claude/dispatch-config.json
+.claude/dispatch-config.json
 !.claude/verify.config.json
 
 node_modules/
