@@ -22,17 +22,17 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$DIR" ] && [ "${#PATTERNS[@]}" -gt 0 ] || exit 1
-[ "${FAKE_GH_DOWNLOAD:-}" != fail ] || exit 1
-[ -z "${FAKE_GH_DELAY:-}" ] || sleep "$FAKE_GH_DELAY"
+[ "${FAKE_DOWNLOAD:-}" != fail ] || exit 1
+[ -z "${FAKE_DELAY:-}" ] || sleep "$FAKE_DELAY"
 for NAME in "${PATTERNS[@]}"; do
-  [ -f "$FAKE_GH_ASSETS/$NAME" ] || exit 1
+  [ -f "$FAKE_ASSETS/$NAME" ] || exit 1
   if [ "$NAME" != SHA256SUMS ]; then
-    COUNTER="$FAKE_GH_ASSETS/$NAME.count"
+    COUNTER="$FAKE_ASSETS/$NAME.count"
     while ! mkdir "$COUNTER.lock" 2>/dev/null; do sleep 1; done
     COUNT=0
     [ ! -f "$COUNTER" ] || COUNT="$(<"$COUNTER")"
     printf '%s\n' "$((COUNT + 1))" > "$COUNTER"
     rmdir "$COUNTER.lock" || exit 1
   fi
-  cp "$FAKE_GH_ASSETS/$NAME" "$DIR/$NAME" || exit 1
+  cp "$FAKE_ASSETS/$NAME" "$DIR/$NAME" || exit 1
 done

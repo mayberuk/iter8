@@ -5,18 +5,20 @@ iter8 release, calls its lifecycle hooks, and on Claude Code 2.1.296 or later ru
 a mod alongside them. Pairing, process liveness, owner resolution, round state and
 announcements belong to the iter8 CLI and service.
 
-Requirements: `gh` logged in with access to `mayberuk/iter8`, `jq`, and either
-Linux x86_64 or macOS arm64.
+Requirements: `curl`, `jq`, and either Linux x86_64 or macOS arm64. No GitHub
+account or `gh` login is needed.
 
 Install in Claude Code:
 
 ```text
-/plugin install iter8 --marketplace mayberuk/cc-plugins
+/plugin install iter8 --marketplace mayberuk/iter8
 ```
 
 The release must be pinned before installation can succeed. The SessionStart
-wake listener installs it in the background using `gh release download`, checks
-its SHA-256 against both the release checksums and the plugin pin, and verifies
+wake listener installs it in the background with `curl`, downloading the binary and
+`SHA256SUMS` over HTTPS from
+`https://github.com/mayberuk/iter8/releases/download/v<version>/`. It checks the
+binary's SHA-256 against both the release checksums and the plugin pin, and verifies
 its version. Synchronous hooks never install.
 
 | Event | What happens |
@@ -84,11 +86,11 @@ when no release at or above the pin exists, and exports `ITER8_PINNED_VERSION` s
 `current` in the data directory points at the newest installed release and is
 never moved to an older one.
 
-To update the pin from the marketplace checkout:
+To update the pin (a maintainer step, which needs `gh` logged in with access to the
+release), run this from the repository root:
 
 ```bash
 plugins/iter8/scripts/pin-release.sh <version>
-scripts/release.sh iter8 patch
 ```
 
 Install data lives at
@@ -109,7 +111,9 @@ handle this in v1.
 
 ## Maintainer notes
 
-Run the mod's tests with `bash plugins/iter8/mod/run-tests.sh`.
+Run the shell suites (install, hooks, rounds skill) with
+`plugins/iter8/tests/run-all.sh`; they need `bash` and `jq` and no network. Run the
+mod's tests with `bash plugins/iter8/mod/run-tests.sh`, which needs the `claude` CLI.
 
 Never commit `.claude-plugin/types/`. Claude Code writes it next to the mod when it
 loads the plugin from a directory; the test runner keeps it in its temporary copy.

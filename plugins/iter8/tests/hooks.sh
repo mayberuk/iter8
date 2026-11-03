@@ -344,7 +344,7 @@ mkdir -p "$PLUGIN" "$ASSETS" "$FIRST_INSTALL/tools"
 cp -R "$ROOT/bin" "$ROOT/scripts" "$PLUGIN/"
 cp "$ROOT/tests/fixtures/fake-iter8" "$ASSETS/iter8-linux-x64"
 cp "$ROOT/tests/fixtures/fake-iter8" "$ASSETS/iter8-darwin-arm64"
-cp "$ROOT/tests/fixtures/fake-gh" "$FIRST_INSTALL/tools/gh"
+cp "$ROOT/tests/fixtures/fake-curl" "$FIRST_INSTALL/tools/curl"
 printf '%s\n' '#!/usr/bin/env bash' 'case "$1" in' '  -s) printf "%s\n" Linux ;;' '  -m) printf "%s\n" x86_64 ;;' '  *) exit 1 ;;' 'esac' > "$FIRST_INSTALL/tools/uname"
 chmod 755 "$FIRST_INSTALL/tools/uname"
 hash_file() {
@@ -355,10 +355,10 @@ hash_file() {
 LINUX_HASH="$(hash_file "$ASSETS/iter8-linux-x64")"
 DARWIN_HASH="$(hash_file "$ASSETS/iter8-darwin-arm64")"
 printf '%s  iter8-linux-x64\n%s  iter8-darwin-arm64\n' "$LINUX_HASH" "$DARWIN_HASH" > "$ASSETS/SHA256SUMS"
-jq -n --arg linux "$LINUX_HASH" --arg darwin "$DARWIN_HASH" '{version:"9.9.9",sha256:{"iter8-linux-x64":$linux,"iter8-darwin-arm64":$darwin}}' > "$PLUGIN/release.json"
+jq -n --arg linux "$LINUX_HASH" --arg darwin "$DARWIN_HASH" '{repo:"mayberuk/iter8",version:"9.9.9",sha256:{"iter8-linux-x64":$linux,"iter8-darwin-arm64":$darwin}}' > "$PLUGIN/release.json"
 export ITER8_PLUGIN_DATA="$FIRST_INSTALL/data" FAKE_ITER8_REGISTERED="$FIRST_INSTALL/owner" FAKE_ITER8_MODE=silent
-export FAKE_GH_ASSETS="$ASSETS" FAKE_GH_LOG="$FIRST_INSTALL/gh.log"
-unset ITER8_BIN ITER8_NO_INSTALL FAKE_GH_AUTH FAKE_GH_DELAY FAKE_GH_DOWNLOAD
+export FAKE_ASSETS="$ASSETS" FAKE_CURL_LOG="$FIRST_INSTALL/curl.log" FAKE_CURL_REPO=mayberuk/iter8 FAKE_CURL_VERSION=9.9.9
+unset ITER8_BIN ITER8_NO_INSTALL FAKE_DELAY FAKE_DOWNLOAD
 TEST_PATH="$FIRST_INSTALL/tools:$TMP/tools:$PATH"
 INPUT='{"session_id":"json label","source":"clear","hook_event_name":"SessionStart"}'
 INSTALLED="$ITER8_PLUGIN_DATA/releases/v9.9.9/iter8"
@@ -372,7 +372,7 @@ if [ -x "$INSTALLED" ]; then pass 'wake installs the pinned binary'; else fail '
 assert_eq "$CALLS" "$REGISTER_CALLS" 'first installed wake waits, registers, then waits with exact flags'
 if [ -f "$FAKE_ITER8_REGISTERED" ]; then pass 'first installed wake creates the owner'; else fail 'first installed wake creates the owner'; fi
 assert_contains "$(<"$ITER8_PLUGIN_DATA/hooks.log")" 'wake owner missing at SessionStart; registering' 'first installed wake logs registration'
-unset ITER8_PLUGIN_DATA FAKE_ITER8_REGISTERED FAKE_GH_ASSETS FAKE_GH_LOG
+unset ITER8_PLUGIN_DATA FAKE_ITER8_REGISTERED FAKE_ASSETS FAKE_CURL_LOG FAKE_CURL_REPO FAKE_CURL_VERSION
 export ITER8_BIN="$ROOT/tests/fixtures/fake-iter8"
 TEST_PATH="$TMP/tools:$PATH"
 
@@ -418,10 +418,10 @@ assert_eq "$CALLS" '' 'missing process skips CLI'
 normal_ancestry
 
 unset ITER8_BIN
-printf '%s\n%s\n' 'gh authentication failed' 'second line must stay private' > "$DATA/install-error"
+printf '%s\n%s\n' 'release download failed' 'second line must stay private' > "$DATA/install-error"
 run "$HOOK" start
 assert_eq "$RC" 0 'missing pinned release exits 0'
-assert_eq "$OUT" 'iter8 is not installed: gh authentication failed' 'missing release reports only first install-error line'
+assert_eq "$OUT" 'iter8 is not installed: release download failed' 'missing release reports only first install-error line'
 assert_eq "$ERR" '' 'missing release suppresses launcher stderr'
 run "$WAKE"
 quiet 'missing binary wake'

@@ -52,6 +52,8 @@ VERSION="$(jq -er '.version | select(type == "string")' "$ROOT/release.json" 2>/
 VERSION_FORMAT='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 [[ "$VERSION" =~ $VERSION_FORMAT ]] || fail 78 'no valid iter8 release is pinned — run scripts/pin-release.sh <version>'
 
+REPO="$(jq -er '.repo | select(type == "string") | select(test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))' "$ROOT/release.json" 2>/dev/null)" || fail 78 'release.json has no valid repo'
+
 SYSTEM="$(uname -s)" || fail 71 'cannot detect platform; supported platforms are linux-x64 and darwin-arm64'
 MACHINE="$(uname -m)" || fail 71 'cannot detect platform; supported platforms are linux-x64 and darwin-arm64'
 case "$SYSTEM/$MACHINE" in
@@ -94,11 +96,13 @@ if [ -f "$BIN" ] && [ -x "$BIN" ]; then
   exit 0
 fi
 
-command -v gh >/dev/null 2>&1 || fail 73 'gh is not installed — install GitHub CLI to download iter8'
-gh auth status >/dev/null 2>&1 || fail 74 'run gh auth login with access to mayberuk/iter8'
+command -v curl >/dev/null 2>&1 || fail 73 'curl is not installed — install curl to download iter8'
 TEMP="$(mktemp -d "$RELEASE_DIR/.download.XXXXXX")" || fail 76 'cannot create download directory'
 printf 'iter8: downloading %s from v%s\n' "$ASSET" "$VERSION" >&2
-gh release download "v$VERSION" --repo mayberuk/iter8 --pattern "$ASSET" --pattern SHA256SUMS --dir "$TEMP" >&2 || fail 76 'release download failed'
+BASE_URL="https://github.com/$REPO/releases/download/v$VERSION"
+for NAME in "$ASSET" SHA256SUMS; do
+  curl --fail --silent --show-error --location --proto '=https' --retry 2 --output "$TEMP/$NAME" "$BASE_URL/$NAME" >&2 || fail 76 "release download failed: $BASE_URL/$NAME"
+done
 [ -f "$TEMP/$ASSET" ] && [ -f "$TEMP/SHA256SUMS" ] || fail 76 'release download did not provide the binary and SHA256SUMS'
 
 EXPECTED=""
