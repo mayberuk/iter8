@@ -259,8 +259,8 @@ describe("the host and a native dialog", () => {
         "the host to be in the dialog",
         async () => (await hostParent(o.page)) === "DIALOG",
       )
-      await until("the dock to show", () => o.overlay.getByRole("toolbar").isVisible())
-      expect(await dockHit(o.page)).toBe(true)
+      // A freshly mounted dock is visible while it is still moving in; a slow runner sampled it mid-entrance.
+      await until("the dock to take clicks", () => dockHit(o.page))
     },
     TEST_MS,
   )
