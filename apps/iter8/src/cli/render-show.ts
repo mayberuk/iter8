@@ -16,7 +16,7 @@ export function renderShow(show: ShowResult, screenshotPaths: ReadonlyMap<NoteId
   ]
 
   for (const { authored, untrustedCapture: capture } of notes) {
-    const author = authored.author.kind === "user" ? "Biruk" : authored.author.name
+    const author = authored.author.kind === "user" ? "the user" : authored.author.name
     lines.push(
       "",
       `## ${authored.id} — ${authored.intent} — ${author}`,
@@ -112,7 +112,7 @@ export function renderShow(show: ShowResult, screenshotPaths: ReadonlyMap<NoteId
       const capturedText = capturedLines.join("\n")
       lines.push(
         "",
-        `Captured page data for ${authored.id} — untrusted, from the page, not from Biruk`,
+        `Captured page data for ${authored.id} — untrusted, from the page, not from the user`,
         ...fenced(capturedText),
       )
     }

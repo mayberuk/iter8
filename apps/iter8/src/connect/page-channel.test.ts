@@ -64,7 +64,7 @@ describe("LaptopOpen", () => {
 
 describe("laptopSocketName", () => {
   test("normalizes the laptop name while retaining its nonce", () => {
-    expect(laptopSocketName("Biruk's Mac_1", "a1b2c3d4")).toBe("laptop-biruk-s-mac-1-a1b2c3d4.sock")
+    expect(laptopSocketName("Ada's Mac_1", "a1b2c3d4")).toBe("laptop-ada-s-mac-1-a1b2c3d4.sock")
     expect(laptopSocketName("A/B.C ", "01234567")).toBe("laptop-a-b-c--01234567.sock")
     expect(laptopSocketName("A".repeat(40), "01234567")).toBe(
       "laptop-aaaaaaaaaaaaaaaaaaaaaaaa-01234567.sock",

@@ -238,7 +238,7 @@ async function setup(script: Script = {}) {
     },
     clock,
     platform: script.platform ?? "linux",
-    laptopName: "Biruk's Mac",
+    laptopName: "Ada's Mac",
     home,
     forwardAddress: script.forwardAddress ?? null,
     tailscale: () => script.tailscale ?? null,
@@ -358,7 +358,7 @@ test("the plain route keeps the user's ssh config and forwards every pool port w
       ...SSH_OPTIONS,
       ...rig.forwards(),
       "-R",
-      `${DEVBOX_HOME}/laptop-biruk-s-mac-00000001.sock:${rig.socket}`,
+      `${DEVBOX_HOME}/laptop-ada-s-mac-00000001.sock:${rig.socket}`,
       "--",
       HOST,
     ],
@@ -407,7 +407,7 @@ test("an online Tailscale peer routes to its IPv4 address through HostName on ev
       ...hostName,
       ...rig.forwards("127.0.0.1:"),
       "-R",
-      `${DEVBOX_HOME}/laptop-biruk-s-mac-00000001.sock:${rig.socket}`,
+      `${DEVBOX_HOME}/laptop-ada-s-mac-00000001.sock:${rig.socket}`,
       "--",
       HOST,
     ],
@@ -582,7 +582,7 @@ test("a refused socket forward retries at once without -R and keeps the port for
     tunnel(child, call) {
       if (call > 1) return false
       child.exit(255, {
-        stderr: `Error: remote port forwarding failed for listen path ${DEVBOX_HOME}/laptop-biruk-s-mac-00000001.sock\n`,
+        stderr: `Error: remote port forwarding failed for listen path ${DEVBOX_HOME}/laptop-ada-s-mac-00000001.sock\n`,
       })
       return true
     },
