@@ -8,6 +8,10 @@ For earlier history, see the git tags.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+The first release from the public repository.
+
 ### Added
 
 - The Claude Code plugin and its marketplace now live in this repository: install with `/plugin marketplace add mayberuk/iter8`, then `/plugin install iter8@iter8`.
