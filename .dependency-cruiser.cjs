@@ -81,7 +81,7 @@ module.exports = {
   options: {
     // TypeScript 7 cannot drive dependency-cruiser, so SWC must parse the source instead.
     parser: "swc",
-    exclude: "(^|/)(dist|docs|\\.claude)(/|$)",
+    exclude: "(^|/)(dist|docs|plugins|\\.claude)(/|$)",
     // Excluding these paths would erase the imports that the boundary rules must reject.
     doNotFollow: { path: "(^|/)(node_modules|fixtures|playground)(/|$)" },
     enhancedResolveOptions: {

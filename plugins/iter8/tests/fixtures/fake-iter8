@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+if [ "${1:-}" = --version ]; then
+  printf 'iter8 %s\n' "${FAKE_ITER8_VERSION:-9.9.9}"
+  exit 0
+fi
+
+if [ -n "${FAKE_ITER8_STDIN:-}" ] && [ "${1:-} ${2:-}" = "hook stop" ]; then
+  cat > "$FAKE_ITER8_STDIN"
+fi
+
+MODE="${FAKE_ITER8_MODE:-silent}"
+if [ "$MODE" = sleep ]; then
+  sleep "${FAKE_ITER8_SLEEP:-3}"
+fi
+{
+  for ARG in "$@"; do printf '%s\t' "$ARG"; done
+  printf 'ITER8_NO_INSTALL=%s\n' "${ITER8_NO_INSTALL-<unset>}"
+} >> "$FAKE_ITER8_LOG"
+
+POINTER_ONE='Review round R12 from larkspur · 7 notes — run `iter8 show R12`'
+POINTER_TWO='Review round R3 from ab · 1 note — run `iter8 show R3`'
+if [ -n "${FAKE_ITER8_REGISTERED:-}" ] && [ "${1:-}" = hook ]; then
+  case "${2:-}" in
+    wait)
+      if [ ! -e "$FAKE_ITER8_REGISTERED" ]; then
+        printf 'No owner registered for pid %s\n' "${4:-}" >&2
+        exit 3
+      fi
+      ;;
+    start)
+      case "${FAKE_ITER8_START:-register}" in
+        register|register-pointer)
+          : > "$FAKE_ITER8_REGISTERED" || exit 1
+          if [ "${FAKE_ITER8_START:-register}" = register-pointer ]; then
+            printf '%s\n' "$POINTER_TWO"
+          fi
+          exit 0
+          ;;
+        fail) exit 5 ;;
+        noop) exit 0 ;;
+        *) exit 64 ;;
+      esac
+      ;;
+  esac
+fi
+if [ "$MODE" = fail ]; then
+  printf '%s\n' "$POINTER_ONE" >&2
+  exit "${FAKE_ITER8_CODE:-1}"
+fi
+if [ "$MODE" = stdout-wake ]; then
+  printf '%s\n%s\n' "$POINTER_ONE" "$POINTER_TWO"
+  exit 2
+fi
+emit() {
+  case "$MODE" in
+    pointer) printf '%s\n%s\n' "$POINTER_ONE" "$POINTER_TWO" ;;
+    leak) printf '%s\n%s\n%s\n' "$POINTER_ONE" 'secret note content' '```untrusted capture secret```' ;;
+    toolong)
+      for ID in 1 2 3 4 5 6 7; do
+        printf 'Review round R%s from larkspur · 2 notes — run `iter8 show R%s`\n' "$ID" "$ID"
+      done
+      ;;
+    mismatch) printf '%s\n' 'Review round R12 from larkspur · 7 notes — run `iter8 show R13`' ;;
+    plural)
+      printf '%s\n' 'Review round R1 from ab · 1 notes — run `iter8 show R1`' 'Review round R2 from ab · 2 note — run `iter8 show R2`'
+      ;;
+    raw) printf '%b' "${FAKE_ITER8_TEXT:-}" ;;
+    silent|sleep) ;;
+    *) exit 64 ;;
+  esac
+}
+if [ "${2:-}" = wait ]; then
+  case "$MODE" in
+    silent|sleep) exit 0 ;;
+    *) emit >&2; exit 2 ;;
+  esac
+fi
+emit
+exit 0

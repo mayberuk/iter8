@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+printf -v ARGS '%q ' "$@"
+printf '%s\n' "${ARGS% }" >> "$FAKE_CURL_LOG"
+OUTPUT=""
+URL=""
+PROTO=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) [ "$#" -ge 2 ] || exit 2; OUTPUT="$2"; shift 2 ;;
+    --proto) [ "$#" -ge 2 ] || exit 2; PROTO="$2"; shift 2 ;;
+    --retry) [ "$#" -ge 2 ] || exit 2; shift 2 ;;
+    --fail|--silent|--show-error|--location) shift ;;
+    -*) exit 2 ;;
+    *) URL="$1"; shift ;;
+  esac
+done
+[ -n "$OUTPUT" ] && [ -n "$URL" ] || exit 2
+[ "$PROTO" = '=https' ] || exit 2
+PREFIX="https://github.com/$FAKE_CURL_REPO/releases/download/v$FAKE_CURL_VERSION/"
+[[ "$URL" = "$PREFIX"* ]] || exit 22
+NAME="${URL#"$PREFIX"}"
+[ "${FAKE_DOWNLOAD:-}" != fail ] || exit 22
+[ -z "${FAKE_DELAY:-}" ] || sleep "$FAKE_DELAY"
+[ -f "$FAKE_ASSETS/$NAME" ] || exit 22
+if [ "$NAME" != SHA256SUMS ]; then
+  COUNTER="$FAKE_ASSETS/$NAME.count"
+  while ! mkdir "$COUNTER.lock" 2>/dev/null; do sleep 1; done
+  COUNT=0
+  [ ! -f "$COUNTER" ] || COUNT="$(<"$COUNTER")"
+  printf '%s\n' "$((COUNT + 1))" > "$COUNTER"
+  rmdir "$COUNTER.lock" || exit 1
+fi
+cp "$FAKE_ASSETS/$NAME" "$OUTPUT"

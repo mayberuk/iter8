@@ -1,0 +1,6 @@
+{
+  "modules": ["./register.ts"],
+  "hooks": {
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-tool.sh", "timeout": 5}]}]
+  }
+}

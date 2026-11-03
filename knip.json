@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": [".claude/**"],
+  "ignore": [".claude/**", "plugins/**"],
   "ignoreWorkspaces": ["fixtures/*", "playground"],
   "ignoreBinaries": ["iter8"],
   "workspaces": {
@@ -10,7 +10,8 @@
         "apps/overlay/src/main.tsx",
         "packages/source/src/index.ts",
         "scripts/*.ts",
-        "**/*.test.ts"
+        "**/*.test.ts",
+        "!plugins/**"
       ],
       "project": ["apps/**/*.{ts,tsx}", "packages/source/**/*.ts", "scripts/**/*.ts"],
       "ignoreDependencies": [

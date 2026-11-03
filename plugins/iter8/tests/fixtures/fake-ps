@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+[ "$#" -eq 4 ] && [ "$1" = -o ] && [ "$3" = -p ] || exit 1
+while read -r PID PARENT COMM; do
+  if [ "$PID" = "$4" ]; then
+    case "$2" in
+      ppid=) printf ' %s\n' "$PARENT" ;;
+      comm=) printf ' %s\n' "$COMM" ;;
+      *) exit 1 ;;
+    esac
+    exit 0
+  fi
+done < "$FAKE_PS_TABLE"
+exit 1

@@ -1,0 +1,8 @@
+{
+  "repo": "mayberuk/iter8",
+  "version": "0.4.6",
+  "sha256": {
+    "iter8-linux-x64": "caecef50e752a44deba6a6a9f745f163c4f96eadce418ddac6ef6e8ef11c296d",
+    "iter8-darwin-arm64": "3611b8c6bed5cd665cb4064d38f58d6937e9ae052df3eb43597af50d014b72da"
+  }
+}

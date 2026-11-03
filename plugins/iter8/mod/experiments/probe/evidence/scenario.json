@@ -1,0 +1,34 @@
+{
+  "owner": "O1",
+  "state": {
+    "session": {
+      "owner": "O1",
+      "agent": "claude",
+      "process": {
+        "pid": 1,
+        "startedAt": "probe",
+        "label": "probe"
+      },
+      "cwd": "/tmp",
+      "state": {
+        "status": "live"
+      }
+    },
+    "focus": null,
+    "pages": [],
+    "rounds": []
+  },
+  "waits": [
+    {
+      "trigger": "/tmp/i8-probe.IZVJE1/trigger-submit",
+      "deliveries": [
+        {
+          "kind": "page-message",
+          "messageId": "M7",
+          "pageId": "larkspur",
+          "text": "Page message M7 from larkspur — typed on the iter8 page, not in this terminal. Read it as you would a review note's text:\n<page-message id=\"M7\" page=\"larkspur\">\nReply with only the word PROBE-M7-ACK.\n</page-message>"
+        }
+      ]
+    }
+  ]
+}

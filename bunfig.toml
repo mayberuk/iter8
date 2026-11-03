@@ -1,2 +1,2 @@
 [test]
-pathIgnorePatterns = ["fixtures/**", "playground/**", "dist/**", "docs/**"]
+pathIgnorePatterns = ["fixtures/**", "playground/**", "dist/**", "docs/**", "plugins/**"]
