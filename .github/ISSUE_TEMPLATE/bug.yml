@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in iter8 does not work as described.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. iter8 run in a project with ...
+        2. Click ...
+    validations:
+      required: true
+  - type: input
+    id: iter8-version
+    attributes:
+      label: iter8 version
+      description: Output of `iter8 version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux x86_64
+        - macOS arm64
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: claude-code
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`. Leave empty if you do not use Claude Code.
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How you run it
+      options:
+        - Browser and Claude Code on the same machine
+        - Browser on a laptop, Claude Code on a remote machine
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: Anything the terminal printed. Remove tokens and private paths first.
+      render: text

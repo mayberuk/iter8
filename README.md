@@ -1,73 +1,59 @@
 # iter8
 
-Point at a running web page and mark it up. Hand the round of notes to the Claude Code session that owns the page.
+Point at a running web page, mark it up, and hand the round of notes to the coding agent session that owns the page. Claude Code is the supported agent today; others are planned.
 
-## Use it
+You click elements on the page, write a note on each, and press Send. The session that started the page gets a pointer to the round and reads the notes with each element's selector and, where iter8 can find it, source location, so it can act on each one without asking which thing you meant.
 
-After the Claude Code plugin installs iter8, install the terminal command on the machine that runs your projects:
+## Requirements
+
+- Linux x86_64 or macOS arm64
+- Claude Code 2.1.296 or later, for the mod that starts a turn when a round arrives; the hooks alone work on older releases
+- `jq`, which the plugin's hooks use
+
+## Install
+
+In Claude Code:
+
+```text
+/plugin marketplace add mayberuk/iter8
+/plugin install iter8@iter8
+```
+
+Then, on the machine that runs your projects, put the `iter8` command on your PATH:
 
 ```sh
 iter8 setup
 ```
 
-If setup says `~/.local/bin` is missing from PATH, add it in your shell profile.
-
-For a browser on your laptop, run this on the laptop:
+Standalone, on a machine without Claude Code (for example the laptop side of a remote dev server):
 
 ```sh
-iter8 setup <devbox>
+curl -fsSL https://raw.githubusercontent.com/mayberuk/iter8/main/install.sh | sh
+iter8 setup <host>
 ```
 
-Replace `<devbox>` with your SSH host name; the connection starts at login, reconnects after sleep or network changes, and follows newer verified releases on the devbox.
+`<host>` is the SSH host name of the machine where Claude Code runs.
 
-In your project directory, start the page:
+## Your first round
+
+In your project directory:
 
 ```sh
 iter8 run
 ```
 
-It runs the project's `dev` or `start` script, or serves its HTML files, and opens the page through the proxy in your local browser or on connected laptops; Ctrl-C stops the dev server and keeps the page's pins and pairing for the next run.
+It starts the project's `dev` or `start` script (or serves its HTML files) and opens the page through iter8's proxy. Click an element, write what you want changed, and press Send. Then tell the Claude Code session you left comments, or let the Send button deliver them; the session resolves each note with `iter8 done`.
 
-To choose the command yourself, replace `<cmd>` with your dev server command:
+`iter8 help` lists every command.
 
-```sh
-iter8 run -- <cmd>
-```
+## Docs
 
-The chosen port arrives as `PORT`; if the command ignores it, iter8 uses the URL the server prints.
+The site is at <https://mayberuk.github.io/iter8-site/>. To work on iter8 itself, read [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem, read [SECURITY.md](SECURITY.md).
 
-If both machines run iter8 with the same pool, give one a different `pool` in its `config.json`.
+## A note on the name
 
-`iter8 help` lists every command; `iter8 help <command>` or `iter8 <command> --help` shows its arguments and flags.
+The name `iter8` is shared with an unrelated Kubernetes experimentation tool. This project has nothing to do with it.
 
-## Work on it
+## Licence
 
-Prerequisites: Bun 1.4.2 and Node 22.12+ for the fixture apps.
-
-```sh
-bun install
-bun run setup:browsers
-bun run dev
-```
-
-`bun run dev` watches the service and overlay and opens the permanent playground through the proxy; its state is in `~/.iter8-dev` with ports 3970–3973, so it can run alongside installed iter8.
-
-In another terminal, start Claude Code with the source CLI:
-
-```sh
-bun run dev:claude
-```
-
-To open the same playground with installed iter8:
-
-```sh
-bun run prod
-```
-
-Run `bun run check` for the full gate.
-
-`bun run build` writes the host binary to `dist/iter8` and the overlay bundles to `dist/overlay/`.
-
-The settled design lives in [docs/design/README.md](docs/design/README.md). Testing conventions live in [.claude/docs/TESTING.md](.claude/docs/TESTING.md).
-
-`bun run release` builds the linux-x64 and darwin-arm64 releases.
+[MIT](LICENSE). Bundled dependencies are listed in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
