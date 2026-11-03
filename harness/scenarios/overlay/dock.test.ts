@@ -1245,6 +1245,8 @@ function shimmer(page: Page) {
       copied: { name: own(".hn"), where: own(".hw"), word: own(".hs") },
       base: { name: text(".proj"), where: text(".where"), word: text(".stword .w") },
       hidden: window.getAttribute("aria-hidden"),
+      // Read in the same evaluate as the animations: a separate read can land after the state changes.
+      dockClass: root.querySelector(".dock")?.getAttribute("class") ?? "",
     }
   })
 }
@@ -1320,9 +1322,7 @@ describe("the dock's state shimmer", () => {
       "the delivered shimmer",
       async () => {
         const now = await shimmer(o.page)
-        return now.window.length > 0 && (await dockClass(o.overlay))?.includes("s-delivered")
-          ? now
-          : null
+        return now.window.length > 0 && now.dockClass.includes("s-delivered") ? now : null
       },
       { timeoutMs: 2000, everyMs: 25 },
     )
