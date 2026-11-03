@@ -11,7 +11,8 @@ account or `gh` login is needed.
 Install in Claude Code:
 
 ```text
-/plugin install iter8 --marketplace mayberuk/iter8
+/plugin marketplace add mayberuk/iter8
+/plugin install iter8@iter8
 ```
 
 The release must be pinned before installation can succeed. The SessionStart

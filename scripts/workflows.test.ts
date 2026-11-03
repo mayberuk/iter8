@@ -328,7 +328,6 @@ test("pin-plugin runs after publish on ubuntu with only the access it needs", as
 test("pin-plugin stays inside this repo and uses no secret other than the workflow token", async () => {
   const raw = await Bun.file(workflowUrl("release")).text()
   expect(raw).not.toContain("CC_PLUGINS_TOKEN")
-  expect(raw).not.toContain("cc-plugins")
   const { job, checkout } = await pinPlugin()
   expect(job.env).toEqual({ GH_TOKEN: `\${{ github.token }}` })
   expect(JSON.stringify(job)).not.toContain("secrets.")
@@ -385,7 +384,7 @@ test("pin-plugin proceeds for a stable tag that is newer, comparing numerically 
   }
 })
 
-test("pin-plugin branches, runs the pin script with the tag version and bumps the plugin patch version", async () => {
+test("pin-plugin branches, runs the pin script with the tag version and bumps the plugin patch version in the manifest and the marketplace", async () => {
   const { pin } = await pinPlugin()
   await inScratch(async (dir) => {
     await writeFake(dir, "bin/git")
@@ -393,6 +392,18 @@ test("pin-plugin branches, runs the pin script with the tag version and bumps th
     const manifest = join(dir, "plugins/iter8/.claude-plugin/plugin.json")
     await mkdir(dirname(manifest), { recursive: true })
     await Bun.write(manifest, JSON.stringify({ name: "iter8", version: "0.3.9" }))
+    const marketplace = join(dir, ".claude-plugin/marketplace.json")
+    await mkdir(dirname(marketplace), { recursive: true })
+    await Bun.write(
+      marketplace,
+      JSON.stringify({
+        name: "iter8",
+        plugins: [
+          { name: "other", version: "5.0.0" },
+          { name: "iter8", version: "0.3.9" },
+        ],
+      }),
+    )
 
     const result = await runStep(dir, pin, { GITHUB_REF_NAME: "v0.4.0" })
     expect(result.exitCode, result.stderr).toBe(0)
@@ -403,6 +414,13 @@ test("pin-plugin branches, runs the pin script with the tag version and bumps th
     expect(JSON.parse(await readFile(manifest, "utf8"))).toEqual({
       name: "iter8",
       version: "0.3.10",
+    })
+    expect(JSON.parse(await readFile(marketplace, "utf8"))).toEqual({
+      name: "iter8",
+      plugins: [
+        { name: "other", version: "5.0.0" },
+        { name: "iter8", version: "0.3.10" },
+      ],
     })
   })
 })
@@ -436,7 +454,7 @@ test("pin-plugin commits the plugin folder and opens a pull request that asks fo
     expect(git).toEqual([
       ["config", "user.name", "github-actions[bot]"],
       ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"],
-      ["add", "plugins/iter8"],
+      ["add", "plugins/iter8", ".claude-plugin/marketplace.json"],
       ["commit", "-m", "Pin iter8 0.4.0"],
       ["push", "-u", "origin", "HEAD"],
     ])

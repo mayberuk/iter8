@@ -184,10 +184,14 @@ jobs:
           git switch -c "iter8-pin-$VERSION"
           plugins/iter8/scripts/pin-release.sh "$VERSION"
           MANIFEST=plugins/iter8/.claude-plugin/plugin.json
+          MARKETPLACE=.claude-plugin/marketplace.json
           IFS=. read -r MAJOR MINOR PATCH <<< "$(jq -er .version "$MANIFEST")"
+          NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
           BUMPED=$(mktemp)
-          jq --arg v "$MAJOR.$MINOR.$((PATCH + 1))" '.version = $v' "$MANIFEST" > "$BUMPED"
+          jq --arg v "$NEXT" '.version = $v' "$MANIFEST" > "$BUMPED"
           mv "$BUMPED" "$MANIFEST"
+          jq --arg v "$NEXT" '(.plugins[] | select(.name == "iter8") | .version) = $v' "$MARKETPLACE" > "$BUMPED"
+          mv "$BUMPED" "$MARKETPLACE"
       - name: Open the pin pull request
         if: steps.decide.outputs.pin == 'true'
         env:
@@ -196,10 +200,10 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugins/iter8
+          git add plugins/iter8 .claude-plugin/marketplace.json
           git commit -m "Pin iter8 $VERSION"
           git push -u origin HEAD
-          BODY="Pins the iter8 plugin to release v$VERSION and bumps the plugin version.
+          BODY="Pins the iter8 plugin to release v$VERSION and bumps the plugin version in its manifest and in the marketplace listing.
 
           This pull request was opened with the workflow token, so GitHub does not run its checks on its own: a maintainer with write access must click \"Approve workflows to run\" (or push to the branch with a personal token) before the required checks report. Auto-merge is deliberately not enabled; merge by hand once the checks pass."
           gh pr create --base "$BASE" --title "Pin iter8 $VERSION" --body "$BODY"

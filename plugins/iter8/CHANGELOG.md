@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 — 2026-11-03
+
+- The plugin now lives in the iter8 repository (`plugins/iter8/`, listed by `.claude-plugin/marketplace.json`) and installs over HTTPS with no `gh` login: `/plugin marketplace add mayberuk/iter8`, then `/plugin install iter8@iter8`. The pinned iter8 release is unchanged (v0.4.6). Test data and docs no longer carry personal names or hostnames.
+
 ## 0.3.8 — 2026-10-29
 
 - Hooks run on macOS's built-in bash 3.2: the launcher's version compare no longer joins BASH_REMATCH into one word under IFS=., which made every hook exit 1 before running a release. A failed hook now logs the first line the CLI wrote to stderr, so the reason is in hooks.log.
@@ -36,7 +40,7 @@
 ## 0.3.0 — 2026-10-12
 
 - The launcher runs the newest installed iter8 release at or above the pin instead of exactly the pin, and exports ITER8_PINNED_VERSION. Installing a release repoints current at the newest installed release and never moves it back. The rounds skill tells the agent to start a site with iter8 run as a background task.
-- Pin the iter8 binary to release v0.4.0: iter8 run starts a project's dev server and opens it through the proxy, iter8 setup installs the terminal command (and with a host, iter8 connect at login), the laptop's connect follows the devbox's newer releases, and notes survive a service restart.
+- Pin the iter8 binary to release v0.4.0: iter8 run starts a project's dev server and opens it through the proxy, iter8 setup installs the terminal command (and with a host, iter8 connect at login), the laptop's connect follows the remote machine's newer releases, and notes survive a service restart.
 
 ## 0.2.3 — 2026-10-12
 
