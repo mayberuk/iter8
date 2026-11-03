@@ -8,6 +8,7 @@
       "!docs",
       "!fixtures",
       "!playground",
+      "!plugins",
       "!harness/scenarios/overlay/dark-neutral-tokens.css",
       "!**/dist",
       "!**/node_modules",
