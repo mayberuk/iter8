@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+if [ "${ITER8_BIN+x}" = x ]; then
+  if [ ! -f "$ITER8_BIN" ] || [ ! -x "$ITER8_BIN" ]; then
+    printf 'iter8: ITER8_BIN=%s is not executable\n' "$ITER8_BIN" >&2
+    exit 127
+  fi
+  exec "$ITER8_BIN" "$@"
+fi
+
+SELF="${BASH_SOURCE[0]}"
+SELF_DIR="${SELF%/*}"
+[ "$SELF_DIR" = "$SELF" ] && SELF_DIR="."
+ROOT="$(cd -- "$SELF_DIR/.." && pwd)"
+RELEASE=""
+[ ! -r "$ROOT/release.json" ] || RELEASE="$(<"$ROOT/release.json")"
+VERSION_FIELD='"version"[[:space:]]*:[[:space:]]*"([^"]+)"'
+VERSION_FORMAT='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+if [[ "$RELEASE" =~ $VERSION_FIELD ]]; then
+  VERSION="${BASH_REMATCH[1]}"
+else
+  VERSION=""
+fi
+if ! [[ "$VERSION" =~ $VERSION_FORMAT ]]; then
+  printf '%s\n' 'iter8: no iter8 release is pinned yet — run scripts/pin-release.sh <version>' >&2
+  exit 78
+fi
+
+DATA="${ITER8_PLUGIN_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/iter8-claude-plugin}"
+. "$ROOT/scripts/lib.sh"
+iter8_newest_release "$DATA" "$VERSION"
+BIN="$ITER8_NEWEST_BIN"
+if [ -z "$BIN" ]; then
+  BIN="$DATA/releases/v$VERSION/iter8"
+  if [ "${ITER8_NO_INSTALL:-}" = 1 ]; then
+    printf 'iter8: pinned binary is missing at %s (ITER8_NO_INSTALL=1)\n' "$BIN" >&2
+    exit 69
+  fi
+  "$ROOT/scripts/install.sh" || exit "$?"
+fi
+export ITER8_PINNED_VERSION="$VERSION"
+exec "$BIN" "$@"

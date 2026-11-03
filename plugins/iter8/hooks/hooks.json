@@ -1,0 +1,24 @@
+{
+  "description": "Pair Claude Code sessions with iter8 and relay only round pointers: a mod starts a turn per round and shows the round pane, Send now reaches a busy Claude between tool calls, and shell wakes cover sessions the mod does not run in.",
+  "modules": ["../mod/register.ts"],
+  "hooks": {
+    "SessionStart": [{"hooks": [
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/hook.sh\" start", "timeout": 10, "statusMessage": "Pairing with iter8..."},
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/wake.sh\"", "async": true, "asyncRewake": true, "timeout": 86400}
+    ]}],
+    "UserPromptSubmit": [{"hooks": [
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/hook.sh\" prompt", "timeout": 5},
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/wake.sh\"", "async": true, "asyncRewake": true, "timeout": 86400}
+    ]}],
+    "PostToolUse": [{"hooks": [
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/hook.sh\" tool", "timeout": 5}
+    ]}],
+    "Stop": [{"hooks": [
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/hook.sh\" stop", "timeout": 5},
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/wake.sh\"", "async": true, "asyncRewake": true, "timeout": 86400}
+    ]}],
+    "SessionEnd": [{"hooks": [
+      {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/hook.sh\" end", "timeout": 2}
+    ]}]
+  }
+}
