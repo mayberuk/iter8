@@ -1,6 +1,6 @@
 # Testing
 
-Biruk is not the QA. Every behaviour a part ships is proven by a test the gate runs, against the
+The user is not the QA. Every behaviour a part ships is proven by a test the gate runs, against the
 real thing wherever the real thing is cheap enough to start. `.claude/docs/TESTING.md` has the
 commands.
 
@@ -13,7 +13,7 @@ commands.
 - **Scenario** (`harness/scenarios/<part>/*.test.ts`, `bun test`): the real service on a
   throwaway state dir and ports, a real fixture app, headless Chromium through Playwright, and the
   stub agent session from `harness/stubs/` standing in for Claude Code. A user-visible behaviour
-  is done when a scenario drives it the way Biruk would and asserts what he would see.
+  is done when a scenario drives it the way the user would and asserts what they would see.
 
 ## Always
 - Inject the boundary a unit test needs to fake (`fetch`, `spawn`, the clock, the state dir); the

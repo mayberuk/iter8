@@ -272,10 +272,10 @@ const INTENTS = [
 ];
 const IL = Object.fromEntries(INTENTS.map(i=>[i.k,i.label]));
 const SESSIONS = [
-  {id:'larkspur', name:'larkspur', where:'devbox:3999', ago:'this page'},
-  {id:'tern', name:'tern', where:'devbox:4100', ago:'active 2 min ago'},
+  {id:'larkspur', name:'larkspur', where:'devhost:3999', ago:'this page'},
+  {id:'tern', name:'tern', where:'devhost:4100', ago:'active 2 min ago'},
   {id:'quarry', name:'quarry', where:'laptop:5173', ago:'active 9 min ago'},
-  {id:'larkspur-api', name:'larkspur-api', where:'devbox:8080', ago:'active 31 min ago'}
+  {id:'larkspur-api', name:'larkspur-api', where:'devhost:8080', ago:'active 31 min ago'}
 ];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));

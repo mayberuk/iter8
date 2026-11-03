@@ -9,7 +9,7 @@ Two independent reviewers: Codex gpt-6.1-sol xhigh (16 findings, `threads/codex-
 - **[delivery]** No durable acceptance, ack or dedupe across push and pull; 10k-char hook cap (Codex #2, Opus #7) — counter. Accepted → decision 4.
 - **[delivery]** asyncRewake timeout enforced, Stop skipped on interrupt — push silently lapses (Opus #2, Codex #14) — counter, verified. Accepted → decision 5.
 - **[lifecycle]** Idle exit strands open pages; startup race; upgrade mismatch; background tasks die with Claude (Opus #8, Codex #7, #8) — counter. Accepted → decision 6.
-- **[transport]** Devbox cannot detect laptop port collisions; laptop-only range overlaps; forwards tied to one SSH connection (Opus #4, Codex #9) — counter. Accepted → decision 7.
+- **[transport]** Remote machine cannot detect laptop port collisions; laptop-only range overlaps; forwards tied to one SSH connection (Opus #4, Codex #9) — counter. Accepted → decision 7.
 - **[proxy]** ETag/304, gzip/streaming, CSP unresolved; multi-port apps and absolute redirects (Opus #5, Codex #10) — counter. Accepted → decision 8.
 - **[isolation]** Cookies are not port-isolated; reused ports inherit service workers (Codex #11) — counter. Accepted → decision 9.
 - **[performance]** Deferred capture still blocks typing; dropped crop caps; new enrichment cost; recycled nodes (Opus #6, Codex #5, #12) — counter. Accepted → decision 10.

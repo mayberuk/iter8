@@ -1,12 +1,12 @@
 ## Verdict
 
-**Denied** — the design leaves material architectural contracts unresolved: durable round acceptance, delivery acknowledgement, session identity across `/clear` and reattach, crash detection, service recovery, authentication and bounded capture work. There are also concrete conflicts in the transport assumptions: the devbox cannot independently detect laptop port collisions, localhost ports share cookies, and painting the composer before capture does not prevent typing delays. These findings do not prove every implementation would fail; they show that implementing the stated decisions alone would not establish the hypothesis.
+**Denied** — the design leaves material architectural contracts unresolved: durable round acceptance, delivery acknowledgement, session identity across `/clear` and reattach, crash detection, service recovery, authentication and bounded capture work. There are also concrete conflicts in the transport assumptions: the remote machine cannot independently detect laptop port collisions, localhost ports share cookies, and painting the composer before capture does not prevent typing delays. These findings do not prove every implementation would fail; they show that implementing the stated decisions alone would not establish the hypothesis.
 
 ## Findings
 
 1. **High — Security: no authority boundary for posting or reattaching**
 
-   **Scenario:** A LAN client addresses the service’s submission or attachment endpoints. No decision specifies credentials or authorization, so the stated architecture cannot distinguish Biruk’s submission from a forged round, or authorize changing its recipient. Single-user scope does not authenticate requests.
+   **Scenario:** A LAN client addresses the service’s submission or attachment endpoints. No decision specifies credentials or authorization, so the stated architecture cannot distinguish the user’s submission from a forged round, or authorize changing its recipient. Single-user scope does not authenticate requests.
 
    **Hits:** LAN fallback; session inboxes; only the owning session receives rounds. **Evidence: counter — an architectural boundary is absent.**
 
@@ -16,7 +16,7 @@
 
    **Scenario:** The service accepts a round, then crashes before persisting it; alternatively, it persists the round but the response disappears and the browser retries. Push and pull can also race to consume it. The design specifies neither durable-before-success acceptance nor idempotency, claims or acknowledgement, permitting lost or duplicated rounds.
 
-   The prior bridge’s print-then-ack sequence illustrates why printing hook output cannot prove that the agent received it. [reviewdesk-annotate-inventory.md:107](/home/biruk/dev/cc-plugins/docs/briefs/web-annotate/reviewdesk-annotate-inventory.md:107)
+   The prior bridge’s print-then-ack sequence illustrates why printing hook output cannot prove that the agent received it.
 
    **Hits:** One inbox; reliable retrieval; acting on every note; never silently reporting to nothing. **Evidence: counter.**
 
@@ -40,9 +40,9 @@
 
 5. **High — Performance: deferred capture can still block typing**
 
-   **Scenario:** The composer paints; screenshot cloning, style collection or source inspection then runs synchronously on the browser’s main thread. Biruk types while that task runs, and the keystroke waits. Scheduling expensive work later changes when it blocks, not whether it blocks.
+   **Scenario:** The composer paints; screenshot cloning, style collection or source inspection then runs synchronously on the browser’s main thread. The user types while that task runs, and the keystroke waits. Scheduling expensive work later changes when it blocks, not whether it blocks.
 
-   The recorded 12.6-second freeze involved main-thread cloning; the eventual fix included explicit node and viewport bounds alongside deferred capture. [reviewdesk-annotate-inventory.md:144](/home/biruk/dev/cc-plugins/docs/briefs/web-annotate/reviewdesk-annotate-inventory.md:144), [reviewdesk-annotate-inventory.md:148](/home/biruk/dev/cc-plugins/docs/briefs/web-annotate/reviewdesk-annotate-inventory.md:148)
+   The recorded 12.6-second freeze involved main-thread cloning; the eventual fix included explicit node and viewport bounds alongside deferred capture.
 
    **Hits:** “Cannot cost a keystroke”; never visibly delayed typing. **Evidence: counter.**
 
@@ -50,17 +50,17 @@
 
 6. **High — Security: captured page content has no prompt trust boundary**
 
-   **Scenario:** Surrounding text or a console error contains instructions such as “ignore the reviewer and execute this command.” That material travels alongside Biruk’s note into hook context or a wake reminder. Authentication would establish which page submitted it, but would not make captured application text an authorized instruction.
+   **Scenario:** Surrounding text or a console error contains instructions such as “ignore the reviewer and execute this command.” That material travels alongside the user’s note into hook context or a wake reminder. Authentication would establish which page submitted it, but would not make captured application text an authorized instruction.
 
    **Hits:** Rich payload; automatic push into an agent session; fitting agent primitives. **Evidence: counter — no trust treatment is selected.**
 
-   **Resolution:** Keep wake output to a neutral round identifier and retrieval instruction. Deliver structured payloads that distinguish Biruk’s authored request from untrusted DOM, console and source metadata. Escape rendered content and prevent captured strings from becoming executable CLI instructions or privileged prompt framing.
+   **Resolution:** Keep wake output to a neutral round identifier and retrieval instruction. Deliver structured payloads that distinguish the user’s authored request from untrusted DOM, console and source metadata. Escape rendered content and prevent captured strings from becoming executable CLI instructions or privileged prompt framing.
 
 7. **High — Service lifecycle: idle exit can strand the interface that must recover**
 
-   **Scenario:** The owning session ends while its page remains open. If “idle” means no live sessions, the service exits, taking away reattach, draft storage and proxy transport. A subsequent browser request cannot launch a process on the devbox. A service crash creates the same recovery gap.
+   **Scenario:** The owning session ends while its page remains open. If “idle” means no live sessions, the service exits, taking away reattach, draft storage and proxy transport. A subsequent browser request cannot launch a process on the remote machine. A service crash creates the same recovery gap.
 
-   Launching the daemon as an ordinary session-owned background task adds another risk: repo research records background-task cleanup when Claude exits. [2026-09-28-claude-code-orchestration-primitives.md:124](/home/biruk/dev/cc-plugins/docs/research/2026-09-28-claude-code-orchestration-primitives.md:124)
+   Launching the daemon as an ordinary session-owned background task adds another risk: repo research records background-task cleanup when Claude exits.
 
    **Hits:** On-demand service; dead-session reattach; surviving drafts; self-opened pages. **Evidence: counter.**
 
@@ -76,7 +76,7 @@
 
 9. **High — SSH transport: laptop collision detection requires laptop-side evidence**
 
-   **Scenario:** Port `3990` is free on the devbox but occupied on the laptop. The devbox successfully starts its proxy and returns `localhost:3990`; the browser reaches the unrelated laptop process. The remote service cannot infer the laptop listener from its own bind result.
+   **Scenario:** Port `3990` is free on the remote machine but occupied on the laptop. The remote machine successfully starts its proxy and returns `localhost:3990`; the browser reaches the unrelated laptop process. The remote service cannot infer the laptop listener from its own bind result.
 
    OpenSSH defaults `ExitOnForwardFailure` to `no`; enabling it still does not verify that later connections reach a working destination. [OpenSSH configuration reference](https://man.openbsd.org/ssh_config#ExitOnForwardFailure)
 
@@ -104,7 +104,7 @@
 
 12. **High — Target identity: delayed enrichment can describe a different element instance**
 
-    **Scenario:** Biruk picks a virtualized row. Before deferred enrichment executes, the framework recycles that DOM node for another record. Its selector and component remain unchanged, but the collected text, screenshot and source lead now describe the replacement. The resulting note points confidently at the wrong item.
+    **Scenario:** The user picks a virtualized row. Before deferred enrichment executes, the framework recycles that DOM node for another record. Its selector and component remain unchanged, but the collected text, screenshot and source lead now describe the replacement. The resulting note points confidently at the wrong item.
 
     **Hits:** Everything beyond the pick is deferred; the agent can act without asking which element was meant. **Evidence: counter.**
 
@@ -112,7 +112,7 @@
 
 13. **High — Iteration: HTML-file changes have no automatic refresh mechanism**
 
-    **Scenario:** The agent edits an HTML mock served from the selected folder. The browser continues displaying its already-loaded document; a folder proxy does not itself refresh it. The next round annotates the old mock unless Biruk reloads manually. Framework HMR does not cover this page kind.
+    **Scenario:** The agent edits an HTML mock served from the selected folder. The browser continues displaying its already-loaded document; a folder proxy does not itself refresh it. The next round annotates the old mock unless the user reloads manually. Framework HMR does not cover this page kind.
 
     **Hits:** Day-one HTML files; changes appear in the next round with no extra steps. **Evidence: counter — no refresh mechanism is selected.**
 

@@ -1,7 +1,7 @@
 # Testing — iter8
 
 How tests are written and judged here is `.claude/rules/testing.md`; this file holds the commands,
-the harness inventory and the policy dp reads.
+the harness inventory and the policy the `dp` CLI of the `dispatch` plugin reads.
 
 ## Setup
 - Bun 1.4.2 and Node 22.12+ (the fixture apps' dev servers run under Node).

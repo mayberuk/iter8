@@ -5,7 +5,7 @@ paths:
 ---
 # Overlay (`apps/overlay`, `packages/source`)
 
-The overlay runs inside someone else's page. It must never cost that page a frame or Biruk a
+The overlay runs inside someone else's page. It must never cost that page a frame or the user a
 keystroke, and the page must never be able to break it.
 
 ## Always

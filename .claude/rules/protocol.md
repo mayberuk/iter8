@@ -16,7 +16,7 @@ that vocabulary; a message that does not parse here does not exist.
 - Keep shapes JSON-safe: what crosses the wire is plain data, so a parsed value round-trips
   through `JSON.stringify` unchanged.
 - Mark captured page data (DOM text, console errors, styles, source leads) as its own schema,
-  separate from the notes Biruk or an agent wrote, so nothing downstream can mix the two.
+  separate from the notes the user or an agent wrote, so nothing downstream can mix the two.
 - Keep `fixtures/*.json` for every message kind, plus one per degraded state (stale capture,
   unresolved anchor, no source lead); one test parses every fixture with its schema.
 

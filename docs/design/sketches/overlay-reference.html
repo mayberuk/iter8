@@ -842,7 +842,7 @@ root.innerHTML = `<style>${CSS}</style>${CLAUDE_SYMBOL}
   <div class="dock chrome" id="dock" role="toolbar" aria-label="Lens annotation tools">
     <div class="idn" id="grip" tabindex="0" role="button" aria-haspopup="menu" aria-label="Session. Drag to move the dock.">
       <span class="vu">${meter()}</span><span id="dAv"></span>
-      <span class="proj" id="dProj">larkspur</span><span class="where" id="dWhere">devbox:3999</span><span class="stword" id="dSt"></span>
+      <span class="proj" id="dProj">larkspur</span><span class="where" id="dWhere">devhost:3999</span><span class="stword" id="dSt"></span>
     </div>
     <i class="vr"></i>
     <div class="seg" role="group" aria-label="Tools">
@@ -888,10 +888,10 @@ const INTENTS = {
 const ORDER = ['fix','change','question','keep'];
 const iv = k => `--c:${INTENTS[k].c};--cd:${INTENTS[k].cd};--w:${INTENTS[k].w};--ct:var(--${k}-t)`;
 const SESSIONS = [
-  {name:'larkspur', where:'devbox:3999', agent:'claude'},
+  {name:'larkspur', where:'devhost:3999', agent:'claude'},
   {name:'larkspur', where:'laptop:3000', agent:'codex'},
-  {name:'ledger-api', where:'devbox:4100', agent:'claude'},
-  {name:'larkspur-docs', where:'devbox:5173', agent:'codex'},
+  {name:'ledger-api', where:'devhost:4100', agent:'claude'},
+  {name:'larkspur-docs', where:'devhost:5173', agent:'codex'},
 ];
 
 const q = s => document.querySelector(s);
