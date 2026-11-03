@@ -585,7 +585,7 @@ describe("conversation: finished messages", () => {
     const juniper = Pairing.parse({
       ...LIVE,
       owner: OTHER.owner,
-      cwd: "/home/biruk/dev/juniper",
+      cwd: "/home/ada/dev/juniper",
       generation: LIVE.generation + 1,
     })
     o.mock.setPairing(juniper)

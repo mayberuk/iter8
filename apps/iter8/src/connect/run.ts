@@ -98,7 +98,7 @@ function portRange(ports: readonly number[]): string {
   return `${ports[0]}–${ports.at(-1)}`
 }
 
-/** Keeps the devbox's pool forwarded to this laptop until interrupted; resolves the exit code. */
+/** Keeps the remote machine's pool forwarded to this laptop until interrupted; resolves the exit code. */
 export async function runConnect(host: string, system: ConnectSystem): Promise<number> {
   assertHost(host)
   const { clock, out } = system

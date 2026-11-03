@@ -115,7 +115,7 @@ function setup(options: Options = {}) {
     ...base,
     env: { ...ambient, ITER8_HOME: home, ...options.env },
     platform: options.platform ?? "linux",
-    hostname: "devbox-7",
+    hostname: "devhost-7",
     ...(options.clock ? { clock: options.clock } : {}),
     ...(options.portFree ? { portFree: options.portFree } : {}),
     ...(options.probe ? { probe: options.probe } : {}),
@@ -517,7 +517,7 @@ describe("browser placement", () => {
       const state = await opened({ env })
       expect(state.launched).toEqual([])
       expect(state.out()).toBe(
-        `${PAGE_URL}\nYou're on SSH and no laptop is connected. On your laptop run: iter8 setup devbox-7\n`,
+        `${PAGE_URL}\nYou're on SSH and no laptop is connected. On your laptop run: iter8 setup devhost-7\n`,
       )
     },
   )

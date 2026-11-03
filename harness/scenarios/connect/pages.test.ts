@@ -19,7 +19,7 @@ import { waitFor } from "../../rig/wait"
 import { FAKE_SSH_ENTRY } from "./fake-ssh"
 
 const REPO = join(import.meta.dir, "..", "..", "..")
-const HOST = "devbox"
+const HOST = "devhost"
 const LAPTOP = "studio-laptop"
 const FORWARD_ADDRESS = "127.0.0.2"
 const CONNECT_MS = 20_000
@@ -98,7 +98,7 @@ function exitedAlready(code: number): Spawned {
   }
 }
 
-async function startDevbox(
+async function startDevhost(
   cleanups: Cleanup[],
 ): Promise<{ service: RunningService; pool: string }> {
   const override = process.env.ITER8_TEST_BINARY
@@ -128,7 +128,7 @@ async function startBrowser(cleanups: Cleanup[]): Promise<Page> {
 
 async function startLaptop(
   cleanups: Cleanup[],
-  devbox: { service: RunningService; pool: string },
+  devhost: { service: RunningService; pool: string },
   options: { page: Page; vars?: Record<string, string> },
 ) {
   const home = await throwawayHome()
@@ -160,10 +160,10 @@ async function startLaptop(
           ...inheritedEnv(),
           FAKE_SSH_LOG: sshLog,
           FAKE_SSH_DOWN: downMarker,
-          FAKE_SSH_ITER8: JSON.stringify(devbox.service.env.command),
+          FAKE_SSH_ITER8: JSON.stringify(devhost.service.env.command),
           FAKE_SSH_REMOTE_ENV: JSON.stringify({
-            [ENV.home]: devbox.service.home,
-            [ENV.pool]: devbox.pool,
+            [ENV.home]: devhost.service.home,
+            [ENV.pool]: devhost.pool,
           }),
           ...options.vars,
         },
@@ -246,7 +246,7 @@ async function startLaptop(
   }
 }
 
-async function openOnDevbox(service: RunningService) {
+async function openOnDevhost(service: RunningService) {
   const run = await runCli(service.env, ["open", fixtureDir("static")], { cwd: service.home })
   expect(run.exitCode).toBe(0)
   const [url = "", , hint = ""] = run.stdout.split("\n")
@@ -299,20 +299,20 @@ async function showsFixtureWithOverlay(page: Page, url: string): Promise<void> {
 }
 
 test.skipIf(unbindable !== null)(
-  "iter8 open on the devbox opens the page in the laptop's browser with the overlay loaded",
+  "iter8 open on the devhost opens the page in the laptop's browser with the overlay loaded",
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const devbox = await startDevbox(cleanups)
+      const devhost = await startDevhost(cleanups)
       const page = await startBrowser(cleanups)
-      const laptop = await startLaptop(cleanups, devbox, { page })
+      const laptop = await startLaptop(cleanups, devhost, { page })
       await laptop.lineAfter(
         0,
-        forwardingLine(devbox.pool, devbox.service.status.machineName, true),
+        forwardingLine(devhost.pool, devhost.service.status.machineName, true),
         CONNECT_MS,
       )
 
-      const open = await openOnDevbox(devbox.service)
+      const open = await openOnDevhost(devhost.service)
       expect(open.hint).toBe(`Opened in the browser on ${LAPTOP}.`)
       expect(laptop.opened).toEqual([open.url])
       await laptop.navigated()
@@ -329,14 +329,14 @@ test.skipIf(unbindable !== null)(
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const devbox = await startDevbox(cleanups)
+      const devhost = await startDevhost(cleanups)
       const page = await startBrowser(cleanups)
-      const laptop = await startLaptop(cleanups, devbox, { page })
-      const forwarding = forwardingLine(devbox.pool, devbox.service.status.machineName, true)
+      const laptop = await startLaptop(cleanups, devhost, { page })
+      const forwarding = forwardingLine(devhost.pool, devhost.service.status.machineName, true)
       const up = await laptop.lineAfter(0, forwarding, CONNECT_MS)
-      const first = await openOnDevbox(devbox.service)
+      const first = await openOnDevhost(devhost.service)
       expect(first.hint).toBe(`Opened in the browser on ${LAPTOP}.`)
-      const before = await laptopSockets(devbox.service.home)
+      const before = await laptopSockets(devhost.service.home)
       expect(before).toHaveLength(1)
 
       await laptop.linkDown()
@@ -345,15 +345,15 @@ test.skipIf(unbindable !== null)(
       await laptop.lineAfter(lost + 1, forwarding, RECONNECT_MS)
 
       const [stale = ""] = before
-      await leaveDeadSocket(join(devbox.service.home, stale))
-      const reconnected = await laptopSockets(devbox.service.home)
+      await leaveDeadSocket(join(devhost.service.home, stale))
+      const reconnected = await laptopSockets(devhost.service.home)
       expect(reconnected).toContain(stale)
       expect(reconnected).toHaveLength(2)
 
-      const second = await openOnDevbox(devbox.service)
+      const second = await openOnDevhost(devhost.service)
       expect(second.hint).toBe(`Opened in the browser on ${LAPTOP}.`)
       expect(laptop.opened).toEqual([first.url, second.url])
-      const after = await laptopSockets(devbox.service.home)
+      const after = await laptopSockets(devhost.service.home)
       expect(after).toEqual(reconnected.filter((entry) => entry !== stale))
       await laptop.navigated()
       await showsFixtureWithOverlay(page, second.url)
@@ -365,13 +365,13 @@ test.skipIf(unbindable !== null)(
 )
 
 test.skipIf(unbindable !== null)(
-  "when the devbox's SSH server refuses socket forwarding, the pool still forwards and iter8 open says to run connect",
+  "when the devhost's SSH server refuses socket forwarding, the pool still forwards and iter8 open says to run connect",
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const devbox = await startDevbox(cleanups)
+      const devhost = await startDevhost(cleanups)
       const page = await startBrowser(cleanups)
-      const laptop = await startLaptop(cleanups, devbox, {
+      const laptop = await startLaptop(cleanups, devhost, {
         page,
         vars: { FAKE_SSH_REFUSE_STREAMLOCAL: "1" },
       })
@@ -383,18 +383,18 @@ test.skipIf(unbindable !== null)(
       )
       await laptop.lineAfter(
         refused + 1,
-        forwardingLine(devbox.pool, devbox.service.status.machineName, false),
+        forwardingLine(devhost.pool, devhost.service.status.machineName, false),
         CONNECT_MS,
       )
       expect(laptop.lines.filter((line) => line.startsWith("Lost "))).toEqual([])
       expect((await laptop.tunnels()).at(-1)).not.toContain("-R")
 
-      const open = await openOnDevbox(devbox.service)
+      const open = await openOnDevhost(devhost.service)
       expect(open.hint).toStartWith(
         `Browser on another machine? Run there: iter8 connect ${hostname()} (or forward the pool yourself: ssh -N `,
       )
       expect(laptop.opened).toEqual([])
-      expect(await laptopSockets(devbox.service.home)).toEqual([])
+      expect(await laptopSockets(devhost.service.home)).toEqual([])
 
       await page.goto(open.url)
       await showsFixtureWithOverlay(page, open.url)

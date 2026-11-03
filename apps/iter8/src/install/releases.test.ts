@@ -119,13 +119,13 @@ async function installFails(
 
 describe("dataDir", () => {
   test("follows the plugin launcher's formula, an empty variable counting as unset", () => {
-    expect(dataDir({ ITER8_PLUGIN_DATA: "/plugin", XDG_DATA_HOME: "/xdg" }, "/home/u")).toBe(
+    expect(dataDir({ ITER8_PLUGIN_DATA: "/plugin", XDG_DATA_HOME: "/xdg" }, "/home/ada")).toBe(
       "/plugin",
     )
-    expect(dataDir({ XDG_DATA_HOME: "/xdg" }, "/home/u")).toBe("/xdg/iter8-claude-plugin")
-    expect(dataDir({}, "/home/u")).toBe("/home/u/.local/share/iter8-claude-plugin")
-    expect(dataDir({ ITER8_PLUGIN_DATA: "", XDG_DATA_HOME: "" }, "/home/u")).toBe(
-      "/home/u/.local/share/iter8-claude-plugin",
+    expect(dataDir({ XDG_DATA_HOME: "/xdg" }, "/home/ada")).toBe("/xdg/iter8-claude-plugin")
+    expect(dataDir({}, "/home/ada")).toBe("/home/ada/.local/share/iter8-claude-plugin")
+    expect(dataDir({ ITER8_PLUGIN_DATA: "", XDG_DATA_HOME: "" }, "/home/ada")).toBe(
+      "/home/ada/.local/share/iter8-claude-plugin",
     )
   })
 })

@@ -581,8 +581,8 @@ describe("applyRound", () => {
 
 describe("sessionName and buildSendRequest", () => {
   test("the name is the last segment of the session's directory, else the page id", () => {
-    expect(sessionName({ cwd: "/home/biruk/dev/larkspur" }, hello.page.id)).toBe("larkspur")
-    expect(sessionName({ cwd: "/home/biruk/dev/larkspur/" }, hello.page.id)).toBe("larkspur")
+    expect(sessionName({ cwd: "/home/ada/dev/larkspur" }, hello.page.id)).toBe("larkspur")
+    expect(sessionName({ cwd: "/home/ada/dev/larkspur/" }, hello.page.id)).toBe("larkspur")
     expect(sessionName(null, PageId.parse("orchid"))).toBe("orchid")
   })
 
@@ -829,7 +829,7 @@ describe("send and attach results", () => {
     m.applyAttachResult(AttachResult.parse(attachJson))
     expect(m.pairing.value?.owner).toBe(OwnerId.parse("own_9pz2mr4c"))
     expect(m.toasts.value.map((toast) => toast.text)).toEqual([
-      "Attached to larkspur · devbox:3990 · requeued Round 11, Round 13",
+      "Attached to larkspur · devhost:3990 · requeued Round 11, Round 13",
     ])
   })
 

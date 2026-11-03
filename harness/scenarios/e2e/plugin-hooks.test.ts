@@ -20,7 +20,7 @@ import { waitFor } from "../../rig/wait"
 import { expectPointerOnly, pickAndNote, sendRound, startBuiltService } from "./steps"
 
 const REPO = join(import.meta.dir, "..", "..", "..")
-const PLUGIN_DIR = process.env.ITER8_CC_PLUGIN_DIR ?? resolve(REPO, "../cc-plugins/plugins/iter8")
+const PLUGIN_DIR = process.env.ITER8_CC_PLUGIN_DIR ?? resolve(REPO, "plugins/iter8")
 const SYNC_TIMEOUT_MS = 30_000
 const UI_TIMEOUT_MS = 15_000
 // A wake hook ends within one UI wait of its trigger; four keep a hang well inside the test timeout.

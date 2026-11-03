@@ -484,8 +484,8 @@ describe("command surface", () => {
       spawn: (argv) => {
         spawned.push(argv)
         return argv[1] === "-G"
-          ? finished(0, { stdout: "host devbox-1\nhostname devbox-1.example\n" })
-          : finished(255, { stderr: "devbox-1: Permission denied (publickey).\n" })
+          ? finished(0, { stdout: "host devhost-1\nhostname devhost-1.example\n" })
+          : finished(255, { stderr: "devhost-1: Permission denied (publickey).\n" })
       },
       clock: { now: Date.now, setTimeout, clearTimeout },
       platform: "linux",
@@ -498,13 +498,13 @@ describe("command surface", () => {
       out: (line) => state.deps.stdout(`${line}\n`),
       onInterrupt() {},
     }
-    await runCommand(connect(state.deps, fakeSystem), { rawArgs: ["devbox-1"] })
+    await runCommand(connect(state.deps, fakeSystem), { rawArgs: ["devhost-1"] })
     expect(spawned.length).toBeGreaterThanOrEqual(2)
-    for (const argv of spawned) expect(argv[argv.indexOf("--") + 1]).toBe("devbox-1")
-    expect(spawned[0]?.slice(0, 4)).toEqual(["ssh", "-G", "--", "devbox-1"])
+    for (const argv of spawned) expect(argv[argv.indexOf("--") + 1]).toBe("devhost-1")
+    expect(spawned[0]?.slice(0, 4)).toEqual(["ssh", "-G", "--", "devhost-1"])
     expect(state.stdout).toEqual([
-      "Connecting to devbox-1 over SSH…\n",
-      "SSH to devbox-1 needs a password or a host-key confirmation. Run ssh devbox-1 once, then retry.\n",
+      "Connecting to devhost-1 over SSH…\n",
+      "SSH to devhost-1 needs a password or a host-key confirmation. Run ssh devhost-1 once, then retry.\n",
     ])
     expect(state.stderr).toEqual([])
     expect(state.exits).toEqual([ExitCode.failure])

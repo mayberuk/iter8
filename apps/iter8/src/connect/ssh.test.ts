@@ -42,8 +42,8 @@ test("SSH options keep reconnects non-interactive and forwards owned by this chi
 })
 
 test.each([
-  "devbox",
-  "biruk@devbox",
+  "devhost",
+  "ada@devhost",
   "100.80.90.10",
   "fd7a:115c:a1e0::10",
   "dev-box.",
@@ -56,11 +56,11 @@ test.each([
 
 test.each([
   "",
-  "-devbox",
+  "-devhost",
   "-oProxyCommand=evil",
   "dev box",
-  " devbox",
-  "devbox ",
+  " devhost",
+  "devhost ",
   "dev\tbox",
   "dev\nbox",
   "dev\rbox",
@@ -108,8 +108,8 @@ test.each([
     {
       ...forward,
       bindAddress: "127.0.0.2",
-      remoteSocket: "/home/biruk/.iter8/laptop-mac-ab12cd34.sock",
-      localSocket: "/Users/biruk/.iter8/connect-123.sock",
+      remoteSocket: "/home/ada/.iter8/laptop-mac-ab12cd34.sock",
+      localSocket: "/Users/ada/.iter8/connect-123.sock",
     },
     [
       "-N",
@@ -121,7 +121,7 @@ test.each([
       "-L",
       "127.0.0.2:3991:127.0.0.1:3991",
       "-R",
-      "/home/biruk/.iter8/laptop-mac-ab12cd34.sock:/Users/biruk/.iter8/connect-123.sock",
+      "/home/ada/.iter8/laptop-mac-ab12cd34.sock:/Users/ada/.iter8/connect-123.sock",
       "--",
       "work",
     ],
@@ -204,12 +204,12 @@ test.each([
   ],
   [255, "bind [127.0.0.1]:3991: Address already in use\n", { kind: "port-taken", port: 3991 }],
   [255, "bind [::1]:3992: Address already in use\n", { kind: "port-taken", port: 3992 }],
-  [255, "biruk@devbox: Permission denied (publickey,password).\n", { kind: "auth" }],
+  [255, "ada@devhost: Permission denied (publickey,password).\n", { kind: "auth" }],
   [255, "Host key verification failed.\n", { kind: "host-key" }],
   [255, "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\n", { kind: "host-key" }],
   [
     255,
-    "Error: remote port forwarding failed for listen path /home/biruk/.iter8/laptop-mac-ab12cd34.sock\n",
+    "Error: remote port forwarding failed for listen path /home/ada/.iter8/laptop-mac-ab12cd34.sock\n",
     { kind: "socket-forward-refused" },
   ],
   [127, "sh: iter8: command not found\n", { kind: "no-iter8" }],
@@ -217,8 +217,8 @@ test.each([
   [5, "iter8 service is unavailable\n", { kind: "service-down" }],
   [
     255,
-    "warning: old message\nssh: connect to host devbox port 22: Connection timed out\n\n",
-    { kind: "transient", detail: "ssh: connect to host devbox port 22: Connection timed out" },
+    "warning: old message\nssh: connect to host devhost port 22: Connection timed out\n\n",
+    { kind: "transient", detail: "ssh: connect to host devhost port 22: Connection timed out" },
   ],
   [
     null,
@@ -237,9 +237,9 @@ test.each([
   },
 )
 
-test("the devbox's iter8 is tried on PATH, then in ~/.local/bin by a path relative to the login directory", () => {
+test("the devhost's iter8 is tried on PATH, then in ~/.local/bin by a path relative to the login directory", () => {
   expect(REMOTE_ITER8).toEqual(["iter8", ".local/bin/iter8"])
   expect(
-    remoteCommandArgs("devbox", { kind: "ssh" }, [REMOTE_ITER8[1], "status", "--json"]),
-  ).toEqual([...SSH_OPTIONS, "--", "devbox", ".local/bin/iter8", "status", "--json"])
+    remoteCommandArgs("devhost", { kind: "ssh" }, [REMOTE_ITER8[1], "status", "--json"]),
+  ).toEqual([...SSH_OPTIONS, "--", "devhost", ".local/bin/iter8", "status", "--json"])
 })

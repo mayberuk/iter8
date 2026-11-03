@@ -4,11 +4,11 @@
     "origin": "http://mock-pricing.localhost:3990",
     "target": {
       "kind": "folder",
-      "root": "/home/biruk/dev/larkspur/mocks/pricing"
+      "root": "/home/ada/dev/larkspur/mocks/pricing"
     },
     "pairing": null
   },
   "url": "http://mock-pricing.localhost:3990/",
-  "landingUrl": "http://mock-pricing.localhost:3990/__iter8/land#m=devbox-7f3a91c2&p=mock-pricing&t=q5Jx2lK9vT0wYbN3cR8mZ4hD1sF6gA7e",
+  "landingUrl": "http://mock-pricing.localhost:3990/__iter8/land#m=devhost-7f3a91c2&p=mock-pricing&t=q5Jx2lK9vT0wYbN3cR8mZ4hD1sF6gA7e",
   "poolPorts": [3990, 3991, 3992, 3993]
 }

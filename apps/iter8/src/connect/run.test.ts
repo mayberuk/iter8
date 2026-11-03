@@ -86,10 +86,10 @@ class FakeChild implements Spawned {
   }
 }
 
-const HOST = "devbox"
+const HOST = "devhost"
 const TAILSCALE = "/usr/bin/tailscale"
-const DEVBOX_HOME = "/home/biruk/.iter8"
-const MACHINE_ID = "devbox-machine"
+const DEVHOST_HOME = "/home/ada/.iter8"
+const MACHINE_ID = "devhost-machine"
 const SSH_OPTIONS = [
   "-o",
   "BatchMode=yes",
@@ -167,13 +167,13 @@ async function setup(script: Script = {}) {
   const statusJson = JSON.stringify({
     state: "ready",
     version: script.remote?.version ?? "0.1.0",
-    build: script.remote?.build ?? "devbox-build",
+    build: script.remote?.build ?? "devhost-build",
     protocolVersion: 2,
     schemaVersion: 3,
     machineId: MACHINE_ID,
-    machineName: "devbox-name",
+    machineName: "devhost-name",
     pid: 4242,
-    home: DEVBOX_HOME,
+    home: DEVHOST_HOME,
     pool: ports,
     overlay: "present",
     owner: null,
@@ -215,7 +215,7 @@ async function setup(script: Script = {}) {
       spawns.push(child)
       if (isConfig(child)) {
         if (script.configHangs) return child
-        child.exit(0, { stdout: `host ${HOST}\nhostname devbox.corp.example\nuser biruk\n` })
+        child.exit(0, { stdout: `host ${HOST}\nhostname devhost.corp.example\nuser ada\n` })
       } else if (argv[0] === TAILSCALE) {
         if (script.tailscaleStatus === undefined) child.exit(1)
         else child.exit(0, { stdout: JSON.stringify(script.tailscaleStatus) })
@@ -303,7 +303,7 @@ async function setup(script: Script = {}) {
     socket,
     installs,
     restarts,
-    forwarding: `Forwarding ${first}–${last} from ${HOST} (devbox-name). Pages opened there open here.`,
+    forwarding: `Forwarding ${first}–${last} from ${HOST} (devhost-name). Pages opened there open here.`,
     exitCode: () => exitCode,
     interrupt: requestInterrupt,
     configs: () => spawns.filter(isConfig),
@@ -358,7 +358,7 @@ test("the plain route keeps the user's ssh config and forwards every pool port w
       ...SSH_OPTIONS,
       ...rig.forwards(),
       "-R",
-      `${DEVBOX_HOME}/laptop-ada-s-mac-00000001.sock:${rig.socket}`,
+      `${DEVHOST_HOME}/laptop-ada-s-mac-00000001.sock:${rig.socket}`,
       "--",
       HOST,
     ],
@@ -386,8 +386,8 @@ test("an online Tailscale peer routes to its IPv4 address through HostName on ev
       BackendState: "Running",
       Peer: {
         nodekey: {
-          HostName: "devbox",
-          DNSName: "devbox.tail1234.ts.net.",
+          HostName: "devhost",
+          DNSName: "devhost.tail1234.ts.net.",
           TailscaleIPs: ["fd7a:115c:a1e0::7", "100.64.0.7"],
           Online: true,
         },
@@ -407,7 +407,7 @@ test("an online Tailscale peer routes to its IPv4 address through HostName on ev
       ...hostName,
       ...rig.forwards("127.0.0.1:"),
       "-R",
-      `${DEVBOX_HOME}/laptop-ada-s-mac-00000001.sock:${rig.socket}`,
+      `${DEVHOST_HOME}/laptop-ada-s-mac-00000001.sock:${rig.socket}`,
       "--",
       HOST,
     ],
@@ -554,7 +554,7 @@ test("service-down says so once and checks again every 3 s", async () => {
 test("authentication, host-key and missing-iter8 failures print their fix and exit 1 without retrying", async () => {
   const cases: [Script, string][] = [
     [
-      { status: () => ({ code: 255, stderr: "biruk@devbox: Permission denied (publickey).\n" }) },
+      { status: () => ({ code: 255, stderr: "ada@devhost: Permission denied (publickey).\n" }) },
       SSH_REFUSED,
     ],
     [
@@ -582,7 +582,7 @@ test("a refused socket forward retries at once without -R and keeps the port for
     tunnel(child, call) {
       if (call > 1) return false
       child.exit(255, {
-        stderr: `Error: remote port forwarding failed for listen path ${DEVBOX_HOME}/laptop-ada-s-mac-00000001.sock\n`,
+        stderr: `Error: remote port forwarding failed for listen path ${DEVHOST_HOME}/laptop-ada-s-mac-00000001.sock\n`,
       })
       return true
     },
@@ -598,7 +598,7 @@ test("a refused socket forward retries at once without -R and keeps the port for
     CONNECTING,
     refused,
     CONNECTING,
-    `Forwarding ${rig.first}–${rig.last} from ${HOST} (devbox-name).`,
+    `Forwarding ${rig.first}–${rig.last} from ${HOST} (devhost-name).`,
   ])
 })
 
@@ -703,7 +703,7 @@ test("iter8 missing both on PATH and in ~/.local/bin says so and stops retrying"
 
 test("a failure other than not-found on PATH is not retried in ~/.local/bin", async () => {
   const rig = await setup({
-    status: () => ({ code: 255, stderr: "biruk@devbox: Permission denied (publickey).\n" }),
+    status: () => ({ code: 255, stderr: "ada@devhost: Permission denied (publickey).\n" }),
   })
   expect(await rig.run).toBe(1)
   expect(rig.lines).toEqual([CONNECTING, SSH_REFUSED])
@@ -718,7 +718,7 @@ const SELF = {
 const UPDATING = `${HOST} runs iter8 0.4.0; updating this computer…`
 const binaryFor = (version: string) => `/data/releases/v${version}/iter8`
 
-test("a devbox on a newer compiled release is downloaded, then connect restarts on it once the tunnel is down", async () => {
+test("a devhost on a newer compiled release is downloaded, then connect restarts on it once the tunnel is down", async () => {
   const rig = await setup({
     self: SELF,
     remote: { version: "0.4.0", build: "compiled" },
@@ -742,22 +742,26 @@ test.each([
     { ...SELF, build: "source" },
     { version: "0.4.0", build: "compiled" },
   ],
-  ["the devbox runs from source", SELF, { version: "0.4.0", build: "source" }],
-  ["the devbox is older", SELF, { version: "0.2.9", build: "compiled" }],
-  ["the devbox is the same version", SELF, { version: "0.3.0", build: "compiled" }],
+  ["the devhost runs from source", SELF, { version: "0.4.0", build: "source" }],
+  ["the devhost is older", SELF, { version: "0.2.9", build: "compiled" }],
+  ["the devhost is the same version", SELF, { version: "0.3.0", build: "compiled" }],
   [
-    "the devbox is a prerelease of this version",
+    "the devhost is a prerelease of this version",
     SELF,
     { version: "0.3.0-rc.1", build: "compiled" },
   ],
-  ["the devbox's version is not a release", SELF, { version: "dev", build: "compiled" }],
-  ["the devbox's version climbs out of the data dir", SELF, { version: "../x", build: "compiled" }],
+  ["the devhost's version is not a release", SELF, { version: "dev", build: "compiled" }],
   [
-    "the devbox's version hides a path after a newer release",
+    "the devhost's version climbs out of the data dir",
+    SELF,
+    { version: "../x", build: "compiled" },
+  ],
+  [
+    "the devhost's version hides a path after a newer release",
     SELF,
     { version: "9.9.9/../../../x", build: "compiled" },
   ],
-  ["the devbox's version carries a line break", SELF, { version: "9.9.9\nrm", build: "compiled" }],
+  ["the devhost's version carries a line break", SELF, { version: "9.9.9\nrm", build: "compiled" }],
 ] as const)("nothing is downloaded when %s", async (_case, self, remote) => {
   const rig = await setup({ self, remote, install: async (version) => binaryFor(version) })
   await forwarded(rig)

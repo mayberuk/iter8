@@ -3,7 +3,7 @@ import fc from "fast-check"
 import { ZodError } from "zod"
 import { planRun, printedPorts, stablePort } from "./run-plan"
 
-const ROOT = "/home/dev/shop"
+const ROOT = "/home/ada/shop"
 const PORT = 4321
 
 function plan(overrides: Partial<Parameters<typeof planRun>[0]> = {}) {
@@ -181,7 +181,7 @@ describe("planRun", () => {
     expect(plan({ packageJson: { scripts: { build: "tsc" } } })).toEqual({
       kind: "nothing",
       reason:
-        "Nothing to run in /home/dev/shop: no dev or start script in package.json and no HTML files. Use iter8 run -- <command>.",
+        "Nothing to run in /home/ada/shop: no dev or start script in package.json and no HTML files. Use iter8 run -- <command>.",
     })
   })
 

@@ -952,7 +952,7 @@ const CODEX = LiveSession.parse({
   ...liveSessionJson,
   owner: "own_codex0001",
   agent: "codex",
-  cwd: "/home/biruk/dev/orchid",
+  cwd: "/home/ada/dev/orchid",
   state: { status: "live" },
 })
 const renumbered = (round: Round, id: string, owner: string | null, first: number) =>

@@ -9,7 +9,7 @@ import { liveSystem } from "./connect"
 
 const RELEASE = "9.0.0"
 const OLDER = "8.0.0"
-const HOST = "devbox"
+const HOST = "devhost"
 const ASSET = `iter8-${process.platform === "darwin" ? "darwin-arm64" : "linux-x64"}`
 const SIGNAL_EXIT = { SIGINT: 30, SIGTERM: 31, SIGHUP: 32 } as const
 

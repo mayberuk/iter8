@@ -2,8 +2,8 @@
   "outcome": "accepted",
   "protocolVersion": 2,
   "serviceVersion": "0.1.0",
-  "machineId": "devbox-7f3a91c2",
-  "machineName": "devbox",
+  "machineId": "devhost-7f3a91c2",
+  "machineName": "devhost",
   "page": {
     "id": "larkspur",
     "origin": "http://larkspur.localhost:3990",
@@ -366,7 +366,7 @@
         "startedAt": "Fri Oct  9 17:58:02 2026",
         "label": "5f0c2e7a-1b9d-4c3e-8a6f-2d4b9e1c7a30"
       },
-      "cwd": "/home/biruk/dev/larkspur",
+      "cwd": "/home/ada/dev/larkspur",
       "generation": 2,
       "state": {
         "status": "live"
@@ -383,7 +383,7 @@
           "startedAt": "Fri Oct  9 18:12:44 2026",
           "label": "a71e0c55-6d2f-4b8e-9c13-7f0e5a2d8b46"
         },
-        "cwd": "/home/biruk/dev/larkspur",
+        "cwd": "/home/ada/dev/larkspur",
         "state": {
           "status": "busy"
         }

@@ -17,10 +17,10 @@ test("a Svelte 5 location becomes one source frame with a 1-based column", () =>
 
 test("the file is passed through exactly as the compiler wrote it", () => {
   const evidence = svelteMetaEvidence(
-    { loc: { file: "/home/dev/app/src/routes/+page.svelte", line: 1, column: 0 } },
+    { loc: { file: "/home/ada/app/src/routes/+page.svelte", line: 1, column: 0 } },
     5,
   )
-  expect(evidence?.frames[0]).toMatchObject({ file: "/home/dev/app/src/routes/+page.svelte" })
+  expect(evidence?.frames[0]).toMatchObject({ file: "/home/ada/app/src/routes/+page.svelte" })
   expect(evidence?.component).toBe("+page")
 })
 

@@ -6,8 +6,8 @@ import { OVERLAY_SCRIPT_PATH } from "./overlay-api"
 const base = OverlayBoot.parse({
   protocolVersion: 1,
   pageId: "larkspur",
-  machineId: "devbox-7f3a",
-  machineName: "devbox",
+  machineId: "devhost-7f3a",
+  machineName: "devhost",
   token: "q5Jx2lK9vT0wYbN3cR8mZ4hD1sF6gA7e",
   apiBase: "/__iter8",
   sourceBundleUrl: "/__iter8/assets/source.js",

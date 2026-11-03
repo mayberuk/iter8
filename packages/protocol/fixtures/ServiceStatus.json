@@ -4,10 +4,10 @@
   "build": "644f7a9",
   "protocolVersion": 2,
   "schemaVersion": 1,
-  "machineId": "devbox-7f3a91c2",
-  "machineName": "devbox",
+  "machineId": "devhost-7f3a91c2",
+  "machineName": "devhost",
   "pid": 40112,
-  "home": "/home/biruk/.iter8",
+  "home": "/home/ada/.iter8",
   "pool": [3990, 3991, 3992, 3993],
   "overlay": "present",
   "owner": {
@@ -18,7 +18,7 @@
       "startedAt": "Fri Oct  9 17:58:02 2026",
       "label": "5f0c2e7a-1b9d-4c3e-8a6f-2d4b9e1c7a30"
     },
-    "cwd": "/home/biruk/dev/larkspur",
+    "cwd": "/home/ada/dev/larkspur",
     "generation": 2,
     "state": {
       "status": "live"

@@ -179,7 +179,7 @@ async function setup(now = () => new Date(Date.UTC(2026, 9, 9, 18, 0, 0))) {
     },
     overlayDir,
     machineId,
-    machineName: "devbox",
+    machineName: "devhost",
     serviceVersion: "9.9.9-test",
   }
   const larkspur = pages.open({
@@ -516,7 +516,7 @@ test("an accepted hello returns the page with its drafts, rounds, agent notes, p
       protocolVersion: PROTOCOL_VERSION,
       serviceVersion: "9.9.9-test",
       machineId,
-      machineName: "devbox",
+      machineName: "devhost",
       page: {
         ...t.larkspur.page,
         pairing: { owner: t.ownerA, generation: 1 },
@@ -1012,11 +1012,11 @@ test("a live upgrade needs the page Origin, the primary listener and every live 
 
 test("the boot for a page names its id, token, machine and the overlay's fixed paths", async () => {
   const t = await setup()
-  expect(OverlayBoot.parse(bootFor(t.larkspur, machineId, "devbox"))).toEqual({
+  expect(OverlayBoot.parse(bootFor(t.larkspur, machineId, "devhost"))).toEqual({
     protocolVersion: PROTOCOL_VERSION,
     pageId: t.larkspur.page.id,
     machineId,
-    machineName: "devbox",
+    machineName: "devhost",
     token: t.larkspur.token,
     apiBase: OVERLAY_PREFIX,
     sourceBundleUrl: SOURCE_BUNDLE_PATH,

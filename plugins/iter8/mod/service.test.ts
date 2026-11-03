@@ -6,7 +6,7 @@ import {
 import type { TranscriptRow } from './transcript';
 
 const BIN = '/plugins/iter8/bin/iter8';
-const HOME = '/home/dev/.local/share/iter8';
+const HOME = '/home/ada/.local/share/iter8';
 const SESSION: ServiceSession = { owner: 'O-4f2a', pid: 4242, socketPath: `${HOME}/control.sock` };
 
 const POINTER = 'Review round R4 from larkspur · 2 notes — run `iter8 show R4`';
@@ -25,7 +25,7 @@ function serviceStatus(over: Record<string, unknown> = {}) {
     protocolVersion: 2,
     schemaVersion: 3,
     machineId: 'm-1',
-    machineName: 'devbox',
+    machineName: 'devhost',
     pid: 900,
     home: HOME,
     pool: [4100, 4101],
@@ -34,7 +34,7 @@ function serviceStatus(over: Record<string, unknown> = {}) {
       owner: 'O-4f2a',
       agent: 'claude',
       process: { pid: 4242, startedAt: '2026-10-10T11:00:00.000Z', label: 'claude (4242)' },
-      cwd: '/home/dev/app',
+      cwd: '/home/ada/app',
       generation: 1,
       state: { status: 'live' },
       relabelPending: false,
@@ -284,7 +284,7 @@ function round(id: string, state: Record<string, unknown>, notes: unknown[]) {
 
 function agentState(over: Record<string, unknown> = {}) {
   return {
-    session: { owner: 'O-4f2a', agent: 'claude', process: serviceStatus().owner.process, cwd: '/home/dev/app', state: { status: 'live' } },
+    session: { owner: 'O-4f2a', agent: 'claude', process: serviceStatus().owner.process, cwd: '/home/ada/app', state: { status: 'live' } },
     focus: { pageId: 'larkspur', roundId: 'R5' },
     pages: [{ pageId: 'larkspur', origin: 'http://localhost:3000', chat: { enabled: true, defaultEnabled: false, reachable: true } }],
     rounds: [

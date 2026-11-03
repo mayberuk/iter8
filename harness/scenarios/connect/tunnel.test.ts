@@ -13,7 +13,7 @@ import { waitFor } from "../../rig/wait"
 import { FAKE_SSH_ENTRY } from "./fake-ssh"
 import { FAKE_TAILSCALE_ENTRY } from "./fake-tailscale"
 
-const HOST = "devbox"
+const HOST = "devhost"
 const LAPTOP = "studio-laptop"
 const FORWARD_ADDRESS = "127.0.0.2"
 const SERVICE_ADDRESS = "127.0.0.1"
@@ -93,7 +93,7 @@ function exitedAlready(code: number): Spawned {
   }
 }
 
-async function startDevbox(
+async function startDevhost(
   cleanups: Cleanup[],
 ): Promise<{ service: RunningService; remote: Remote }> {
   const pool = await poolRange(2)
@@ -236,11 +236,11 @@ async function reachesService(port: number): Promise<void> {
 }
 
 test.skipIf(unbindable !== null)(
-  "connect forwards every pool port over plain SSH and names the devbox it reached",
+  "connect forwards every pool port over plain SSH and names the devhost it reached",
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const { service, remote } = await startDevbox(cleanups)
+      const { service, remote } = await startDevhost(cleanups)
       const laptop = await startLaptop(cleanups, () => remote)
 
       await laptop.lineAfter(0, forwardingLine(remote.pool, service.status.machineName), CONNECT_MS)
@@ -262,7 +262,7 @@ test.skipIf(unbindable !== null)(
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const { service, remote } = await startDevbox(cleanups)
+      const { service, remote } = await startDevhost(cleanups)
       const laptop = await startLaptop(cleanups, () => remote)
       const forwarding = forwardingLine(remote.pool, service.status.machineName)
       const up = await laptop.lineAfter(0, forwarding, CONNECT_MS)
@@ -291,7 +291,7 @@ test.skipIf(unbindable !== null)(
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const { service, remote } = await startDevbox(cleanups)
+      const { service, remote } = await startDevhost(cleanups)
       const laptop = await startLaptop(cleanups, () => remote)
       const forwarding = forwardingLine(remote.pool, service.status.machineName)
       const up = await laptop.lineAfter(0, forwarding, CONNECT_MS)
@@ -321,11 +321,11 @@ test.skipIf(unbindable !== null)(
 )
 
 test.skipIf(unbindable !== null)(
-  "with the devbox an online tailnet peer, ssh keeps the alias and goes to its Tailscale address",
+  "with the devhost an online tailnet peer, ssh keeps the alias and goes to its Tailscale address",
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const { service, remote } = await startDevbox(cleanups)
+      const { service, remote } = await startDevhost(cleanups)
       const tailnet = await throwawayHome()
       cleanups.push(tailnet.dispose)
       const statusFile = join(tailnet.path, "tailscale-status.json")
@@ -334,7 +334,7 @@ test.skipIf(unbindable !== null)(
         JSON.stringify({
           BackendState: "Running",
           Peer: {
-            "nodekey:devbox": {
+            "nodekey:devhost": {
               HostName: HOST,
               DNSName: `${HOST}.tail1234.ts.net.`,
               TailscaleIPs: [TAILNET_ADDRESS, "fd7a:115c:a1e0::1"],
@@ -367,7 +367,7 @@ test.skipIf(unbindable !== null)(
   async () => {
     const cleanups: Cleanup[] = []
     try {
-      const { service, remote } = await startDevbox(cleanups)
+      const { service, remote } = await startDevhost(cleanups)
       const [taken = 0] = portsOf(remote.pool)
       const blocker = Bun.listen({ hostname: FORWARD_ADDRESS, port: taken, socket: { data() {} } })
       let blocking = true
@@ -398,7 +398,7 @@ test.skipIf(unbindable !== null)(
 )
 
 test.skipIf(unbindable !== null)(
-  "connect started before the devbox service says it is waiting, then forwards once the service runs",
+  "connect started before the devhost service says it is waiting, then forwards once the service runs",
   async () => {
     const cleanups: Cleanup[] = []
     try {
@@ -414,11 +414,11 @@ test.skipIf(unbindable !== null)(
       )
       expect(await laptop.tunnels()).toEqual([])
 
-      const devbox = await startDevbox(cleanups)
-      remote = devbox.remote
+      const devhost = await startDevhost(cleanups)
+      remote = devhost.remote
       await laptop.lineAfter(
         waiting + 1,
-        forwardingLine(remote.pool, devbox.service.status.machineName),
+        forwardingLine(remote.pool, devhost.service.status.machineName),
         CONNECT_MS,
       )
       expect(laptop.lines.filter((line) => line.startsWith("Lost "))).toEqual([])

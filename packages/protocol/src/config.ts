@@ -16,7 +16,7 @@ export type PortRange = z.infer<typeof PortRange>
 export const ServiceConfig = z.object({ pool: PortRange })
 export type ServiceConfig = z.infer<typeof ServiceConfig>
 
-/** The macOS range keeps a laptop's own service off the ports an SSH forward from the devbox uses. */
+/** The macOS range keeps a laptop's own service off the ports an SSH forward from the remote machine uses. */
 export const DEFAULT_POOL = {
   linux: "3990-3993",
   darwin: "3980-3983",

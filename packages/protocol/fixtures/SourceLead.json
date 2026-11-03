@@ -6,7 +6,7 @@
   "frames": [
     {
       "kind": "generated",
-      "file": "rsc://React/Server/file:///home/biruk/dev/larkspur/.next/server/chunks/ssr/app_pricing_page_tsx.js?0",
+      "file": "rsc://React/Server/file:///home/ada/dev/larkspur/.next/server/chunks/ssr/app_pricing_page_tsx.js?0",
       "line": 42,
       "column": 9,
       "component": "PricingCard"

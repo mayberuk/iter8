@@ -278,7 +278,7 @@ describe("dock session states", () => {
       liveSessions: [OTHER],
       pageState: SEEDED,
     })
-    const started = { ...OTHER, owner: "own_newcomer1", cwd: "/home/biruk/dev/newcomer" }
+    const started = { ...OTHER, owner: "own_newcomer1", cwd: "/home/ada/dev/newcomer" }
     mock.setLiveSessions([OTHER, started])
     await dock(overlay)
       .getByRole("button", { name: /^Session larkspur/ })
@@ -838,7 +838,7 @@ describe("session rows and state chips", () => {
       ...OTHER,
       owner: "own_third001",
       agent: "codex",
-      cwd: "/home/biruk/dev/ledger",
+      cwd: "/home/ada/dev/ledger",
       process: { ...OTHER.process, pid: 51009, label: "third-process-label" },
     }
     const { overlay, mock } = await open({

@@ -26,13 +26,13 @@ const DEAD = {
 const ORCHID = LiveSession.parse({
   ...liveSessionJson,
   owner: "own_orchid01",
-  cwd: "/home/biruk/dev/orchid",
+  cwd: "/home/ada/dev/orchid",
   state: { status: "live" },
 })
 const TULIP = LiveSession.parse({
   ...liveSessionJson,
   owner: "own_tulip002",
-  cwd: "/home/biruk/dev/tulip",
+  cwd: "/home/ada/dev/tulip",
   state: { status: "live" },
 })
 const CURRENT = {

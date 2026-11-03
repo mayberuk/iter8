@@ -40,6 +40,6 @@ test("a resolved lead of none states why", () => {
 test("a resolved file is relative to the project and stays inside it", () => {
   const exact = { ...fileOnly, confidence: "exact", framework: "react", line: 4 }
   expect(ResolvedSourceLead.safeParse(exact).success).toBe(true)
-  for (const file of ["/home/biruk/app/src/Card.tsx", "../other/Card.tsx", "src/../../Card.tsx"])
+  for (const file of ["/home/ada/app/src/Card.tsx", "../other/Card.tsx", "src/../../Card.tsx"])
     expect(ResolvedSourceLead.safeParse({ ...exact, file }).success).toBe(false)
 })

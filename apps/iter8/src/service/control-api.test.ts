@@ -60,7 +60,7 @@ afterEach(async () => {
   for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true })
 })
 
-const projectRoot = "/home/biruk/dev/larkspur"
+const projectRoot = "/home/ada/dev/larkspur"
 const devServer = "http://localhost:5173"
 const cliPid = 9001
 
@@ -109,7 +109,7 @@ function setup(waiterNow?: () => number) {
         machineId,
         machineName: "workstation",
         pid: process.pid,
-        home: "/home/biruk/.iter8",
+        home: "/home/ada/.iter8",
         pool: [3990, 3991, 3992, 3993],
         overlay: "present",
         owner: owner && owners.pairing(owner, PairingGeneration.parse(0), listener(owner)),

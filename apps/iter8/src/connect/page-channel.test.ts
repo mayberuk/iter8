@@ -13,10 +13,10 @@ import {
 } from "./page-channel"
 
 const message = LaptopOpen.parse({
-  machineId: "devbox-id",
+  machineId: "devhost-id",
   url: "http://larkspur.localhost:3990/notes?round=1#pin",
 })
-const expected = { machineId: "devbox-id", ports: [3990, 3991] }
+const expected = { machineId: "devhost-id", ports: [3990, 3991] }
 
 async function withHome(run: (home: string) => Promise<void>): Promise<void> {
   const home = await mkdtemp(join(tmpdir(), "i8-"))
@@ -252,7 +252,7 @@ describe("announceToLaptops", () => {
       const received: LaptopOpen[] = []
       const listeners: Array<{ close(): Promise<void> }> = []
       try {
-        for (const name of ["biruks-mac", "linux-laptop"]) {
+        for (const name of ["adas-mac", "linux-laptop"]) {
           listeners.push(
             await listenForPages({
               socketPath: join(home, `laptop-${name}-01234567.sock`),
@@ -266,7 +266,7 @@ describe("announceToLaptops", () => {
         for (const name of ["control.sock", "laptop-backup.txt"])
           await writeFile(join(home, name), "keep")
         expect((await announceToLaptops(home, message)).sort()).toEqual([
-          "biruks-mac",
+          "adas-mac",
           "linux-laptop",
         ])
         expect(received).toEqual([message, message])

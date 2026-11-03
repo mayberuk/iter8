@@ -44,7 +44,7 @@ afterEach(async () => {
 })
 
 const machineId = MachineId.parse("machine-under-test")
-const machineName = "devbox"
+const machineName = "devhost"
 const APP_HTML = "<!doctype html><html><head><title>app</title></head><body>app body</body></html>"
 
 async function until(label: string, read: () => boolean, timeoutMs = 5_000): Promise<void> {

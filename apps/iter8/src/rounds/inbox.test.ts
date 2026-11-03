@@ -181,7 +181,7 @@ function pairingFor(owner: OwnerId, generation: number) {
     owner,
     agent: "claude",
     process: { pid: 4821, startedAt: "Fri Oct  9 17:58:02 2026", label: "session-label" },
-    cwd: "/home/biruk/dev/larkspur",
+    cwd: "/home/ada/dev/larkspur",
     generation,
     state: { status: "live" },
     relabelPending: false,

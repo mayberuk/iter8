@@ -17,7 +17,7 @@ export const SSH_OPTIONS: readonly string[] = [
 ]
 
 /**
- * Where the devbox's iter8 is tried, in order. A non-interactive ssh shell's PATH leaves out
+ * Where the remote machine's iter8 is tried, in order. A non-interactive ssh shell's PATH leaves out
  * ~/.local/bin, and ssh resolves a relative command against the login directory.
  */
 export const REMOTE_ITER8 = ["iter8", ".local/bin/iter8"] as const

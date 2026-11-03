@@ -2,10 +2,10 @@ import { expect, test } from "bun:test"
 import { pickRoute, resolvedHostname, TAILSCALE_MAC_APP } from "./route"
 
 const peer = {
-  ID: "node-devbox",
-  PublicKey: "nodekey:devbox",
-  HostName: "DevBox",
-  DNSName: "devbox.tail1234.ts.net.",
+  ID: "node-devhost",
+  PublicKey: "nodekey:devhost",
+  HostName: "DevHost",
+  DNSName: "devhost.tail1234.ts.net.",
   OS: "linux",
   TailscaleIPs: ["fd7a:115c:a1e0::10", "100.80.90.10", "100.80.90.11"],
   Online: true,
@@ -25,34 +25,34 @@ const running = {
     TailscaleIPs: ["100.80.90.20", "fd7a:115c:a1e0::20"],
     Online: true,
   },
-  Peer: { "nodekey:devbox": peer },
+  Peer: { "nodekey:devhost": peer },
   CurrentTailnet: { Name: "example", MagicDNSSuffix: "tail1234.ts.net", MagicDNSEnabled: true },
   Health: [],
 }
 
 test.each([
-  ["user biruk\nhostname devbox\nport 22\n", "devbox"],
-  ["hostname devbox.tail1234.ts.net.\r\n", "devbox.tail1234.ts.net."],
+  ["user ada\nhostname devhost\nport 22\n", "devhost"],
+  ["hostname devhost.tail1234.ts.net.\r\n", "devhost.tail1234.ts.net."],
   ["  hostname\t100.80.90.10  \n", "100.80.90.10"],
-  ["HostName DEVBOX\n", "DEVBOX"],
-  ["canonicalizehostname false\nproxycommand hostname devbox\n", null],
+  ["HostName DEVHOST\n", "DEVHOST"],
+  ["canonicalizehostname false\nproxycommand hostname devhost\n", null],
   ["hostname\n", null],
-  ["hostname devbox other\n", null],
+  ["hostname devhost other\n", null],
   ["", null],
 ] as const)("resolvedHostname(%j) is %j", (output, expected) => {
   expect(resolvedHostname(output)).toBe(expected)
 })
 
 test.each([
-  ["devbox", null],
-  ["DEVBOX.", null],
-  ["devbox.tail1234.ts.net", null],
-  ["DEVBOX.TAIL1234.TS.NET.", null],
+  ["devhost", null],
+  ["DEVHOST.", null],
+  ["devhost.tail1234.ts.net", null],
+  ["DEVHOST.TAIL1234.TS.NET.", null],
   ["100.80.90.10", null],
   ["100.80.90.11", null],
   ["FD7A:115C:A1E0::10", null],
-  ["work", "DevBox."],
-  ["work", "DEVBOX.TAIL1234.TS.NET"],
+  ["work", "DevHost."],
+  ["work", "DEVHOST.TAIL1234.TS.NET"],
   ["work", "100.80.90.11"],
   ["work", "FD7A:115C:A1E0::10"],
 ] as const)("%s resolved to %s uses the matching peer's first IPv4", (host, resolved) => {
@@ -68,27 +68,27 @@ test.each([
   ["no addresses", { ...peer, TailscaleIPs: [] }, { kind: "ssh" }],
   ["offline", { ...peer, Online: false }, { kind: "ssh" }],
 ] as const)("a matching peer with %s", (_name, candidate, expected) => {
-  expect(pickRoute("devbox", null, { ...running, Peer: { "nodekey:devbox": candidate } })).toEqual(
-    expected,
-  )
+  expect(
+    pickRoute("devhost", null, { ...running, Peer: { "nodekey:devhost": candidate } }),
+  ).toEqual(expected)
 })
 
 test("the first DNS label matches independently of HostName", () => {
   expect(
-    pickRoute("devbox", null, {
+    pickRoute("devhost", null, {
       ...running,
-      Peer: { "nodekey:devbox": { ...peer, HostName: "some-other-name" } },
+      Peer: { "nodekey:devhost": { ...peer, HostName: "some-other-name" } },
     }),
   ).toEqual({ kind: "tailscale", address: "100.80.90.10" })
 })
 
 test.each([
   "dev",
-  "devbox.tail1234",
-  "evildevbox",
-  "devbox.tail1234.ts.net.evil",
+  "devhost.tail1234",
+  "evildevhost",
+  "devhost.tail1234.ts.net.evil",
   "laptop",
-  "nodekey:devbox",
+  "nodekey:devhost",
 ])("%s does not match a peer exactly", (host) => {
   expect(pickRoute(host, null, running)).toEqual({ kind: "ssh" })
 })
@@ -105,16 +105,16 @@ test.each([
   { BackendState: "Running" },
   { ...running, Peer: {} },
   { ...running, Peer: [] },
-  { ...running, Peer: { "nodekey:devbox": { ...peer, Online: "true" } } },
-  { ...running, Peer: { "nodekey:devbox": { ...peer, TailscaleIPs: [100] } } },
-  { ...running, Peer: { "nodekey:devbox": { HostName: "devbox" } } },
+  { ...running, Peer: { "nodekey:devhost": { ...peer, Online: "true" } } },
+  { ...running, Peer: { "nodekey:devhost": { ...peer, TailscaleIPs: [100] } } },
+  { ...running, Peer: { "nodekey:devhost": { HostName: "devhost" } } },
 ])("invalid, inactive or peerless status %j falls back to SSH", (status) => {
-  expect(pickRoute("devbox", null, status)).toEqual({ kind: "ssh" })
+  expect(pickRoute("devhost", null, status)).toEqual({ kind: "ssh" })
 })
 
 test("an offline match does not hide another online match", () => {
   expect(
-    pickRoute("devbox", null, {
+    pickRoute("devhost", null, {
       ...running,
       Peer: {
         "nodekey:old": { ...peer, Online: false },

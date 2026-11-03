@@ -392,10 +392,10 @@ describe("a host on Linux", () => {
   test("checks ssh, writes the unit and enables it", async () => {
     const t = await fixture({ env: { SSH_AUTH_SOCK: "/run/user/1000/agent.sock" } })
     t.system.env.PATH = `/usr/local/bin:/usr/bin:${join(t.home, ".local", "bin")}`
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.ok])
     expect(t.spawned).toEqual([
-      [...ssh, "devbox", "true"],
+      [...ssh, "devhost", "true"],
       ["systemctl", "--user", "daemon-reload"],
       ["systemctl", "--user", "enable", "iter8-connect.service"],
       ["systemctl", "--user", "restart", "iter8-connect.service"],
@@ -403,10 +403,10 @@ describe("a host on Linux", () => {
     expect(await readFile(t.unit, "utf8")).toBe(
       [
         "[Unit]",
-        "Description=iter8 connect devbox",
+        "Description=iter8 connect devhost",
         "",
         "[Service]",
-        "ExecStart=%h/.local/bin/iter8 connect devbox",
+        "ExecStart=%h/.local/bin/iter8 connect devhost",
         "Restart=always",
         "RestartSec=5",
         `Environment=PATH=/usr/local/bin:/usr/bin:${join(t.home, ".local", "bin")}`,
@@ -417,13 +417,13 @@ describe("a host on Linux", () => {
         "",
       ].join("\n"),
     )
-    expect(t.stdout.at(-1)).toBe("iter8 connect devbox now runs at login.\n")
+    expect(t.stdout.at(-1)).toBe("iter8 connect devhost now runs at login.\n")
     expect(await exists(t.plist)).toBe(false)
   })
 
   test("omits SSH_AUTH_SOCK when the environment has none", async () => {
     const t = await fixture()
-    await t.run("devbox")
+    await t.run("devhost")
     expect(await readFile(t.unit, "utf8")).not.toContain("SSH_AUTH_SOCK")
   })
 
@@ -449,14 +449,14 @@ describe("a host on Linux", () => {
     const t = await fixture({
       reply: (argv) => (argv[0] === "ssh" ? { code: 255, stderr: "Permission denied" } : {}),
     })
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(t.stderr).toEqual([
-      "SSH to devbox needs a password or a host-key confirmation. Run ssh devbox once, then retry setup.\n",
+      "SSH to devhost needs a password or a host-key confirmation. Run ssh devhost once, then retry setup.\n",
     ])
     expect(await exists(t.unit)).toBe(false)
     expect(await exists(join(t.home, ".config"))).toBe(false)
-    expect(t.spawned).toEqual([[...ssh, "devbox", "true"]])
+    expect(t.spawned).toEqual([[...ssh, "devhost", "true"]])
     expect(t.stdout.join("")).not.toContain("now runs at login")
   })
 
@@ -467,7 +467,7 @@ describe("a host on Linux", () => {
           ? { code: 1, stderr: "Failed to connect to bus: No medium found\n" }
           : {},
     })
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(t.stderr).toEqual(["Failed to connect to bus: No medium found\n"])
     expect(t.stdout.join("")).not.toContain("now runs at login")
@@ -495,11 +495,11 @@ describe("a host on Linux", () => {
       reply: (argv) =>
         argv.includes("daemon-reload") ? { code: 1, stderr: "Failed to reload: no bus\n" } : {},
     })
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(t.stderr).toEqual(["Failed to reload: no bus\n"])
     expect(t.spawned).toEqual([
-      [...ssh, "devbox", "true"],
+      [...ssh, "devhost", "true"],
       ["systemctl", "--user", "daemon-reload"],
     ])
     expect(t.stdout.join("")).not.toContain("now runs at login")
@@ -510,7 +510,7 @@ describe("a host on Linux", () => {
     const before = Buffer.from("[Unit]\nDescription=hand edited \u00e9\n\u0000\nkeep\n")
     await mkdir(join(t.unit, ".."), { recursive: true })
     await writeFile(t.unit, before)
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(Buffer.compare(await readFile(t.unit), before)).toBe(0)
     expect(t.spawned.map((argv) => argv[0])).toEqual(["ssh"])
@@ -523,7 +523,7 @@ describe("a host on Linux", () => {
       if (argv[0] === "systemctl") throw new Error("ENOENT: no such file")
       return spawn(argv)
     }
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(t.stderr).toEqual(["Could not run systemctl: ENOENT: no such file\n"])
   })
@@ -543,10 +543,10 @@ describe("a host on macOS", () => {
       env: { SSH_AUTH_SOCK: "/private/tmp/com.apple.launchd.x/Listeners" },
     })
     t.system.env.PATH = "/opt/homebrew/bin:/usr/bin"
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.ok])
     expect(t.spawned).toEqual([
-      ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", "devbox", "true"],
+      ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", "devhost", "true"],
       ["launchctl", "bootout", "gui/501/dev.iter8.connect"],
       ["launchctl", "bootstrap", "gui/501", t.plist],
     ])
@@ -563,7 +563,7 @@ describe("a host on macOS", () => {
         `  <array>`,
         `    <string>${t.launcher}</string>`,
         `    <string>connect</string>`,
-        `    <string>devbox</string>`,
+        `    <string>devhost</string>`,
         `  </array>`,
         `  <key>RunAtLoad</key>`,
         `  <true/>`,
@@ -586,7 +586,7 @@ describe("a host on macOS", () => {
       ].join("\n"),
     )
     expect((await stat(t.stateDir)).mode & 0o777).toBe(0o700)
-    expect(t.stdout.at(-1)).toBe("iter8 connect devbox now runs at login.\n")
+    expect(t.stdout.at(-1)).toBe("iter8 connect devhost now runs at login.\n")
     expect(await exists(t.unit)).toBe(false)
   })
 
@@ -666,7 +666,7 @@ describe("a host on macOS", () => {
     const before = Buffer.from("<plist>hand edited \u00e9\u0000</plist>\n")
     await mkdir(join(t.plist, ".."), { recursive: true })
     await writeFile(t.plist, before)
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(Buffer.compare(await readFile(t.plist), before)).toBe(0)
     expect(t.spawned.map((argv) => argv[0])).toEqual(["ssh"])
@@ -674,7 +674,7 @@ describe("a host on macOS", () => {
 
   test("omits SSH_AUTH_SOCK when the environment has none", async () => {
     const t = await fixture({ platform: "darwin" })
-    await t.run("devbox")
+    await t.run("devhost")
     expect(await readFile(t.plist, "utf8")).not.toContain("SSH_AUTH_SOCK")
   })
 
@@ -684,7 +684,7 @@ describe("a host on macOS", () => {
       reply: (argv) =>
         argv[1] === "bootout" ? { code: 113, stderr: "Could not find service" } : {},
     })
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.ok])
     expect(t.spawned.at(-1)).toEqual(["launchctl", "bootstrap", "gui/501", t.plist])
   })
@@ -695,7 +695,7 @@ describe("a host on macOS", () => {
       reply: (argv) =>
         argv[1] === "bootstrap" ? { code: 5, stderr: "Bootstrap failed: 5\n" } : {},
     })
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(t.stderr).toEqual(["Bootstrap failed: 5\n"])
     expect(t.stdout.join("")).not.toContain("now runs at login")
@@ -706,7 +706,7 @@ describe("a host on macOS", () => {
       platform: "darwin",
       reply: (argv) => (argv[0] === "ssh" ? { code: 255 } : {}),
     })
-    await t.run("devbox")
+    await t.run("devhost")
     expect(t.exits).toEqual([ExitCode.failure])
     expect(await exists(join(t.home, "Library"))).toBe(false)
     expect(await exists(t.stateDir)).toBe(false)

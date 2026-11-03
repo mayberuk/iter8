@@ -10,7 +10,7 @@ import { waitFor } from "../../rig/wait"
 import { FAKE_SSH_ENTRY } from "./fake-ssh"
 import { FAKE_TAILSCALE_ENTRY } from "./fake-tailscale"
 
-const HOST = "devbox"
+const HOST = "devhost"
 const SERVICE_ADDRESS = "127.0.0.1"
 const SECOND_LOOPBACK = "127.0.0.2"
 const READY_MS = 10_000

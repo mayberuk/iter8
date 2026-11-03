@@ -14,7 +14,7 @@ const pluginOverride = process.env.ITER8_CC_PLUGIN_DIR
 const PLUGIN_DIR = resolve(
   pluginOverride !== undefined && pluginOverride !== ""
     ? pluginOverride
-    : join(REPO, "..", "cc-plugins", "plugins", "iter8"),
+    : join(REPO, "plugins", "iter8"),
 )
 
 const TURN_TIMEOUT_MS = 180_000

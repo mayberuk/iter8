@@ -176,7 +176,7 @@ export const CLI_SURFACE = {
     owner: AGENT_OWNER,
   },
   connect: {
-    summary: "Keep an SSH tunnel to a devbox's iter8 pool up and open its pages here",
+    summary: "Keep an SSH tunnel to a remote machine's iter8 pool up and open its pages here",
     positionals: ["HOST"],
     flags: [],
     output: null,
