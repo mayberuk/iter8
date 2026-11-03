@@ -23,7 +23,7 @@ const LOCK_POLL_MS = 1_000
 const LOCK_WAIT_MS = 300_000 // The plugin installer shares this lock and waits the same 300 s.
 
 // The plugin's install.sh and pin-release.sh accept exactly this VERSION_FORMAT; a version from
-// another machine names directories and gh argv, so nothing looser may reach them.
+// another machine names directories and download URLs, so nothing looser may reach them.
 const VERSION_FORMAT = /^([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/
 const SUM_LINE = /^([0-9a-f]{64}) {2}(iter8-linux-x64|iter8-darwin-arm64)$/
 const CURRENT_TARGET = /(?:^|\/)releases\/v([^/]+)\/iter8$/
@@ -151,6 +151,7 @@ export async function pointCurrent(dataDir: string): Promise<string | null> {
 }
 
 export type InstallDeps = {
+  fetch: (url: string, init: RequestInit) => Promise<Response>
   spawn: typeof Bun.spawn
   platform: Platform
   pid: number
@@ -243,14 +244,28 @@ async function run(
   return { code, stdout, stderr }
 }
 
-function lastLine(text: string): string {
-  return (
-    text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .at(-1) ?? ""
-  ).replace(/\.$/, "")
+async function download(deps: InstallDeps, version: string, name: string): Promise<Uint8Array> {
+  const url = `https://github.com/${RELEASE_REPO}/releases/download/v${version}/${name}`
+  const failed = (error: unknown) =>
+    new Error(
+      `could not download ${url}: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  let response: Response
+  try {
+    // GitHub answers a release asset URL with a redirect to its storage host.
+    response = await deps.fetch(url, { redirect: "follow" })
+  } catch (error) {
+    throw failed(error)
+  }
+  if (response.status === 404) {
+    throw new Error(`the release v${version} has no ${name} (${url} returned 404)`)
+  }
+  if (!response.ok) throw new Error(`downloading ${url} returned HTTP ${response.status}`)
+  try {
+    return await response.bytes()
+  } catch (error) {
+    throw failed(error)
+  }
 }
 
 async function expectedSum(sums: string, asset: string): Promise<string> {
@@ -281,41 +296,16 @@ export async function installRelease(
   try {
     if (await isExecutableFile(binary)) return binary
     const asset = `iter8-${deps.platform}`
-    const download = await mkdtemp(join(releaseDir, ".download-"))
+    const scratch = await mkdtemp(join(releaseDir, ".download-"))
     try {
-      const fetched = await run(deps, [
-        "gh",
-        "release",
-        "download",
-        `v${version}`,
-        "--repo",
-        RELEASE_REPO,
-        "--pattern",
-        asset,
-        "--pattern",
-        "SHA256SUMS",
-        "--dir",
-        download,
-      ])
-      if (fetched.code !== 0) {
-        const detail = lastLine(fetched.stderr)
-        throw new Error(
-          `gh release download v${version} failed${detail === "" ? ` with code ${fetched.code}` : `: ${detail}`}`,
-        )
-      }
-      const sums = await readFile(join(download, "SHA256SUMS"), "utf8").catch(() => {
-        throw new Error("the release has no SHA256SUMS")
-      })
+      const sums = new TextDecoder().decode(await download(deps, version, "SHA256SUMS"))
       const sum = await expectedSum(sums, asset)
-      const downloaded = join(download, asset)
-      const bytes = await Bun.file(downloaded)
-        .arrayBuffer()
-        .catch(() => {
-          throw new Error(`the release has no ${asset}`)
-        })
+      const bytes = await download(deps, version, asset)
       if (new Bun.CryptoHasher("sha256").update(bytes).digest("hex") !== sum) {
         throw new Error(`the downloaded ${asset} does not match SHA256SUMS`)
       }
+      const downloaded = join(scratch, asset)
+      await writeFile(downloaded, bytes)
       await chmod(downloaded, 0o755)
       const smoke = await run(deps, [downloaded, "--version"])
       const expected = `iter8 ${version}`
@@ -327,7 +317,7 @@ export async function installRelease(
       await rename(downloaded, binary)
       return binary
     } finally {
-      await rm(download, { recursive: true, force: true })
+      await rm(scratch, { recursive: true, force: true })
     }
   } finally {
     await releaseLock(lock)

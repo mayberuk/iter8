@@ -51,37 +51,31 @@ async function writeExecutable(path: string, content: string): Promise<void> {
   await chmod(path, 0o755)
 }
 
-type Release = { files: Record<string, string>; ghExit?: number; ghStderr?: string }
+type Release = { files: Record<string, string> }
 
-async function setup(release: Release) {
+const releaseUrl = (version: string, name: string) =>
+  `https://github.com/mayberuk/iter8/releases/download/v${version}/${name}`
+
+async function setup(release: Release, version = VERSION) {
   const root = await tempDir()
   const data = join(root, "data")
-  const published = join(root, "published")
-  await mkdir(published)
-  for (const [name, content] of Object.entries(release.files)) {
-    await writeFile(join(published, name), content)
-  }
-  const ghLog = join(root, "gh.argv")
-  const gh = join(root, "gh")
-  await writeExecutable(
-    gh,
-    [
-      "#!/bin/sh",
-      `printf '%s\\n' "$@" > '${ghLog}'`,
-      "dir=",
-      'while [ $# -gt 0 ]; do if [ "$1" = --dir ]; then dir=$2; fi; shift; done',
-      `for file in '${published}'/*; do [ -e "$file" ] && cp "$file" "$dir"/; done`,
-      `printf '${release.ghStderr ?? ""}' >&2`,
-      `exit ${release.ghExit ?? 0}`,
-      "",
-    ].join("\n"),
-  )
+  const emptyPath = join(root, "empty-bin")
+  await mkdir(emptyPath)
+  const fetched: { url: string; init: RequestInit }[] = []
   const spawned: string[][] = []
   const sleeps: number[] = []
   const deps: InstallDeps = {
+    fetch: async (url, init) => {
+      fetched.push({ url, init })
+      const name = Object.keys(release.files).find((file) => url === releaseUrl(version, file))
+      return name === undefined
+        ? new Response("Not Found", { status: 404 })
+        : new Response(release.files[name])
+    },
+    // A PATH with nothing on it: the install may run only the binary it downloaded, by path.
     spawn: ((argv: string[], options: Parameters<typeof Bun.spawn>[1]) => {
       spawned.push(argv)
-      return Bun.spawn(argv[0] === "gh" ? [gh, ...argv.slice(1)] : argv, options)
+      return Bun.spawn(argv, { ...options, env: { PATH: emptyPath } })
     }) as InstallDeps["spawn"],
     platform: "linux-x64",
     pid: 4242,
@@ -93,11 +87,12 @@ async function setup(release: Release) {
   return {
     data,
     deps,
+    emptyPath,
+    fetched,
     spawned,
     sleeps,
     releaseDir,
     binary: join(releaseDir, "iter8"),
-    ghArgv: async () => (await readFile(ghLog, "utf8")).trimEnd().split("\n"),
   }
 }
 
@@ -109,8 +104,12 @@ const goodRelease = (binary = goodBinary): Release => ({
   },
 })
 
-async function installFails(release: Release, reason: string | RegExp) {
-  const rig = await setup(release)
+async function installFails(
+  release: Release | ((rig: Awaited<ReturnType<typeof setup>>) => void),
+  reason: string | RegExp,
+) {
+  const rig = await setup(typeof release === "function" ? goodRelease() : release)
+  if (typeof release === "function") release(rig)
   const installing = installRelease(rig.data, VERSION, rig.deps)
   if (typeof reason === "string") await expect(installing).rejects.toThrow(reason)
   else await expect(installing).rejects.toThrow(reason)
@@ -191,7 +190,7 @@ describe("compareVersions", () => {
 })
 
 describe("installRelease", () => {
-  test("downloads the platform asset and SHA256SUMS, verifies them and installs the binary", async () => {
+  test("downloads SHA256SUMS and the platform asset over HTTPS, verifies them and installs the binary", async () => {
     const rig = await setup(goodRelease())
     const path = await installRelease(rig.data, VERSION, rig.deps)
 
@@ -199,23 +198,56 @@ describe("installRelease", () => {
     expect(await readFile(path, "utf8")).toBe(goodBinary)
     expect((await stat(path)).mode & 0o777).toBe(0o755)
     expect(await readdir(rig.releaseDir)).toEqual(["iter8"])
-    const download = (await rig.ghArgv()).at(-1) ?? ""
-    expect(await rig.ghArgv()).toEqual([
-      "release",
-      "download",
-      `v${VERSION}`,
-      "--repo",
-      RELEASE_REPO,
-      "--pattern",
-      ASSET,
-      "--pattern",
-      "SHA256SUMS",
-      "--dir",
-      download,
+    expect(rig.fetched).toEqual([
+      {
+        url: "https://github.com/mayberuk/iter8/releases/download/v1.2.3/SHA256SUMS",
+        init: { redirect: "follow" },
+      },
+      {
+        url: "https://github.com/mayberuk/iter8/releases/download/v1.2.3/iter8-linux-x64",
+        init: { redirect: "follow" },
+      },
     ])
-    expect(download.startsWith(`${rig.releaseDir}/`)).toBe(true)
     expect(RELEASE_REPO).toBe("mayberuk/iter8")
-    expect(rig.spawned.map((argv) => argv.slice(-1))).toEqual([[download], ["--version"]])
+    const smoke = rig.spawned[0] ?? []
+    expect(rig.spawned).toEqual([smoke])
+    expect(smoke[1]).toBe("--version")
+    expect(smoke[0]?.startsWith(`${rig.releaseDir}/.download-`)).toBe(true)
+    expect(smoke[0]?.endsWith(`/${ASSET}`)).toBe(true)
+  })
+
+  test("installs with no gh on PATH", async () => {
+    const rig = await setup(goodRelease())
+    expect(Bun.which("gh", { PATH: rig.emptyPath })).toBeNull()
+    expect(await installRelease(rig.data, VERSION, rig.deps)).toBe(rig.binary)
+    expect(rig.spawned.every((argv) => argv[0]?.startsWith("/"))).toBe(true)
+  })
+
+  test("follows GitHub's redirect from the release URL to the storage host with the real fetch", async () => {
+    const rig = await setup(goodRelease())
+    const files = goodRelease().files
+    const storage = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => {
+        const { pathname } = new URL(request.url)
+        const release = "/mayberuk/iter8/releases/download/v1.2.3/"
+        if (pathname.startsWith(release)) {
+          const target = new URL(`/storage/${pathname.slice(release.length)}`, request.url)
+          return Response.redirect(target.href, 302)
+        }
+        const body = files[pathname.slice("/storage/".length)]
+        return body === undefined ? new Response("Not Found", { status: 404 }) : new Response(body)
+      },
+    })
+    try {
+      rig.deps.fetch = (url, init) =>
+        fetch(url.replace("https://github.com", `http://127.0.0.1:${storage.port}`), init)
+      expect(await installRelease(rig.data, VERSION, rig.deps)).toBe(rig.binary)
+      expect(await readFile(rig.binary, "utf8")).toBe(goodBinary)
+    } finally {
+      await storage.stop(true)
+    }
   })
 
   test("accepts a --version line with no trailing newline", async () => {
@@ -228,6 +260,7 @@ describe("installRelease", () => {
     await mkdir(rig.releaseDir, { recursive: true })
     await writeExecutable(rig.binary, "installed earlier")
     expect(await installRelease(rig.data, VERSION, rig.deps)).toBe(rig.binary)
+    expect(rig.fetched).toEqual([])
     expect(rig.spawned).toEqual([])
     expect(await readFile(rig.binary, "utf8")).toBe("installed earlier")
     expect(await readdir(rig.releaseDir)).toEqual(["iter8"])
@@ -261,18 +294,62 @@ describe("installRelease", () => {
     ["no line for the asset", `${sha256(goodBinary)}  ${OTHER_ASSET}\n`],
     ["a line with one space", `${sha256(goodBinary)} ${ASSET}\n`],
     ["an uppercase hash", `${sha256(goodBinary).toUpperCase()}  ${ASSET}\n`],
-  ])("SHA256SUMS with %s is refused", async (_case, sums) => {
-    await installFails(
+  ])("SHA256SUMS with %s is refused before the asset is downloaded", async (_case, sums) => {
+    const rig = await installFails(
       { files: { [ASSET]: goodBinary, SHA256SUMS: sums } },
       `SHA256SUMS has no line for ${ASSET}`,
     )
+    expect(rig.fetched.map(({ url }) => url)).toEqual([releaseUrl(VERSION, "SHA256SUMS")])
   })
 
-  test("a release without SHA256SUMS or without the asset is refused", async () => {
-    await installFails({ files: { [ASSET]: goodBinary } }, "the release has no SHA256SUMS")
+  test("a release without SHA256SUMS (404) is refused", async () => {
+    await installFails(
+      { files: { [ASSET]: goodBinary } },
+      `the release v1.2.3 has no SHA256SUMS (${releaseUrl(VERSION, "SHA256SUMS")} returned 404)`,
+    )
+  })
+
+  test("a release without the platform asset (404) is refused", async () => {
     await installFails(
       { files: { SHA256SUMS: `${sha256(goodBinary)}  ${ASSET}\n` } },
-      `the release has no ${ASSET}`,
+      `the release v1.2.3 has no ${ASSET} (${releaseUrl(VERSION, ASSET)} returned 404)`,
+    )
+  })
+
+  test("a server error is refused with its status", async () => {
+    await installFails(
+      (rig) => {
+        rig.deps.fetch = async () => new Response("Service Unavailable", { status: 503 })
+      },
+      `downloading ${releaseUrl(VERSION, "SHA256SUMS")} returned HTTP 503`,
+    )
+  })
+
+  test("a network failure is refused and names the URL and the cause", async () => {
+    await installFails(
+      (rig) => {
+        rig.deps.fetch = async () => {
+          throw new TypeError("Unable to connect. Is the computer able to access the url?")
+        }
+      },
+      `could not download ${releaseUrl(VERSION, "SHA256SUMS")}: Unable to connect. Is the computer able to access the url?`,
+    )
+  })
+
+  test("a connection dropped while the asset body streams is refused", async () => {
+    await installFails(
+      (rig) => {
+        const serve = rig.deps.fetch
+        rig.deps.fetch = async (url, init) =>
+          url.endsWith(ASSET)
+            ? new Response(
+                new ReadableStream({
+                  pull: (controller) => controller.error(new Error("connection reset")),
+                }),
+              )
+            : serve(url, init)
+      },
+      `could not download ${releaseUrl(VERSION, ASSET)}: connection reset`,
     )
   })
 
@@ -286,22 +363,17 @@ describe("installRelease", () => {
     await installFails(goodRelease(binary), /--version printed .* instead of "iter8 1\.2\.3"/)
   })
 
-  test("a failed gh download names gh's reason", async () => {
-    await installFails(
-      { files: {}, ghExit: 1, ghStderr: "release not found\\n" },
-      `gh release download v${VERSION} failed: release not found`,
-    )
-  })
-
-  test("a gh that cannot be run is reported", async () => {
+  test("a downloaded binary that cannot be run is reported", async () => {
     const rig = await setup(goodRelease())
     const deps: InstallDeps = {
       ...rig.deps,
       spawn: (() => {
-        throw new Error('Executable not found in $PATH: "gh"')
+        throw new Error("Permission denied")
       }) as InstallDeps["spawn"],
     }
-    await expect(installRelease(rig.data, VERSION, deps)).rejects.toThrow("could not run gh")
+    await expect(installRelease(rig.data, VERSION, deps)).rejects.toThrow(
+      /could not run .*\/iter8-linux-x64: Permission denied/,
+    )
     expect(await readdir(rig.releaseDir)).toEqual([])
   })
 
@@ -325,6 +397,7 @@ describe("installRelease", () => {
       await expect(installRelease(rig.data, version, rig.deps)).rejects.toThrow(
         "is not a release version",
       )
+      expect(rig.fetched).toEqual([])
       expect(rig.spawned).toEqual([])
       await expect(stat(rig.data)).rejects.toMatchObject({ code: "ENOENT" })
       expect((await readdir(root)).sort()).toEqual(before)
@@ -335,7 +408,7 @@ describe("installRelease", () => {
   test("a version with prerelease and build metadata in the plugin's format is installed", async () => {
     const version = "1.2.3-rc.1+build.5"
     const binary = versionScript(`iter8 ${version}\\n`)
-    const rig = await setup(goodRelease(binary))
+    const rig = await setup(goodRelease(binary), version)
     const path = await installRelease(rig.data, version, rig.deps)
     expect(path).toBe(join(rig.data, "releases", `v${version}`, "iter8"))
     expect(await readFile(path, "utf8")).toBe(binary)
@@ -375,6 +448,7 @@ describe("installRelease", () => {
 
     await expect(installRelease(rig.data, VERSION, rig.deps)).rejects.toThrow("over 300 s")
     expect(rig.sleeps).toEqual(Array.from({ length: 300 }, () => 1_000))
+    expect(rig.fetched).toEqual([])
     expect(rig.spawned).toEqual([])
     expect(await readFile(join(lock, "pid"), "utf8")).toBe(`${process.pid}\n`)
   })

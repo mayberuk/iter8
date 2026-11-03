@@ -77,32 +77,31 @@ async function setup() {
     `${createHash("sha256").update(binary).digest("hex")}  ${ASSET}\n`,
   )
 
-  const gh = join(root, "gh")
-  await writeExecutable(
-    gh,
-    [
-      "#!/bin/sh",
-      "dir=",
-      'while [ $# -gt 0 ]; do if [ "$1" = --dir ]; then dir=$2; fi; shift; done',
-      `cp '${published}'/* "$dir"/`,
-      "",
-    ].join("\n"),
-  )
+  const fetched: string[] = []
+  const releaseBase = `https://github.com/mayberuk/iter8/releases/download/v${RELEASE}/`
+  const fetch = async (url: string) => {
+    fetched.push(url)
+    const file = Bun.file(join(published, url.slice(releaseBase.length)))
+    return url.startsWith(releaseBase) && (await file.exists())
+      ? new Response(await file.bytes())
+      : new Response("Not Found", { status: 404 })
+  }
 
   const spawned: { argv: string[]; options: unknown }[] = []
   const spawn = ((argv: string[], options: Parameters<typeof Bun.spawn>[1]) => {
     spawned.push({ argv, options })
-    return Bun.spawn(argv[0] === "gh" ? [gh, ...argv.slice(1)] : argv, options)
+    return Bun.spawn(argv, options)
   }) as typeof Bun.spawn
 
   const execPath = join(root, "running", "iter8")
   const system = liveSystem(deps, {
+    fetch,
     spawn,
     env: { ITER8_HOME: join(root, "iter8-home") },
     home,
     execPath,
   })
-  return { root, data, marks, spawned, system, execPath }
+  return { root, data, marks, fetched, spawned, system, execPath }
 }
 
 test("self is this build's version and the injected executable path", async () => {
@@ -111,7 +110,7 @@ test("self is this build's version and the injected executable path", async () =
   expect(rig.system.home).toBe(join(rig.root, "iter8-home"))
 })
 
-test("install downloads through gh into the data dir and leaves current on the new release", async () => {
+test("install downloads the release over HTTPS into the data dir and leaves current on the new release", async () => {
   const rig = await setup()
   const older = join(rig.data, "releases", `v${OLDER}`, "iter8")
   await mkdir(join(rig.data, "releases", `v${OLDER}`), { recursive: true })
@@ -123,25 +122,17 @@ test("install downloads through gh into the data dir and leaves current on the n
   expect(await readlink(join(rig.data, "current"))).toBe(installed)
   expect(await rig.system.releases?.newest()).toEqual({ version: RELEASE, path: installed })
 
-  const download = rig.spawned[0]?.argv ?? []
-  expect(download.slice(0, -1)).toEqual([
-    "gh",
-    "release",
-    "download",
-    `v${RELEASE}`,
-    "--repo",
-    "mayberuk/iter8",
-    "--pattern",
-    ASSET,
-    "--pattern",
-    "SHA256SUMS",
-    "--dir",
+  expect(rig.fetched).toEqual([
+    `https://github.com/mayberuk/iter8/releases/download/v${RELEASE}/SHA256SUMS`,
+    `https://github.com/mayberuk/iter8/releases/download/v${RELEASE}/${ASSET}`,
   ])
+  expect(rig.spawned.map(({ argv }) => argv.at(-1))).toEqual(["--version"])
 })
 
 test("install refuses a version outside the plugin's format and creates nothing", async () => {
   const rig = await setup()
   await expect(rig.system.releases?.install("../x")).rejects.toThrow("is not a release version")
+  expect(rig.fetched).toEqual([])
   expect(rig.spawned).toEqual([])
   expect(await Bun.file(join(rig.root, "home")).exists()).toBe(false)
 })
