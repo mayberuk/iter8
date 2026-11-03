@@ -8,17 +8,30 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cache/ms-playwright
+          key: deps-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: deps-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run setup:browsers --with-deps
       - run: bun run build
@@ -30,13 +43,15 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run release -- --tag "$TAG" --out dist/release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiled-release
           if-no-files-found: error
@@ -51,11 +66,13 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: compiled-release
           path: dist/release
@@ -81,7 +98,7 @@ jobs:
             exit 1
           fi
           shasum -a 256 iter8-linux-x64 iter8-darwin-arm64 > SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verified-release
           if-no-files-found: error
@@ -95,54 +112,56 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: mayberuk/iter8
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-release
           path: dist/release
+      - name: Verify checksums
+        working-directory: dist/release
+        run: sha256sum --check SHA256SUMS
+      # Attest after the macOS job's re-signing: an attestation binds the file digest, so only these final bytes count.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/release/iter8-linux-x64
+            dist/release/iter8-darwin-arm64
+            dist/release/SHA256SUMS
       - name: Publish release
         working-directory: dist/release
         run: |
-          sha256sum --check SHA256SUMS
-          gh release create "$TAG" --verify-tag iter8-linux-x64 iter8-darwin-arm64 SHA256SUMS
+          flags=()
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --verify-tag "${flags[@]}" iter8-linux-x64 iter8-darwin-arm64 SHA256SUMS
 
   pin-plugin:
     needs: publish
     runs-on: ubuntu-latest
+    # GITHUB_TOKEN may open the pull request only while "Allow GitHub Actions to create and approve pull requests" is on.
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      # A job-level `if` cannot read secrets, so the gate step turns the token's presence into an output.
-      - name: Check for cc-plugins token
-        id: gate
-        env:
-          TOKEN: ${{ secrets.CC_PLUGINS_TOKEN }}
-        run: |
-          if [ -n "$TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::CC_PLUGINS_TOKEN is not set; skipping the cc-plugins pin bump"
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: actions/checkout@v4
-        if: steps.gate.outputs.enabled == 'true'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: mayberuk/cc-plugins
-          token: ${{ secrets.CC_PLUGINS_TOKEN }}
-          path: cc-plugins
+          ref: ${{ github.event.repository.default_branch }}
       - name: Decide whether to pin
         id: decide
-        if: steps.gate.outputs.enabled == 'true'
-        working-directory: cc-plugins
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           if [[ "$VERSION" == *-* ]]; then
-            echo "::notice::$GITHUB_REF_NAME is a prerelease; skipping the cc-plugins pin bump"
+            echo "::notice::$GITHUB_REF_NAME is a prerelease; skipping the plugin pin bump"
             echo "pin=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -155,30 +174,32 @@ jobs:
             if (( 10#${NEW[i]} < 10#${OLD[i]} )); then break; fi
           done
           if [ "$PIN" = false ]; then
-            echo "::notice::$VERSION is not newer than the pinned $CURRENT; skipping the cc-plugins pin bump"
+            echo "::notice::$VERSION is not newer than the pinned $CURRENT; skipping the plugin pin bump"
           fi
           echo "pin=$PIN" >> "$GITHUB_OUTPUT"
-      - name: Pin release checksums
-        if: steps.gate.outputs.enabled == 'true' && steps.decide.outputs.pin == 'true'
-        working-directory: cc-plugins
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Pin release checksums and bump the plugin version
+        if: steps.decide.outputs.pin == 'true'
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           git switch -c "iter8-pin-$VERSION"
           plugins/iter8/scripts/pin-release.sh "$VERSION"
+          MANIFEST=plugins/iter8/.claude-plugin/plugin.json
+          IFS=. read -r MAJOR MINOR PATCH <<< "$(jq -er .version "$MANIFEST")"
+          BUMPED=$(mktemp)
+          jq --arg v "$MAJOR.$MINOR.$((PATCH + 1))" '.version = $v' "$MANIFEST" > "$BUMPED"
+          mv "$BUMPED" "$MANIFEST"
       - name: Open the pin pull request
-        if: steps.gate.outputs.enabled == 'true' && steps.decide.outputs.pin == 'true'
-        working-directory: cc-plugins
+        if: steps.decide.outputs.pin == 'true'
         env:
-          GH_TOKEN: ${{ secrets.CC_PLUGINS_TOKEN }}
+          BASE: ${{ github.event.repository.default_branch }}
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          scripts/release.sh iter8 patch "Pin iter8 $VERSION."
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add --all
+          git add plugins/iter8
           git commit -m "Pin iter8 $VERSION"
           git push -u origin HEAD
-          gh pr create --repo mayberuk/cc-plugins --title "Pin iter8 $VERSION" --body "Pins the iter8 plugin to release v$VERSION."
-          gh pr merge --repo mayberuk/cc-plugins --auto --squash || echo "::notice::auto-merge is not enabled on cc-plugins; merge the PR by hand"
+          BODY="Pins the iter8 plugin to release v$VERSION and bumps the plugin version.
+
+          This pull request was opened with the workflow token, so GitHub does not run its checks on its own: a maintainer with write access must click \"Approve workflows to run\" (or push to the branch with a personal token) before the required checks report. Auto-merge is deliberately not enabled; merge by hand once the checks pass."
+          gh pr create --base "$BASE" --title "Pin iter8 $VERSION" --body "$BODY"
