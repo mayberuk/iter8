@@ -1,4 +1,5 @@
-const KILL_ON_PIPE_CLOSE = 'read -r _; kill -9 -- "$1" 2>/dev/null'
+// No `--`: dash, Ubuntu's sh, rejects it after -9 and kills nothing; -9 "-<pgid>" works in dash and bash.
+const KILL_ON_PIPE_CLOSE = 'read -r _; kill -9 "$1" 2>/dev/null'
 
 /**
  * Kills `child` (its whole process group when `group`) once this process is gone for any reason,

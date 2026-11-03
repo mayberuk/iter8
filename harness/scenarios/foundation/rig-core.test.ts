@@ -435,7 +435,7 @@ test("newPage isolates contexts and collects console and uncaught page errors", 
   }
 }, 15000)
 
-test("launchChromium launches headless with exactly the caller's args and no others", async () => {
+test("launchChromium launches headless with grayscale text and the caller's args, and no others", async () => {
   const launch = spyOn(chromium, "launch")
   try {
     const plain = await launchChromium()
@@ -443,8 +443,8 @@ test("launchChromium launches headless with exactly the caller's args and no oth
     const custom = await launchChromium({ args: ["--lang=en-GB", "--mute-audio"] })
     await custom.close()
     expect(launch.mock.calls).toEqual([
-      [{ headless: true, args: [] }],
-      [{ headless: true, args: ["--lang=en-GB", "--mute-audio"] }],
+      [{ headless: true, args: ["--disable-lcd-text"] }],
+      [{ headless: true, args: ["--disable-lcd-text", "--lang=en-GB", "--mute-audio"] }],
     ])
   } finally {
     launch.mockRestore()

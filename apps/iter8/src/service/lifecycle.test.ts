@@ -203,6 +203,25 @@ async function registerOwner(home: Home, pid: number) {
   return pairing.owner
 }
 
+// The request `iter8 hook start` sends, made in-process for a service already running on a short
+// idle period: on a loaded 4-core runner a CLI cold start outlasts that period and the service idles out first.
+async function registerOwnerOnRunningService(home: Home, pid: number) {
+  const response = await controlFetch(home, "/hook/start", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      pid,
+      label: "alpha",
+      source: "startup",
+      agent: "stub",
+      cwd: await realpath(home.root),
+    }),
+  })
+  if (!response.ok)
+    throw new Error(`POST /hook/start answered ${response.status}: ${await response.text()}`)
+  return PairResult.parse(await response.json()).pairing.owner
+}
+
 async function serviceStatus(home: Home, owner?: string) {
   return cliJson(home, ["status", ...(owner ? ["--owner", owner] : [])], ServiceStatus)
 }
@@ -510,7 +529,7 @@ for (const stage of ["announced", "queued"] as const) {
     const idleMs = 600
     const service = await startIdleService(home, idleMs)
     const session = sleeper(home)
-    const owner = await registerOwner(home, session.pid)
+    const owner = await registerOwnerOnRunningService(home, session.pid)
     const { open, access } = await openPage(home, "site", owner)
     const live = await connectLive(access)
     const roundStage = async (id: string) => {
@@ -614,7 +633,7 @@ test("activity restarts the idle period instead of letting an earlier idle stret
   const service = await startIdleService(home, idleMs)
   await stays(service, idleMs / 4 + 500)
   const session = sleeper(home)
-  await registerOwner(home, session.pid)
+  await registerOwnerOnRunningService(home, session.pid)
   await stays(service, idleMs + 500)
 
   const killedAt = Date.now()
