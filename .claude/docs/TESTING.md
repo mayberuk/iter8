@@ -13,6 +13,9 @@ the harness inventory and the policy the `dp` CLI of the `dispatch` plugin reads
 - Precheck: `bun run typecheck && bun run lint`
 - Unit: `bun run knip && bun run depcruise && bun test packages scripts`
 - Gate: `bun run build && bun run check` — the e2e scenarios launch `dist/iter8`, so the gate rebuilds it first
+- CI gate: `bun run check:ci` — the gate without the budget suite (`bun run test:budget`). GitHub's
+  4-core runner drops 17–21 frames with the pointer still against a bound of 8, so a budget there
+  measures the runner; the budget suite runs on the maintainer's quiet machine before every tag.
 - Scoped: `bun test <path>` — always name the paths; a bare `bun test` is not the gate.
 
 ## Harness Inventory
@@ -34,7 +37,7 @@ Import each module by path; there are no barrels.
 - `harness/rig/long-task.ts` — `startLongTaskProbe(page)`; `.stop()` reports the longest main-thread
   task after start. Run it beside `startFrameProbe`: the Long Tasks API reports rendering-only
   tasks only while a requestAnimationFrame loop runs. A test asserting any wall-clock budget lives in
-  a `*.budget.test.ts` file, which `bun run test` runs alone after the parallel run: a long task is
+  a `*.budget.test.ts` file, which `bun run test` runs alone after the parallel run (`test:budget`; CI skips it): a long task is
   wall time, and on CI's 4-core runner three other Chromiums sharing the CPU turned one into 480 ms.
   The parallel run is capped at 16 workers (`--parallel=16`): on a 32-core host 32 workers gave e2e
   timing failures, two 16-worker runs gave none, at about 16 s slower (77 s against 61 s).

@@ -107,13 +107,13 @@ test("CI runs on main pushes and pull requests, cancelling superseded runs", asy
   })
 })
 
-test("CI installs frozen dependencies and builds before checking with one test worker per core", async () => {
+test("CI installs frozen dependencies and builds before the gate without budgets, one test worker per core", async () => {
   const workflow = await readWorkflow("ci")
   const runs = workflow.jobs.check?.steps.map(({ run }) => run)
   if (!runs) throw new Error("CI check job is missing")
   const install = runs.indexOf("bun install --frozen-lockfile")
   const build = runs.indexOf("bun run build")
-  const check = runs.indexOf("ITER8_TEST_WORKERS=$(nproc) bun run check")
+  const check = runs.indexOf("ITER8_TEST_WORKERS=$(nproc) bun run check:ci")
   expect(install).toBeGreaterThanOrEqual(0)
   expect(build).toBeGreaterThan(install)
   expect(check).toBeGreaterThan(build)

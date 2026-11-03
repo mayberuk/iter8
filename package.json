@@ -18,13 +18,16 @@
     "lint": "biome check .",
     "knip": "knip",
     "depcruise": "depcruise --config .dependency-cruiser.cjs .",
-    "test": "bun test --parallel=${ITER8_TEST_WORKERS:-16} --timeout 120000 --path-ignore-patterns=\"**/*.budget.test.ts\" --path-ignore-patterns=\"plugins/**\" && bun test --timeout 120000 .budget.test.",
+    "test": "bun run test:suite && bun run test:budget",
     "test:plugin": "plugins/iter8/tests/run-all.sh",
     "check": "bun run typecheck && bun run lint && bun run knip && bun run depcruise && bun run test && bun run test:plugin",
     "setup:browsers": "playwright install chromium",
     "build": "bun scripts/build.ts",
     "build:overlay": "bun scripts/build.ts overlay",
-    "release": "bun scripts/release.ts"
+    "release": "bun scripts/release.ts",
+    "test:suite": "bun test --parallel=${ITER8_TEST_WORKERS:-16} --timeout 120000 --path-ignore-patterns=\"**/*.budget.test.ts\" --path-ignore-patterns=\"plugins/**\"",
+    "test:budget": "bun test --timeout 120000 .budget.test.",
+    "check:ci": "bun run typecheck && bun run lint && bun run knip && bun run depcruise && bun run test:suite && bun run test:plugin"
   },
   "dependencies": {
     "@hono/zod-validator": "0.9.1",

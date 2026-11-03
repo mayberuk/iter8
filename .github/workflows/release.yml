@@ -35,7 +35,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run setup:browsers --with-deps
       - run: bun run build
-      - run: ITER8_TEST_WORKERS=$(nproc) bun run check
+      - run: ITER8_TEST_WORKERS=$(nproc) bun run check:ci
 
   build:
     needs: check

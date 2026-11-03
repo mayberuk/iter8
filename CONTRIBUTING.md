@@ -30,6 +30,8 @@ bun run prod
 
 Run `bun run check` for the full gate: typecheck, lint, knip, dependency-cruiser and the tests.
 
+CI runs `bun run check:ci`, the same gate without the performance-budget suite, because a shared runner's frame timing says more about the runner than about iter8. Before tagging a release, a maintainer runs `bun run test:budget` on a quiet machine.
+
 `bun run build` writes the host binary to `dist/iter8` and the overlay bundles to `dist/overlay/`.
 
 `bun run release` builds the linux-x64 and darwin-arm64 releases.
