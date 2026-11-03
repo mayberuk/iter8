@@ -8,6 +8,7 @@ import { type ConnectSystem, runConnect } from "../../connect/run"
 import { resolvePaths } from "../../home"
 import {
   dataDir,
+  type InstallDeps,
   installRelease,
   newestInstalled,
   type Platform,
@@ -25,13 +26,14 @@ function releasePlatform(platform: "darwin" | "linux"): Platform {
 export function liveSystem(
   deps: CliDeps,
   boundaries: {
+    fetch: InstallDeps["fetch"]
     spawn: typeof Bun.spawn
     env: Record<string, string | undefined>
     home: string
     execPath: string
   },
 ): ConnectSystem {
-  const { spawn, env, home, execPath } = boundaries
+  const { fetch, spawn, env, home, execPath } = boundaries
   const platform = process.platform
   if (platform !== "darwin" && platform !== "linux") {
     throw new Error("iter8 connect runs on macOS and Linux")
@@ -71,6 +73,7 @@ export function liveSystem(
       newest: () => newestInstalled(data),
       install: async (version) => {
         const installed = await installRelease(data, version, {
+          fetch,
           spawn,
           platform: releasePlatform(platform),
           pid: process.pid,
@@ -102,6 +105,7 @@ export const connect = (deps: CliDeps, system?: ConnectSystem): CommandDef =>
           positionals[0] ?? "",
           system ??
             liveSystem(deps, {
+              fetch,
               spawn: Bun.spawn,
               env: process.env,
               home: homedir(),
