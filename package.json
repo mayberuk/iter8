@@ -30,7 +30,7 @@
     "@hono/zod-validator": "0.9.1",
     "@iter8/protocol": "workspace:*",
     "@jridgewell/trace-mapping": "0.3.31",
-    "@preact/signals": "2.11.3",
+    "@preact/signals": "2.11.4",
     "bippy": "0.7.3",
     "citty": "0.2.2",
     "hono": "4.13.13",
