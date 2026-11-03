@@ -18,7 +18,7 @@
     "lint": "biome check .",
     "knip": "knip",
     "depcruise": "depcruise --config .dependency-cruiser.cjs .",
-    "test": "bun test --parallel=16 --timeout 120000 --path-ignore-patterns=\"**/*.budget.test.ts\" --path-ignore-patterns=\"plugins/**\" && bun test --timeout 120000 .budget.test.",
+    "test": "bun test --parallel=${ITER8_TEST_WORKERS:-16} --timeout 120000 --path-ignore-patterns=\"**/*.budget.test.ts\" --path-ignore-patterns=\"plugins/**\" && bun test --timeout 120000 .budget.test.",
     "test:plugin": "plugins/iter8/tests/run-all.sh",
     "check": "bun run typecheck && bun run lint && bun run knip && bun run depcruise && bun run test && bun run test:plugin",
     "setup:browsers": "playwright install chromium",

@@ -28,7 +28,9 @@ Import each module by path; there are no barrels.
   makes comes from here and is disposed by its creator.
 - `harness/rig/home.ts` — `throwawayHome()`: a `Scratch` under a short `/tmp/iter8-w{worker}-` root,
   because macOS temp paths push a control socket past the 104-byte `sun_path` limit.
-- `harness/rig/browser.ts` — `launchChromium({ args })` (headless, no flags of its own), `newPage`.
+- `harness/rig/browser.ts` — `launchChromium({ args })` (headless; its one flag of its own is
+  `--disable-lcd-text`, because Ubuntu's fontconfig gives screenshots subpixel text that the
+  overlay's image capture can never draw), `newPage`.
 - `harness/rig/long-task.ts` — `startLongTaskProbe(page)`; `.stop()` reports the longest main-thread
   task after start. Run it beside `startFrameProbe`: the Long Tasks API reports rendering-only
   tasks only while a requestAnimationFrame loop runs. A test asserting any wall-clock budget lives in
@@ -36,6 +38,8 @@ Import each module by path; there are no barrels.
   wall time, and on CI's 4-core runner three other Chromiums sharing the CPU turned one into 480 ms.
   The parallel run is capped at 16 workers (`--parallel=16`): on a 32-core host 32 workers gave e2e
   timing failures, two 16-worker runs gave none, at about 16 s slower (77 s against 61 s).
+  `ITER8_TEST_WORKERS` lowers the cap; CI sets it to the runner's core count, because 16 workers
+  on a 4-core runner left a service 15 s short of ready and failed timing scenarios.
 - `harness/rig/frames.ts` — `startFrameProbe(page)`; `.stop()` gives the frame intervals, the late
   count (a frame over 1.5 × the display interval) and the worst frame. `summarizeFrames` is the pure part.
 - `harness/rig/layout.ts` — `startLayoutProbe(page)`; `.stop()` counts layouts in the window, for the "at most 2 layouts per move" bounds.
