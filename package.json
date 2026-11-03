@@ -40,7 +40,7 @@
     "pino": "10.4.0",
     "preact": "11.0.1",
     "sugar-high": "2.5.0",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

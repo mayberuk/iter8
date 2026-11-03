@@ -6,7 +6,7 @@
     "@iter8/protocol": "workspace:*",
     "hono": "4.13.13",
     "playwright": "1.64.0",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "fast-check": "4.10.2"

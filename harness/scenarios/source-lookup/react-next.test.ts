@@ -41,7 +41,18 @@ describe.each(builds)("$name", ({ name, assertsLine }) => {
       const view = await rig.open(fixture)
       try {
         const selector = `[data-source-target="${target}"]`
-        await view.page.waitForSelector(selector)
+        // The server-rendered element appears before React hydrates it; a lookup before hydration finds no fiber.
+        await view.page.waitForFunction(
+          (sel) => {
+            const element = document.querySelector(sel)
+            return (
+              element !== null &&
+              Object.keys(element).some((key) => key.startsWith("__reactFiber$"))
+            )
+          },
+          selector,
+          { timeout: 30_000 },
+        )
         const lead = await lookupInPage(view, selector)
         if ("rejected" in lead) throw new Error(`lookup rejected with ${lead.rejected}`)
         expect(await resolveInPage(view, lead)).toMatchObject({

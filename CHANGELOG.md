@@ -18,3 +18,8 @@ For earlier history, see the git tags.
 
 - Installs no longer need the `gh` command.
 - The README now addresses new users; the developer instructions moved to `CONTRIBUTING.md`.
+
+### Security
+
+- Zod is now 4.6.6, which fixes a memory exhaustion advisory (GHSA-mrhx-c7xc-m3w5) in the schemas the service validates requests with.
+- The Next.js test fixtures use 16.4.5, and the Astro fixture's undici is now 8.12.2. Neither ships in iter8.
